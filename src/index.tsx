@@ -190,6 +190,14 @@ function Content() {
             Sign in with Steam
           </ButtonItem>
         </PanelSectionRow>
+        <PanelSectionRow>
+          <ButtonItem
+            layout="below"
+            onClick={() => openInSteamBrowser(status.gateway_url)}
+          >
+            Open the website
+          </ButtonItem>
+        </PanelSectionRow>
         {message && (
           <PanelSectionRow>
             <div style={{ fontSize: "0.8em", opacity: 0.75 }}>{message}</div>
@@ -204,9 +212,17 @@ function Content() {
       <PanelSection title="Library">
         <PanelSectionRow>
           <div style={{ fontSize: "0.85em" }}>
-            {status.tracked} game{status.tracked === 1 ? "" : "s"} synced from your
-            Shelfcloud picks.
+            {status.tracked} game{status.tracked === 1 ? "" : "s"} synced into your
+            Shelfcloud collection.
           </div>
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <ButtonItem
+            layout="below"
+            onClick={() => openInSteamBrowser(status.gateway_url)}
+          >
+            Pick games on the website
+          </ButtonItem>
         </PanelSectionRow>
         <PanelSectionRow>
           <ButtonItem layout="below" disabled={busy} onClick={() => void sync()}>
@@ -237,6 +253,11 @@ function Content() {
               }}
             />
           </Focusable>
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <ButtonItem layout="below" disabled={busy} onClick={() => void signIn()}>
+            Sign in again
+          </ButtonItem>
         </PanelSectionRow>
         <PanelSectionRow>
           <ButtonItem layout="below" onClick={() => void signOut()}>

@@ -159,6 +159,20 @@ class Plugin:
 
     # --------------------------------------------------------------- library
 
+    @staticmethod
+    def _artwork(game: Dict) -> Dict[str, Optional[str]]:
+        """Artwork for each Steam library slot, as resolved by the gateway.
+
+        Deliberately no lookups here: artwork is catalog data, resolved once
+        server-side for every user, so the plugin only renders what it is given.
+        Falls back to provider images for games the gateway could not resolve.
+        """
+        return {
+            "capsule": game.get("capsule_url"),
+            "hero": game.get("hero_url") or game.get("banner_url"),
+            "logo": game.get("logo_url"),
+        }
+
     def _to_desired(self, game: Dict) -> Optional[Dict]:
         """Turn a library entry into everything the frontend needs to make a tile."""
         providers = game.get("providers") or []
@@ -184,8 +198,7 @@ class Plugin:
             "provider": provider["provider"],
             "exe": "/usr/bin/python3",
             "options": options,
-            "cover_url": game.get("cover_url"),
-            "banner_url": game.get("banner_url"),
+            "artwork": self._artwork(game),
         }
 
     async def get_desired_library(self) -> Dict[str, Any]:
@@ -221,8 +234,11 @@ class Plugin:
 
     # ------------------------------------------------- shortcut bookkeeping
 
-    async def record_shortcut(self, game_id: int, app_id: int, name: str, options: str) -> Dict:
-        self._synced[str(game_id)] = {"app_id": app_id, "name": name, "launch": options}
+    async def record_shortcut(self, game_id: int, app_id: int, name: str,
+                              options: str, art: str = "") -> Dict:
+        self._synced[str(game_id)] = {
+            "app_id": app_id, "name": name, "launch": options, "art": art,
+        }
         await self._save_state()
         return {"ok": True}
 
