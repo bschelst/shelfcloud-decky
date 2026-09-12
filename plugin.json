@@ -1,0 +1,11 @@
+{
+  "name": "Shelfcloud",
+  "author": "Bart Schelstraete",
+  "flags": [],
+  "api_version": 1,
+  "publish": {
+    "tags": ["cloud-gaming", "library", "boosteroid", "geforce-now", "xbox-cloud"],
+    "description": "Browse games playable on cloud gaming services and add them to your Steam library. Launching one takes you straight into that game on the provider.",
+    "image": ""
+  }
+}
