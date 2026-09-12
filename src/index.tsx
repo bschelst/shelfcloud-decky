@@ -1,123 +1,255 @@
-// Shelfcloud — add cloud games to your Steam library.
+// Shelfcloud — your cloud games, in your Steam library.
 // Schelstraete Bart - https://github.com/bschelst/shelfcloud-decky
 
-import { definePlugin, toaster } from "@decky/api";
+import { addEventListener, definePlugin, removeEventListener, toaster } from "@decky/api";
 import {
   ButtonItem,
+  Dropdown,
+  Focusable,
+  Navigation,
   PanelSection,
   PanelSectionRow,
-  TextField,
   staticClasses,
 } from "@decky/ui";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { FaCloud } from "react-icons/fa";
 
-import { getBrowsers, getCatalog, getSettings } from "./lib/api";
-import { addGameToSteam, preferredProvider } from "./lib/shortcuts";
-import { providerLabel, type Browser, type Game, type Settings } from "./lib/types";
+import {
+  forgetShortcut,
+  getDesiredLibrary,
+  getStatus,
+  logout,
+  pollLogin,
+  recordShortcut,
+  setSetting,
+  startLogin,
+  syncFinished,
+} from "./lib/api";
+import { syncLibrary } from "./lib/sync";
+import type { Status } from "./lib/types";
 
-const MAX_VISIBLE = 30;
+const SYNC_EVENT = "shelfcloud/library";
+const LOGIN_POLL_MS = 2500;
+const LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
+
+/** Open a URL in Steam's built-in browser, the only browser Game Mode has.
+ *
+ * The cast works around a name collision: `SteamClient.URL` resolves to the
+ * DOM's global `URL` type rather than Steam's, so ExecuteSteamURL is invisible
+ * to TypeScript even though it is declared by @decky/ui and present at runtime
+ * (verified on hardware).
+ */
+type SteamUrlApi = { ExecuteSteamURL(url: string): void };
+
+function openInSteamBrowser(url: string): void {
+  try {
+    (SteamClient.URL as unknown as SteamUrlApi).ExecuteSteamURL(`steam://openurl/${url}`);
+  } catch (error) {
+    console.error("[shelfcloud] could not open browser", error);
+    Navigation.NavigateToExternalWeb(url);   // last resort
+  }
+}
+
+/** Run a full reconcile. Shared by the button, the poll event and post-login. */
+async function runSync(onProgress?: (message: string) => void) {
+  const library = await getDesiredLibrary();
+  if (!library.ok || !library.desired) {
+    throw new Error(library.error || "Could not read your library");
+  }
+
+  const result = await syncLibrary(library.desired, library.tracked || {}, {
+    record: recordShortcut,
+    forget: forgetShortcut,
+    onProgress,
+  });
+  await syncFinished(result.added, result.removed, result.updated);
+  return { result, total: library.desired.length, skipped: library.skipped ?? 0 };
+}
 
 function Content() {
-  const [games, setGames] = useState<Game[]>([]);
-  const [browsers, setBrowsers] = useState<Browser[]>([]);
-  const [settings, setSettings] = useState<Settings | null>(null);
-  const [query, setQuery] = useState("");
-  const [status, setStatus] = useState("Loading…");
-  const [adding, setAdding] = useState<number | null>(null);
+  const [status, setStatus] = useState<Status | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const loginTimer = useRef<number | null>(null);
 
-  useEffect(() => {
-    void (async () => {
-      const [catalog, foundBrowsers, currentSettings] = await Promise.all([
-        getCatalog(false),
-        getBrowsers(),
-        getSettings(),
-      ]);
-      setBrowsers(foundBrowsers);
-      setSettings(currentSettings);
-
-      if (!catalog.ok) {
-        setStatus(`Could not reach the gateway: ${catalog.error ?? "unknown error"}`);
-        return;
-      }
-      setGames(catalog.games);
-      setStatus(
-        `${catalog.games.length} games${catalog.cached ? " (cached)" : ""}` +
-          (foundBrowsers.length === 0 ? " — no supported browser found" : ""),
-      );
-    })();
+  const refresh = useCallback(async () => {
+    setStatus(await getStatus());
   }, []);
 
-  const matches = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    const filtered = needle
-      ? games.filter((game) => game.name.toLowerCase().includes(needle))
-      : games;
-    return filtered.slice(0, MAX_VISIBLE);
-  }, [games, query]);
+  useEffect(() => { void refresh(); }, [refresh]);
 
-  const browserAppId = settings?.browser ?? browsers[0]?.app_id;
+  // Cancel any in-flight login poll when the panel unmounts, so a forgotten
+  // timer cannot keep hitting the gateway for five minutes.
+  useEffect(() => () => {
+    if (loginTimer.current) window.clearInterval(loginTimer.current);
+  }, []);
 
-  async function onAdd(game: Game) {
-    if (!browserAppId) {
-      toaster.toast({ title: "No browser", body: "Install Chrome or Edge from Discover first." });
+  const sync = useCallback(async (quiet = false) => {
+    setBusy(true);
+    try {
+      const { result, total, skipped } = await runSync(setMessage);
+      const parts = [];
+      if (result.added) parts.push(`${result.added} added`);
+      if (result.removed) parts.push(`${result.removed} removed`);
+      if (result.updated) parts.push(`${result.updated} updated`);
+      if (result.failed) parts.push(`${result.failed} failed`);
+      const summary = parts.length ? parts.join(", ") : "already up to date";
+      setMessage(`${total} games — ${summary}${skipped ? ` (${skipped} skipped)` : ""}`);
+      if (!quiet) toaster.toast({ title: "Shelfcloud", body: summary });
+    } catch (error) {
+      setMessage(String(error));
+      if (!quiet) toaster.toast({ title: "Sync failed", body: String(error) });
+    } finally {
+      setBusy(false);
+      void refresh();
+    }
+  }, [refresh]);
+
+  // The backend polls the gateway and fires this; only the frontend can touch
+  // SteamClient, so the actual reconcile happens here.
+  useEffect(() => {
+    const handler = () => { void sync(true); };
+    addEventListener(SYNC_EVENT, handler);
+    return () => { removeEventListener(SYNC_EVENT, handler); };
+  }, [sync]);
+
+  const signIn = useCallback(async () => {
+    setBusy(true);
+    setMessage("Opening Steam sign-in…");
+    const start = await startLogin();
+    if (!start.ok || !start.login_url || !start.session_token) {
+      setMessage(start.error || "Could not start sign-in");
+      setBusy(false);
       return;
     }
-    const provider = preferredProvider(game);
-    if (!provider) return;
 
-    setAdding(game.id);
-    try {
-      const { artworkApplied } = await addGameToSteam(game, provider, browserAppId);
-      toaster.toast({
-        title: `${game.name} added`,
-        body: `Launches on ${providerLabel(provider.provider)}${artworkApplied ? "" : " (no artwork)"}`,
-      });
-    } catch (error) {
-      toaster.toast({ title: "Could not add game", body: String(error) });
-    } finally {
-      setAdding(null);
-    }
+    // Game Mode has no browser of its own, so hand the URL to Steam.
+    //
+    // Navigation.NavigateToExternalWeb() opens a browser window but leaves it
+    // on its blank data:text/html placeholder — verified on hardware. The
+    // steam://openurl protocol actually navigates, and is the same mechanism
+    // boosteroid-steamos uses for Google sign-in.
+    openInSteamBrowser(start.login_url);
+
+    setMessage("Finish signing in, then come back here…");
+    const deadline = Date.now() + LOGIN_TIMEOUT_MS;
+    const token = start.session_token;
+
+    loginTimer.current = window.setInterval(async () => {
+      if (Date.now() > deadline) {
+        window.clearInterval(loginTimer.current!);
+        setMessage("Sign-in timed out. Try again.");
+        setBusy(false);
+        return;
+      }
+      const poll = await pollLogin(token);
+      if (poll.ok && poll.status === "signed_in") {
+        window.clearInterval(loginTimer.current!);
+        setMessage("Signed in. Syncing…");
+        setBusy(false);
+        await refresh();
+        void sync(true);
+      }
+    }, LOGIN_POLL_MS);
+  }, [refresh, sync]);
+
+  const signOut = useCallback(async () => {
+    await logout();
+    setMessage("Signed out. Your existing tiles were left alone.");
+    void refresh();
+  }, [refresh]);
+
+  if (!status) {
+    return <PanelSection title="Shelfcloud"><PanelSectionRow>Loading…</PanelSectionRow></PanelSection>;
+  }
+
+  if (!status.browsers.length) {
+    return (
+      <PanelSection title="Shelfcloud">
+        <PanelSectionRow>
+          <div style={{ fontSize: "0.85em" }}>
+            No supported browser found. Install Chrome or Edge from the Discover
+            store in Desktop Mode, then reopen this panel.
+          </div>
+        </PanelSectionRow>
+      </PanelSection>
+    );
+  }
+
+  if (!status.signed_in) {
+    return (
+      <PanelSection title="Shelfcloud">
+        <PanelSectionRow>
+          <div style={{ fontSize: "0.85em", marginBottom: 8 }}>
+            Sign in with Steam, then pick your cloud games on the website. They
+            appear here automatically.
+          </div>
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <ButtonItem layout="below" disabled={busy} onClick={() => void signIn()}>
+            Sign in with Steam
+          </ButtonItem>
+        </PanelSectionRow>
+        {message && (
+          <PanelSectionRow>
+            <div style={{ fontSize: "0.8em", opacity: 0.75 }}>{message}</div>
+          </PanelSectionRow>
+        )}
+      </PanelSection>
+    );
   }
 
   return (
-    <PanelSection title="Cloud games">
-      <PanelSectionRow>
-        <TextField
-          label="Search"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
-      </PanelSectionRow>
-
-      <PanelSectionRow>
-        <div style={{ fontSize: "0.8em", opacity: 0.7 }}>{status}</div>
-      </PanelSectionRow>
-
-      {matches.map((game) => {
-        const provider = preferredProvider(game);
-        return (
-          <PanelSectionRow key={game.id}>
-            <ButtonItem
-              layout="below"
-              disabled={adding !== null}
-              description={provider ? providerLabel(provider.provider) : "No provider"}
-              onClick={() => void onAdd(game)}
-            >
-              {adding === game.id ? `Adding ${game.name}…` : game.name}
-            </ButtonItem>
-          </PanelSectionRow>
-        );
-      })}
-
-      {games.length > matches.length && (
+    <>
+      <PanelSection title="Library">
         <PanelSectionRow>
-          <div style={{ fontSize: "0.8em", opacity: 0.7 }}>
-            Showing {matches.length} of {games.length}. Search to narrow it down.
+          <div style={{ fontSize: "0.85em" }}>
+            {status.tracked} game{status.tracked === 1 ? "" : "s"} synced from your
+            Shelfcloud picks.
           </div>
         </PanelSectionRow>
-      )}
-    </PanelSection>
+        <PanelSectionRow>
+          <ButtonItem layout="below" disabled={busy} onClick={() => void sync()}>
+            {busy ? "Syncing…" : "Sync now"}
+          </ButtonItem>
+        </PanelSectionRow>
+        {message && (
+          <PanelSectionRow>
+            <div style={{ fontSize: "0.8em", opacity: 0.75 }}>{message}</div>
+          </PanelSectionRow>
+        )}
+        {status.last_error && (
+          <PanelSectionRow>
+            <div style={{ fontSize: "0.8em", color: "#ff6b6b" }}>{status.last_error}</div>
+          </PanelSectionRow>
+        )}
+      </PanelSection>
+
+      <PanelSection title="Settings">
+        <PanelSectionRow>
+          <Focusable style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <div style={{ fontSize: "0.8em", opacity: 0.75 }}>Browser used to play</div>
+            <Dropdown
+              selectedOption={status.browser?.app_id}
+              rgOptions={status.browsers.map((b) => ({ data: b.app_id, label: b.label }))}
+              onChange={(option) => {
+                void setSetting("browser", option.data).then(setStatus);
+              }}
+            />
+          </Focusable>
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <ButtonItem layout="below" onClick={() => void signOut()}>
+            Sign out
+          </ButtonItem>
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <div style={{ fontSize: "0.75em", opacity: 0.6 }}>
+            {status.gateway_url}
+          </div>
+        </PanelSectionRow>
+      </PanelSection>
+    </>
   );
 }
 
