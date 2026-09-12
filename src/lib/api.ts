@@ -2,9 +2,18 @@
 
 import { callable } from "@decky/api";
 
-import type { Browser, CatalogResult, Settings } from "./types";
+import type { LibraryResponse, LoginPoll, LoginStart, Status } from "./types";
 
-export const getCatalog = callable<[force: boolean], CatalogResult>("get_catalog");
-export const getBrowsers = callable<[], Browser[]>("get_browsers");
-export const getSettings = callable<[], Settings>("get_settings");
-export const setSetting = callable<[key: string, value: unknown], Settings>("set_setting");
+export const getStatus = callable<[], Status>("get_status");
+export const setSetting = callable<[key: string, value: unknown], Status>("set_setting");
+
+export const startLogin = callable<[], LoginStart>("start_login");
+export const pollLogin = callable<[session_token: string], LoginPoll>("poll_login");
+export const logout = callable<[], { ok: boolean }>("logout");
+
+export const getDesiredLibrary = callable<[], LibraryResponse>("get_desired_library");
+export const recordShortcut =
+  callable<[game_id: number, app_id: number, name: string, options: string], unknown>("record_shortcut");
+export const forgetShortcut = callable<[game_id: number], unknown>("forget_shortcut");
+export const syncFinished =
+  callable<[added: number, removed: number, updated: number], unknown>("sync_finished");
