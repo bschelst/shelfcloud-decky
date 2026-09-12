@@ -3,10 +3,27 @@
 // This lives on the frontend because only here does SteamClient exist. The
 // backend decides *what* the library should contain; this makes it so.
 
-import type { DesiredGame, SyncResult, TrackedShortcut } from "./types";
+import { addToProviderCollections, type CollectionMember } from "./collection";
+import { providerLabel, type DesiredGame, type SyncResult, type TrackedShortcut } from "./types";
 
-/** Steam library asset slots. See the note in shortcuts.ts on why these are local. */
-const LibraryAsset = { Capsule: 0, Hero: 1 } as const;
+/**
+ * Tile name, suffixed with the provider.
+ *
+ * Without this a cloud tile sits next to the user's real copy under an
+ * identical name — two "Cyberpunk 2077" entries with no way to tell which
+ * streams and which is installed locally.
+ */
+export function shortcutTitle(game: DesiredGame): string {
+  return `${game.name} (${providerLabel(game.provider)})`;
+}
+
+/**
+ * Steam library asset slots.
+ *
+ * Declared locally because @decky/ui does not re-export ELibraryAssetType from
+ * its package root; these are the upstream enum's implicit values.
+ */
+const LibraryAsset = { Capsule: 0, Hero: 1, Logo: 2, Header: 3, Icon: 4 } as const;
 
 const START_DIR = "/usr/bin/";
 
@@ -23,11 +40,12 @@ async function fetchArtworkBase64(url: string): Promise<string | undefined> {
   }
 }
 
-/** Apply cover and banner. Never fatal: a blank tile still plays. */
+/** Fill each library art slot. Never fatal: a blank tile still plays. */
 async function applyArtwork(appId: number, game: DesiredGame): Promise<void> {
   const artwork: Array<[string | undefined | null, number]> = [
-    [game.cover_url, LibraryAsset.Capsule],
-    [game.banner_url, LibraryAsset.Hero],
+    [game.artwork?.capsule, LibraryAsset.Capsule],
+    [game.artwork?.hero, LibraryAsset.Hero],
+    [game.artwork?.logo, LibraryAsset.Logo],
   ];
   for (const [url, assetType] of artwork) {
     if (!url) continue;
@@ -43,9 +61,24 @@ async function applyArtwork(appId: number, game: DesiredGame): Promise<void> {
 }
 
 export interface SyncCallbacks {
-  record: (gameId: number, appId: number, name: string, options: string) => Promise<unknown>;
+  record: (
+    gameId: number, appId: number, name: string, options: string, art: string,
+  ) => Promise<unknown>;
   forget: (gameId: number) => Promise<unknown>;
   onProgress?: (message: string) => void;
+}
+
+/**
+ * A fingerprint of the artwork a tile currently carries.
+ *
+ * Stored alongside the shortcut so sync can tell when the gateway has resolved
+ * better art and re-apply it. Without this, artwork is only ever applied at
+ * creation and existing tiles stay frozen — which is how games resolved after
+ * their tile was made ended up blank.
+ */
+export function artworkFingerprint(game: DesiredGame): string {
+  const a = game.artwork ?? {};
+  return [a.capsule ?? "", a.hero ?? "", a.logo ?? ""].join("|");
 }
 
 /**
@@ -66,33 +99,57 @@ export async function syncLibrary(
 ): Promise<SyncResult> {
   const result: SyncResult = { added: 0, removed: 0, updated: 0, failed: 0 };
   const desiredIds = new Set(desired.map((g) => g.game_id));
+  const members: CollectionMember[] = [];
 
   for (const game of desired) {
     const existing = tracked[String(game.game_id)];
+    const title = shortcutTitle(game);
+    const art = artworkFingerprint(game);
     try {
       if (!existing) {
         callbacks.onProgress?.(`Adding ${game.name}…`);
         const appId = await SteamClient.Apps.AddShortcut(
-          game.name, game.exe, START_DIR, game.options,
+          title, game.exe, START_DIR, game.options,
         );
         if (!appId) throw new Error("Steam refused the shortcut");
 
-        // AddShortcut's name argument does not stick: immediately afterwards the
-        // app overview has no display_name, and Steam later fills it from the
-        // executable's basename — so every tile ended up called "python3".
-        // Setting it explicitly is what actually names the tile.
-        SteamClient.Apps.SetShortcutName(appId, game.name);
+        // AddShortcut only reliably applies the exe — and it stores that
+        // quote-wrapped as "/usr/bin/python3". The name and launchOptions
+        // arguments are silently dropped, which produced tiles called "python3"
+        // that ran an argument-less interpreter and exited instantly.
+        // Verified against shortcuts.vdf on hardware. Set everything explicitly.
+        SteamClient.Apps.SetShortcutName(appId, title);
+        SteamClient.Apps.SetShortcutExe(appId, game.exe);
+        SteamClient.Apps.SetShortcutStartDir(appId, START_DIR);
+        SteamClient.Apps.SetShortcutLaunchOptions(appId, game.options);
 
         await applyArtwork(appId, game);
-        await callbacks.record(game.game_id, appId, game.name, game.options);
+        await callbacks.record(game.game_id, appId, title, game.options, art);
+        members.push({ appId, provider: game.provider });
         result.added++;
-      } else if (existing.launch !== game.options) {
-        // Same game, different launch command (provider or browser changed).
-        callbacks.onProgress?.(`Updating ${game.name}…`);
-        SteamClient.Apps.SetShortcutLaunchOptions(existing.app_id, game.options);
-        SteamClient.Apps.SetShortcutExe(existing.app_id, game.exe);
-        await callbacks.record(game.game_id, existing.app_id, game.name, game.options);
-        result.updated++;
+      } else {
+        const launchChanged = existing.launch !== game.options || existing.name !== title;
+        // Artwork is compared separately: the gateway resolves better art over
+        // time, and a tile whose launch command never changes must still pick
+        // it up rather than staying blank forever.
+        const artChanged = (existing.art ?? "") !== art;
+
+        if (launchChanged) {
+          callbacks.onProgress?.(`Updating ${game.name}…`);
+          SteamClient.Apps.SetShortcutName(existing.app_id, title);
+          SteamClient.Apps.SetShortcutExe(existing.app_id, game.exe);
+          SteamClient.Apps.SetShortcutStartDir(existing.app_id, START_DIR);
+          SteamClient.Apps.SetShortcutLaunchOptions(existing.app_id, game.options);
+        }
+        if (artChanged) {
+          callbacks.onProgress?.(`Updating artwork for ${game.name}…`);
+          await applyArtwork(existing.app_id, game);
+        }
+        if (launchChanged || artChanged) {
+          await callbacks.record(game.game_id, existing.app_id, title, game.options, art);
+          result.updated++;
+        }
+        members.push({ appId: existing.app_id, provider: game.provider });
       }
     } catch (error) {
       console.error("[shelfcloud] sync failed for", game.name, error);
@@ -112,6 +169,10 @@ export async function syncLibrary(
       result.failed++;
     }
   }
+
+  // Sort tiles into a collection per provider, so the user can see at a glance
+  // what runs where. Best effort — unsorted tiles still play.
+  await addToProviderCollections(members);
 
   return result;
 }

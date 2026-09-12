@@ -1,5 +1,12 @@
 /** Shapes exchanged with the plugin backend (main.py). */
 
+/** Artwork per Steam library slot, already chosen by the backend. */
+export interface Artwork {
+  capsule?: string | null;   // 600x900 portrait — the library grid tile
+  hero?: string | null;      // wide banner on the game page
+  logo?: string | null;      // transparent logo overlaid on the hero
+}
+
 /** A game the library should contain, with its launch command already built. */
 export interface DesiredGame {
   game_id: number;
@@ -7,8 +14,7 @@ export interface DesiredGame {
   provider: string;
   exe: string;
   options: string;
-  cover_url?: string | null;
-  banner_url?: string | null;
+  artwork?: Artwork;
 }
 
 /** A shortcut this plugin created, so it can be updated or removed later. */
@@ -16,6 +22,8 @@ export interface TrackedShortcut {
   app_id: number;
   name: string;
   launch: string;
+  /** Fingerprint of the artwork applied, so better art can be detected later. */
+  art?: string;
 }
 
 export interface LibraryResponse {
