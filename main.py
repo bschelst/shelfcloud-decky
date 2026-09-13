@@ -28,8 +28,14 @@ import browsers
 
 DEFAULT_GATEWAY = "http://127.0.0.1:8000"
 REQUEST_TIMEOUT = 20
-POLL_INTERVAL_SECONDS = 300
 SYNC_EVENT = "shelfcloud/library"
+
+# How often to check the gateway for library changes, in minutes.
+SYNC_INTERVAL_CHOICES = [1, 5, 10, 30, 60]
+DEFAULT_SYNC_MINUTES = 5
+# Re-read between ticks rather than caching, so a changed setting takes effect
+# on the next tick instead of requiring a plugin reload.
+MIN_SYNC_SECONDS = 30
 
 
 def _settings_file() -> str:
@@ -169,6 +175,7 @@ class Plugin:
         """
         return {
             "capsule": game.get("capsule_url"),
+            "header": game.get("header_url"),
             "hero": game.get("hero_url") or game.get("banner_url"),
             "logo": game.get("logo_url"),
         }
@@ -200,6 +207,75 @@ class Plugin:
             "options": options,
             "artwork": self._artwork(game),
         }
+
+    async def get_website_launch(self) -> Optional[Dict[str, str]]:
+        """Launch command for a Steam tile that opens the Shelfcloud website.
+
+        Steam's own in-client browser forwards no controller input to web pages
+        — verified on hardware: zero key events, zero gamepads, so the d-pad is
+        dead there and no page-side code can help. Launching the site as a Steam
+        shortcut instead puts it under Steam Input, which can map the d-pad to
+        arrow keys and make the page navigable.
+
+        Uses the same browser the user picked for games, so there is one choice
+        and one persistent profile — the site and the games share a login.
+        """
+        browser = await asyncio.to_thread(browsers.resolve_browser, self._settings.get("browser"))
+        if browser is None:
+            return None
+
+        launcher = os.path.join(decky.DECKY_PLUGIN_DIR, "bin", "shelfcloud-launch.py")
+        profile = browsers.profile_dir(browser["app_id"])
+        # --no-autoplay: our own site has no provider Play button to press.
+        options = " ".join([
+            launcher, browser["app_id"], profile, self._gateway(), "--no-autoplay",
+        ])
+        return {
+            "exe": "/usr/bin/python3",
+            "options": options,
+            "name": "Shelfcloud (website)",
+            "browser": browser["label"],
+        }
+
+    async def clear_library(self) -> Dict[str, Any]:
+        """Empty the chosen library. Tiles are removed by the next sync."""
+        try:
+            result = await asyncio.to_thread(self._request, "/api/me/library/clear", "POST", {})
+            return {"ok": True, **result}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    async def preview_owned(self) -> Dict[str, Any]:
+        """How many owned-on-Steam games could be added in one go."""
+        try:
+            result = await asyncio.to_thread(self._request, "/api/me/library/owned-preview")
+            return {"ok": True, **result}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    async def add_owned_games(self) -> Dict[str, Any]:
+        """Add every game the user owns on Steam that is playable on cloud.
+
+        The alternative is picking a few hundred games one at a time on the
+        website, which is the whole point of having this button.
+        """
+        try:
+            result = await asyncio.to_thread(
+                self._request, "/api/me/library/add-owned", "POST", {}
+            )
+            return {"ok": True, **result}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    async def sync_steam_library(self) -> Dict[str, Any]:
+        """Re-read which games the user owns from Steam."""
+        try:
+            result = await asyncio.to_thread(
+                self._request, "/api/me/steam-library/refresh", "POST", {}
+            )
+            return {"ok": result.get("ok", False), **result}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
 
     async def get_desired_library(self) -> Dict[str, Any]:
         """What the Steam library should contain, ready to act on."""
@@ -255,6 +331,14 @@ class Plugin:
 
     # ---------------------------------------------------------------- status
 
+    def _sync_minutes(self) -> int:
+        """Minutes between automatic syncs, clamped to a sane range."""
+        try:
+            minutes = int(self._settings.get("sync_minutes", DEFAULT_SYNC_MINUTES))
+        except (TypeError, ValueError):
+            return DEFAULT_SYNC_MINUTES
+        return max(1, min(minutes, 24 * 60))
+
     async def get_status(self) -> Dict[str, Any]:
         browser = await asyncio.to_thread(browsers.resolve_browser, self._settings.get("browser"))
         return {
@@ -264,6 +348,8 @@ class Plugin:
             "tracked": len(self._synced),
             "browser": browser,
             "browsers": await asyncio.to_thread(browsers.detect_browsers),
+            "sync_minutes": self._sync_minutes(),
+            "sync_choices": SYNC_INTERVAL_CHOICES,
             "last_error": self._last_error,
         }
 
@@ -291,4 +377,8 @@ class Plugin:
                 raise
             except Exception as exc:
                 decky.logger.warning("Poll failed: %s", exc)
-            await asyncio.sleep(POLL_INTERVAL_SECONDS)
+
+            # Read the interval each tick rather than capturing it once, so
+            # changing the setting takes effect on the next tick instead of
+            # needing a plugin reload.
+            await asyncio.sleep(max(MIN_SYNC_SECONDS, self._sync_minutes() * 60))
