@@ -1,0 +1,105 @@
+// The panel's header: one number, one bar, provider chips.
+//
+// Deliberately not a chart. A chart earns its place when there is a trend or a
+// distribution to read; "184 games" is a single number, and a pie of 184-vs-124
+// says less than the numbers themselves. On a ~300px panel held at arm's length
+// the legible thing is a big figure and a bar.
+//
+// The same bar doubles as the live sync progress, so the most prominent element
+// always answers "where am I?" — idle or working.
+
+import { providerLabel } from "../lib/types";
+
+const ACCENT = "#4da3ff";
+const GOOD = "#35c26a";
+const DIM = "rgba(255,255,255,0.55)";
+
+export interface LibrarySummaryProps {
+  synced: number;
+  /** Total playable games available to add (owned + free). */
+  available: number;
+  byProvider: Record<string, number>;
+  /** When syncing, 0..1 — the bar shows work done instead of coverage. */
+  progress?: number | null;
+  progressLabel?: string;
+}
+
+export function LibrarySummary({
+  synced, available, byProvider, progress, progressLabel,
+}: LibrarySummaryProps) {
+  const working = typeof progress === "number";
+  // Guard against a zero denominator before the first Steam-library sync.
+  const coverage = available > 0 ? Math.min(1, synced / available) : 0;
+  const fill = working ? Math.max(0, Math.min(1, progress!)) : coverage;
+
+  return (
+    <div style={{ padding: "4px 0 2px" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+        <div style={{
+          fontSize: "2.1em",
+          fontWeight: 700,
+          lineHeight: 1,
+          color: working ? ACCENT : GOOD,
+          fontVariantNumeric: "tabular-nums",   // digits stop jittering as it counts
+        }}>
+          {synced}
+        </div>
+        <div style={{ fontSize: "0.8em", color: DIM, paddingBottom: 2 }}>
+          {available > synced ? `of ${available} playable` : "games in your library"}
+        </div>
+      </div>
+
+      <div style={{
+        height: 6,
+        borderRadius: 999,
+        background: "rgba(255,255,255,0.12)",
+        overflow: "hidden",
+        margin: "9px 0 7px",
+      }}>
+        <div style={{
+          width: `${fill * 100}%`,
+          height: "100%",
+          borderRadius: 999,
+          background: working
+            ? `linear-gradient(90deg, ${ACCENT}, #8fd0ff)`
+            : `linear-gradient(90deg, ${GOOD}, #7de0a4)`,
+          transition: "width 220ms ease",
+        }} />
+      </div>
+
+      {working ? (
+        <div style={{
+          fontSize: "0.78em",
+          color: DIM,
+          // Fixed height: progress text changes length constantly and a box
+          // that resizes makes the whole panel jump.
+          height: "1.2em",
+          overflow: "hidden",
+          whiteSpace: "nowrap",
+          textOverflow: "ellipsis",
+        }}>
+          {progressLabel}
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 5, minHeight: "1.2em" }}>
+          {Object.entries(byProvider).map(([provider, count]) => (
+            <span
+              key={provider}
+              style={{
+                fontSize: "0.7em",
+                padding: "2px 7px",
+                borderRadius: 999,
+                background: "rgba(77,163,255,0.16)",
+                border: "1px solid rgba(77,163,255,0.35)",
+                color: "#cfe6ff",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {providerLabel(provider)} {count}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}

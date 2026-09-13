@@ -20,7 +20,7 @@ export const addOwnedGames = callable<[], AddOwnedResult>("add_owned_games");
 export const syncSteamLibrary = callable<[], SteamLibraryResult>("sync_steam_library");
 export const getDesiredLibrary = callable<[], LibraryResponse>("get_desired_library");
 export const recordShortcut =
-  callable<[game_id: number, app_id: number, name: string, options: string, art: string], unknown>("record_shortcut");
+  callable<[game_id: number, app_id: number, name: string, options: string, art: string, provider: string], unknown>("record_shortcut");
 export const forgetShortcut = callable<[game_id: number], unknown>("forget_shortcut");
 export const syncFinished =
   callable<[added: number, removed: number, updated: number], unknown>("sync_finished");

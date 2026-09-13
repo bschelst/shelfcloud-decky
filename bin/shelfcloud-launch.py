@@ -109,6 +109,48 @@ def try_autoplay(url: str) -> None:
     print("[shelfcloud] Play button not found in time; leaving it to the user")
 
 
+def active_gamepads() -> list:
+    """Virtual gamepads Steam Input has created, as /dev/input/event* paths.
+
+    Steam creates one per connected controller when a game starts. The browser
+    enumerates these to expose the Gamepad API.
+    """
+    pads = []
+    try:
+        with open("/proc/bus/input/devices", encoding="utf-8") as handle:
+            blocks = handle.read().split("\n\n")
+    except OSError:
+        return pads
+
+    for block in blocks:
+        if "X-Box" not in block and "Xbox" not in block:
+            continue
+        for line in block.splitlines():
+            if line.startswith("H: Handlers="):
+                for handler in line.split("=", 1)[1].split():
+                    if handler.startswith("event"):
+                        pads.append(f"/dev/input/{handler}")
+    return pads
+
+
+def wait_for_gamepad(timeout: float = 6.0) -> list:
+    """Give Steam Input a moment to create its virtual pads before starting the
+    browser.
+
+    The browser enumerates input devices at startup, and udev hotplug events do
+    not reach it reliably inside the flatpak sandbox — so a pad that appears
+    after it starts may never be noticed. Waiting costs a second and avoids
+    launching into a game with no controller.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        pads = active_gamepads()
+        if pads:
+            return pads
+        time.sleep(0.3)
+    return []
+
+
 def main() -> int:
     args = [a for a in sys.argv[1:] if a != "--no-autoplay"]
     autoplay = "--no-autoplay" not in sys.argv[1:]
@@ -119,6 +161,17 @@ def main() -> int:
 
     app_id, profile, url = args[0], args[1], args[2]
     os.makedirs(profile, exist_ok=True)
+
+    pads = wait_for_gamepad()
+    if len(pads) > 1:
+        # Known issue: with several controllers connected the browser can bind
+        # to the idle virtual pad and report no gamepad at all. Verified on
+        # hardware — 4,473 events on the live pad, zero on the one Chrome
+        # opened. Logged so it is diagnosable rather than mysterious.
+        print(f"[shelfcloud] {len(pads)} virtual gamepads: {pads}. "
+              "If the controller does not work in-game, disconnect the extra one.")
+    elif not pads:
+        print("[shelfcloud] no virtual gamepad yet; controller may not work")
 
     browser = subprocess.Popen(build_browser_command(app_id, profile, url))
 

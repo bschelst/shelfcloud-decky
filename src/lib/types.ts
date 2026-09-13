@@ -50,6 +50,7 @@ export interface Status {
   browsers: Browser[];
   sync_minutes: number;
   sync_choices: number[];
+  by_provider: Record<string, number>;
   last_error?: string | null;
 }
 
