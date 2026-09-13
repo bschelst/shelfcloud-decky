@@ -67,6 +67,7 @@ async function applyArtwork(appId: number, game: DesiredGame): Promise<void> {
 export interface SyncCallbacks {
   record: (
     gameId: number, appId: number, name: string, options: string, art: string,
+    provider: string,
   ) => Promise<unknown>;
   forget: (gameId: number) => Promise<unknown>;
   onProgress?: (message: string) => void;
@@ -154,7 +155,7 @@ export async function syncLibrary(
         SteamClient.Apps.SetShortcutLaunchOptions(appId, game.options);
 
         await applyArtwork(appId, game);
-        await callbacks.record(game.game_id, appId, title, game.options, art);
+        await callbacks.record(game.game_id, appId, title, game.options, art, game.provider);
         members.push({ appId, provider: game.provider });
         result.added++;
       } else {
@@ -176,7 +177,7 @@ export async function syncLibrary(
           await applyArtwork(existing.app_id, game);
         }
         if (launchChanged || artChanged) {
-          await callbacks.record(game.game_id, existing.app_id, title, game.options, art);
+          await callbacks.record(game.game_id, existing.app_id, title, game.options, art, game.provider);
           result.updated++;
         }
         members.push({ appId: existing.app_id, provider: game.provider });

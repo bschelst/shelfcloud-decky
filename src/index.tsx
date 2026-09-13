@@ -30,6 +30,7 @@ import {
   syncFinished,
 } from "./lib/api";
 import { syncLibrary } from "./lib/sync";
+import { LibrarySummary } from "./components/LibrarySummary";
 import type { Status } from "./lib/types";
 
 const SYNC_EVENT = "shelfcloud/library";
@@ -77,6 +78,8 @@ function Content() {
   const [owned, setOwned] = useState<number | null>(null);
   // Two-press confirm: this deletes every tile the plugin made.
   const [confirmClear, setConfirmClear] = useState(false);
+  // Fraction 0..1 while syncing, so the header bar can show live progress.
+  const [progress, setProgress] = useState<number | null>(null);
   const loginTimer = useRef<number | null>(null);
 
   const refresh = useCallback(async () => {
@@ -125,7 +128,16 @@ function Content() {
   const sync = useCallback(async (quiet = false) => {
     setBusy(true);
     try {
-      const { result, total, skipped } = await runSync(setMessage);
+      const { result, total, skipped } = await runSync((line) => {
+        setMessage(line);
+        // The sync emits "Adding X (12/124)"; reuse it rather than threading a
+        // second callback through every call site.
+        const match = /\((\d+)\/(\d+)\)\s*$/.exec(line);
+        if (match) {
+          const [, done, all] = match;
+          setProgress(Number(all) > 0 ? Number(done) / Number(all) : null);
+        }
+      });
       const parts = [];
       if (result.added) parts.push(`${result.added} added`);
       if (result.removed) parts.push(`${result.removed} removed`);
@@ -139,6 +151,7 @@ function Content() {
       if (!quiet) toaster.toast({ title: "Sync failed", body: String(error) });
     } finally {
       setBusy(false);
+      setProgress(null);
       void refresh();
     }
   }, [refresh]);
@@ -271,10 +284,13 @@ function Content() {
     <>
       <PanelSection title="Shelfcloud">
         <PanelSectionRow>
-          <div style={{ fontSize: "0.85em" }}>
-            <b>{status.tracked}</b> game{status.tracked === 1 ? "" : "s"} synced
-            {status.browser ? ` · ${status.browser.label}` : ""}
-          </div>
+          <LibrarySummary
+            synced={status.tracked}
+            available={(owned ?? 0) + status.tracked}
+            byProvider={status.by_provider}
+            progress={busy ? progress : null}
+            progressLabel={message}
+          />
         </PanelSectionRow>
 
         <PanelSectionRow>
@@ -295,7 +311,7 @@ function Content() {
           </ButtonItem>
         </PanelSectionRow>
 
-        {(message || status.last_error) && (
+        {(status.last_error || (message && !busy)) && (
           <PanelSectionRow>
             <div style={{
               fontSize: "0.8em",

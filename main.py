@@ -311,9 +311,10 @@ class Plugin:
     # ------------------------------------------------- shortcut bookkeeping
 
     async def record_shortcut(self, game_id: int, app_id: int, name: str,
-                              options: str, art: str = "") -> Dict:
+                              options: str, art: str = "", provider: str = "") -> Dict:
         self._synced[str(game_id)] = {
-            "app_id": app_id, "name": name, "launch": options, "art": art,
+            "app_id": app_id, "name": name, "launch": options,
+            "art": art, "provider": provider,
         }
         await self._save_state()
         return {"ok": True}
@@ -331,6 +332,14 @@ class Plugin:
 
     # ---------------------------------------------------------------- status
 
+    def _provider_counts(self) -> Dict[str, int]:
+        """How many synced tiles belong to each provider, for the panel chips."""
+        counts: Dict[str, int] = {}
+        for entry in self._synced.values():
+            provider = entry.get("provider") or "boosteroid"
+            counts[provider] = counts.get(provider, 0) + 1
+        return counts
+
     def _sync_minutes(self) -> int:
         """Minutes between automatic syncs, clamped to a sane range."""
         try:
@@ -346,6 +355,7 @@ class Plugin:
             "steam_id64": self._settings.get("steam_id64"),
             "gateway_url": self._gateway(),
             "tracked": len(self._synced),
+            "by_provider": self._provider_counts(),
             "browser": browser,
             "browsers": await asyncio.to_thread(browsers.detect_browsers),
             "sync_minutes": self._sync_minutes(),
