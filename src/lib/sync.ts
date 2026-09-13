@@ -105,14 +105,30 @@ export async function syncLibrary(
   const desiredIds = new Set(desired.map((g) => g.game_id));
   const members: CollectionMember[] = [];
 
-  // Total work known up front, so progress can say "12 of 179" rather than a
-  // stream of identical-looking lines with no sense of how long is left.
+  // Count the REAL work up front — adds, updates and removals — not every game
+  // walked past. Counting all of them made the denominator (308) disagree with
+  // the button that started the job ("Add 124 playable games"), which reads as
+  // a bug even though both numbers were correct.
+  //
+  // Unchanged games do not need to tick the counter: they are skipped with no
+  // network calls, so hundreds pass instantly and there is no stall to hide.
   const toRemove = Object.keys(tracked).filter((id) => !desiredIds.has(Number(id))).length;
-  const total = desired.length + toRemove;
+  const toChange = desired.filter((g) => {
+    const existing = tracked[String(g.game_id)];
+    if (!existing) return true;                                  // add
+    if (existing.launch !== g.options) return true;              // relaunch
+    if (existing.name !== shortcutTitle(g)) return true;         // renamed
+    return (existing.art ?? "") !== artworkFingerprint(g);       // new artwork
+  }).length;
+  const total = toChange + toRemove;
   let done = 0;
-  const step = (label: string) => {
+  // Game names vary wildly in length, and a message that wraps to two lines
+  // and back makes the whole panel jump as it ticks through hundreds of games.
+  // Truncating keeps every progress line the same height.
+  const shorten = (name: string) => (name.length > 22 ? `${name.slice(0, 21)}…` : name);
+  const step = (label: string, name: string) => {
     done++;
-    callbacks.onProgress?.(`${label} (${done}/${total})`);
+    callbacks.onProgress?.(`${label} ${shorten(name)} (${done}/${total})`);
   };
 
   for (const game of desired) {
@@ -121,7 +137,7 @@ export async function syncLibrary(
     const art = artworkFingerprint(game);
     try {
       if (!existing) {
-        step(`Adding ${game.name}`);
+        step("Adding", game.name);
         const appId = await SteamClient.Apps.AddShortcut(
           title, game.exe, START_DIR, game.options,
         );
@@ -149,23 +165,19 @@ export async function syncLibrary(
         const artChanged = (existing.art ?? "") !== art;
 
         if (launchChanged) {
-          step(`Updating ${game.name}`);
+          step("Updating", game.name);
           SteamClient.Apps.SetShortcutName(existing.app_id, title);
           SteamClient.Apps.SetShortcutExe(existing.app_id, game.exe);
           SteamClient.Apps.SetShortcutStartDir(existing.app_id, START_DIR);
           SteamClient.Apps.SetShortcutLaunchOptions(existing.app_id, game.options);
         }
         if (artChanged) {
-          if (!launchChanged) step(`Artwork for ${game.name}`);
+          if (!launchChanged) step("Artwork", game.name);
           await applyArtwork(existing.app_id, game);
         }
         if (launchChanged || artChanged) {
           await callbacks.record(game.game_id, existing.app_id, title, game.options, art);
           result.updated++;
-        } else {
-          // Nothing to do, but it still counts toward the total — otherwise
-          // progress appears stuck while hundreds of unchanged games fly past.
-          done++;
         }
         members.push({ appId: existing.app_id, provider: game.provider });
       }
@@ -178,7 +190,7 @@ export async function syncLibrary(
   for (const [gameId, entry] of Object.entries(tracked)) {
     if (desiredIds.has(Number(gameId))) continue;
     try {
-      step(`Removing ${entry.name}`);
+      step("Removing", entry.name);
       SteamClient.Apps.RemoveShortcut(entry.app_id);
       await callbacks.forget(Number(gameId));
       result.removed++;
