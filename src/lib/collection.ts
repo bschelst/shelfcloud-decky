@@ -35,6 +35,17 @@ export interface CollectionMember {
 }
 
 /**
+ * Collection name for a provider, e.g. "Boosteroid (Shelfcloud)".
+ *
+ * Suffixed rather than named after the provider alone: a bare "Boosteroid"
+ * could collide with a collection the user already keeps, and this makes it
+ * obvious which collections Shelfcloud manages and may add to or empty.
+ */
+export function collectionName(provider: string): string {
+  return `${providerLabel(provider)} (Shelfcloud)`;
+}
+
+/**
  * Put each synced app into the collection for the provider it launches through.
  *
  * Best effort: failing to sort tiles leaves them playable, which is not worth
@@ -46,7 +57,7 @@ export async function addToProviderCollections(members: CollectionMember[]): Pro
 
   const byProvider = new Map<string, number[]>();
   for (const member of members) {
-    const name = providerLabel(member.provider);
+    const name = collectionName(member.provider);
     const list = byProvider.get(name) ?? [];
     list.push(member.appId);
     byProvider.set(name, list);

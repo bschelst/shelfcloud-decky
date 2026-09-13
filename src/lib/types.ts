@@ -2,8 +2,9 @@
 
 /** Artwork per Steam library slot, already chosen by the backend. */
 export interface Artwork {
-  capsule?: string | null;   // 600x900 portrait — the library grid tile
-  hero?: string | null;      // wide banner on the game page
+  capsule?: string | null;   // 600x900 portrait — the small library grid tile
+  header?: string | null;    // 460x215 — the wide banner of the SELECTED game
+  hero?: string | null;      // 1920x620 background on the game page
   logo?: string | null;      // transparent logo overlaid on the hero
 }
 
@@ -47,6 +48,8 @@ export interface Status {
   tracked: number;
   browser: Browser | null;
   browsers: Browser[];
+  sync_minutes: number;
+  sync_choices: number[];
   last_error?: string | null;
 }
 
@@ -82,4 +85,34 @@ const PROVIDER_LABELS: Record<string, string> = {
 
 export function providerLabel(provider: string): string {
   return PROVIDER_LABELS[provider] ?? provider;
+}
+
+/** Launch command for a Steam tile that opens the Shelfcloud website. */
+export interface WebsiteLaunch {
+  exe: string;
+  options: string;
+  name: string;
+  browser: string;
+}
+
+/** How many owned-on-Steam games could be bulk-added. */
+export interface OwnedPreview {
+  ok: boolean;
+  available?: number;
+  not_added?: number;
+  error?: string;
+}
+
+export interface AddOwnedResult {
+  ok: boolean;
+  added?: number;
+  error?: string;
+}
+
+export interface SteamLibraryResult {
+  ok: boolean;
+  owned?: number;
+  status?: string;
+  message?: string;
+  error?: string;
 }

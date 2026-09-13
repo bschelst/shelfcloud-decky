@@ -44,6 +44,10 @@ async function fetchArtworkBase64(url: string): Promise<string | undefined> {
 async function applyArtwork(appId: number, game: DesiredGame): Promise<void> {
   const artwork: Array<[string | undefined | null, number]> = [
     [game.artwork?.capsule, LibraryAsset.Capsule],
+    // Header is the wide banner Steam shows for the *selected* game. Setting
+    // only the capsule leaves that big panel blank, which reads as "artwork is
+    // broken" even though the small tile looks fine.
+    [game.artwork?.header, LibraryAsset.Header],
     [game.artwork?.hero, LibraryAsset.Hero],
     [game.artwork?.logo, LibraryAsset.Logo],
   ];
@@ -78,7 +82,7 @@ export interface SyncCallbacks {
  */
 export function artworkFingerprint(game: DesiredGame): string {
   const a = game.artwork ?? {};
-  return [a.capsule ?? "", a.hero ?? "", a.logo ?? ""].join("|");
+  return [a.capsule ?? "", a.header ?? "", a.hero ?? "", a.logo ?? ""].join("|");
 }
 
 /**
@@ -101,13 +105,23 @@ export async function syncLibrary(
   const desiredIds = new Set(desired.map((g) => g.game_id));
   const members: CollectionMember[] = [];
 
+  // Total work known up front, so progress can say "12 of 179" rather than a
+  // stream of identical-looking lines with no sense of how long is left.
+  const toRemove = Object.keys(tracked).filter((id) => !desiredIds.has(Number(id))).length;
+  const total = desired.length + toRemove;
+  let done = 0;
+  const step = (label: string) => {
+    done++;
+    callbacks.onProgress?.(`${label} (${done}/${total})`);
+  };
+
   for (const game of desired) {
     const existing = tracked[String(game.game_id)];
     const title = shortcutTitle(game);
     const art = artworkFingerprint(game);
     try {
       if (!existing) {
-        callbacks.onProgress?.(`Adding ${game.name}…`);
+        step(`Adding ${game.name}`);
         const appId = await SteamClient.Apps.AddShortcut(
           title, game.exe, START_DIR, game.options,
         );
@@ -135,19 +149,23 @@ export async function syncLibrary(
         const artChanged = (existing.art ?? "") !== art;
 
         if (launchChanged) {
-          callbacks.onProgress?.(`Updating ${game.name}…`);
+          step(`Updating ${game.name}`);
           SteamClient.Apps.SetShortcutName(existing.app_id, title);
           SteamClient.Apps.SetShortcutExe(existing.app_id, game.exe);
           SteamClient.Apps.SetShortcutStartDir(existing.app_id, START_DIR);
           SteamClient.Apps.SetShortcutLaunchOptions(existing.app_id, game.options);
         }
         if (artChanged) {
-          callbacks.onProgress?.(`Updating artwork for ${game.name}…`);
+          if (!launchChanged) step(`Artwork for ${game.name}`);
           await applyArtwork(existing.app_id, game);
         }
         if (launchChanged || artChanged) {
           await callbacks.record(game.game_id, existing.app_id, title, game.options, art);
           result.updated++;
+        } else {
+          // Nothing to do, but it still counts toward the total — otherwise
+          // progress appears stuck while hundreds of unchanged games fly past.
+          done++;
         }
         members.push({ appId: existing.app_id, provider: game.provider });
       }
@@ -160,7 +178,7 @@ export async function syncLibrary(
   for (const [gameId, entry] of Object.entries(tracked)) {
     if (desiredIds.has(Number(gameId))) continue;
     try {
-      callbacks.onProgress?.(`Removing ${entry.name}…`);
+      step(`Removing ${entry.name}`);
       SteamClient.Apps.RemoveShortcut(entry.app_id);
       await callbacks.forget(Number(gameId));
       result.removed++;
