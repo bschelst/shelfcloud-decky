@@ -278,6 +278,12 @@ function Content() {
         </PanelSectionRow>
 
         <PanelSectionRow>
+          <ButtonItem layout="below" onClick={() => openInSteamBrowser(status.gateway_url)}>
+            Pick games on the website
+          </ButtonItem>
+        </PanelSectionRow>
+
+        <PanelSectionRow>
           <ButtonItem layout="below" disabled={busy} onClick={() => void sync()}>
             {busy ? "Syncing…" : "Sync now"}
           </ButtonItem>
@@ -285,13 +291,7 @@ function Content() {
 
         <PanelSectionRow>
           <ButtonItem layout="below" disabled={busy} onClick={() => void addOwned()}>
-            {owned ? `Add ${owned} playable games` : "Add my playable games"}
-          </ButtonItem>
-        </PanelSectionRow>
-
-        <PanelSectionRow>
-          <ButtonItem layout="below" onClick={() => openInSteamBrowser(status.gateway_url)}>
-            Open website
+            {owned ? `Add all my games (${owned})` : "Add all my games"}
           </ButtonItem>
         </PanelSectionRow>
 
@@ -301,6 +301,12 @@ function Content() {
               fontSize: "0.8em",
               opacity: status.last_error ? 1 : 0.75,
               color: status.last_error ? "#ff6b6b" : undefined,
+              // Fixed two-line box: progress messages change length constantly,
+              // and letting the box grow and shrink makes the panel jump.
+              minHeight: "2.4em",
+              maxHeight: "2.4em",
+              overflow: "hidden",
+              lineHeight: "1.2em",
             }}>
               {status.last_error || message}
             </div>
@@ -336,7 +342,12 @@ function Content() {
 
         <PanelSectionRow>
           <ButtonItem layout="below" disabled={busy} onClick={() => void removeAll()}>
-            {confirmClear ? "Confirm: remove all tiles" : "Remove all games"}
+            {/* ButtonItem has no destructive variant, so the label carries the
+                warning colour. Brighter once armed, to mark the point of no
+                return. */}
+            <span style={{ color: confirmClear ? "#ff4444" : "#ff6b6b", fontWeight: confirmClear ? 700 : 500 }}>
+              {confirmClear ? "Confirm — remove all tiles" : "Remove all games"}
+            </span>
           </ButtonItem>
         </PanelSectionRow>
 
