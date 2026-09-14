@@ -44,7 +44,7 @@ import {
 import { syncLibrary } from "./lib/sync";
 import { changeSummary, syncSummary } from "./lib/summary";
 import { LibrarySummary } from "./components/LibrarySummary";
-import { Logo } from "./components/Logo";
+import { Logo, LogoMono } from "./components/Logo";
 import { Collapsible, IconLabel } from "./components/Collapsible";
 import HelpModal from "./components/HelpModal";
 import { NoBrowser } from "./components/NoBrowser";
@@ -784,9 +784,11 @@ export default definePlugin(() => {
       </div>
     ),
     content: <Content />,
-    // The mark, not a generic cloud glyph: this is the row the user picks
-    // Shelfcloud out of in Decky's plugin list.
-    icon: <Logo size={26} />,
+    // Monochrome and em-sized, so it matches its neighbours in Decky's plugin
+    // list: they are react-icons that take their colour from the row and turn
+    // white when it is selected. A coloured, pixel-sized mark stood out as
+    // both larger and out of place.
+    icon: <LogoMono />,
     onDismount() {
       removeEventListener(SYNC_EVENT, onLibraryChanged);
     },
