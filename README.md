@@ -2,7 +2,7 @@
   <img src="assets/shelfcloud-logo.png" alt="Shelfcloud" width="420" />
 </p>
 
-<h3 align="center">Your cloud games, in your Steam library.</h3>
+<h3 align="center">Cloud games, in your Steam Deck, Steam Machine and Bazzite library.</h3>
 
 <p align="center">
   <a href="https://github.com/bschelst/shelfcloud-decky/releases"><img src="https://img.shields.io/badge/version-0.1.0_beta-4d9fff?style=flat-square" alt="Version" /></a>
@@ -151,6 +151,19 @@ Open an issue on <a href="https://github.com/bschelst/shelfcloud-decky/issues">G
 </details>
 
 <br>
+
+## Disclaimer
+
+Shelfcloud is an independent, open-source project. It is **not affiliated with,
+endorsed by, or sponsored by** Valve, Steam, Microsoft, Xbox, NVIDIA, GeForce
+NOW, Boosteroid, or any other service named here. All product names, logos and
+trademarks are the property of their respective owners, and are used only to
+say which service carries which game.
+
+Shelfcloud opens a provider's own URL in your own browser, using your own
+subscription. It does not proxy, rehost, resell or circumvent any service, and
+it neither provides nor includes access to any of them — you need whatever
+subscription each game already requires.
 
 ## &#128220; License
 
