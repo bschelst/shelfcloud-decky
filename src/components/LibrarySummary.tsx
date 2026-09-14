@@ -33,6 +33,8 @@ export interface LibrarySummaryProps {
   synced: number;
   /** Total playable games available to add (owned + free). */
   available: number;
+  /** The shelf this device shows, when it is on one. See below. */
+  shelfName?: string | null;
   byProvider: Record<string, number>;
   /** When syncing, 0..1 — the bar shows work done instead of coverage. */
   progress?: number | null;
@@ -40,12 +42,21 @@ export interface LibrarySummaryProps {
 }
 
 export function LibrarySummary({
-  synced, available, byProvider, progress, progressLabel,
+  synced, available, shelfName, byProvider, progress, progressLabel,
 }: LibrarySummaryProps) {
   const working = typeof progress === "number";
+
+  // On a shelf the two numbers stop being comparable, so they stop being
+  // compared. `synced` is what this device holds — its shelf plus the shared
+  // games — while `available` counts every owned game that could be added
+  // ANYWHERE on the account. Shown together as "6 of 360" they read as "the
+  // shelf is ignoring 354 games", and a coverage bar drawn from 6/360 makes a
+  // full shelf look 2% full.
+  const onShelf = Boolean(shelfName);
   // Guard against a zero denominator before the first Steam-library sync.
   const coverage = available > 0 ? Math.min(1, synced / available) : 0;
-  const fill = working ? Math.max(0, Math.min(1, progress!)) : coverage;
+  const fill = working ? Math.max(0, Math.min(1, progress!))
+    : (onShelf ? 1 : coverage);
 
   return (
     <div style={{ padding: "4px 0 2px" }}>
@@ -60,7 +71,9 @@ export function LibrarySummary({
           {synced}
         </div>
         <div style={{ fontSize: "0.8em", color: DIM, paddingBottom: 2 }}>
-          {available > synced ? `of ${available} playable` : "games in your library"}
+          {onShelf
+            ? `on ${shelfName}`
+            : available > synced ? `of ${available} playable` : "games in your library"}
         </div>
       </div>
 

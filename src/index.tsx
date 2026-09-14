@@ -532,6 +532,12 @@ function Content() {
           >
             <LibrarySummary
               synced={status.tracked}
+              // Named only when this device is actually ON a shelf. Shared is
+              // spelled null, and there the account-wide total is the right
+              // comparison, so the summary keeps saying "of N playable".
+              shelfName={shelves?.ok && typeof shelves.shelf_id === "number"
+                ? (shelves.shelves ?? []).find((s) => s.id === shelves.shelf_id)?.name ?? null
+                : null}
               available={busy && totalWhenSyncStarted.current !== null
                 ? totalWhenSyncStarted.current
                 : (owned ?? 0) + status.tracked}
@@ -661,7 +667,7 @@ function Content() {
           {shelves?.ok && (shelves.shelves?.length ?? 0) > 0 && (
             <PanelSectionRow>
               <Focusable style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                <div style={{ fontSize: "0.75em", opacity: 0.7 }}>Show the shelf</div>
+                <div style={{ fontSize: "0.75em", opacity: 0.7 }}>Use shelf</div>
                 <Dropdown
                   disabled={signedOut || busy}
                   // A Dropdown option needs a non-null key, but "no shelf" is
