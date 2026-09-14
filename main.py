@@ -246,6 +246,7 @@ class Plugin:
         url = self._gateway() + path
         data = json.dumps(body).encode() if body is not None else None
         request = urllib.request.Request(url, data=data, method=method)
+        request.add_header("User-Agent", ARTWORK_USER_AGENT)
         request.add_header("Accept", "application/json")
         if data:
             request.add_header("Content-Type", "application/json")
