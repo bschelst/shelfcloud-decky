@@ -849,14 +849,13 @@ class Plugin:
         return False
 
     async def apply_overrides(self) -> Dict[str, Any]:
-        """Apply flatpak overrides to every detected browser. Callable from the panel."""
-        clean_env = self._clean_env()
-        found = await asyncio.to_thread(browsers.detect_browsers)
-        applied = 0
-        for browser in found:
-            if await self._apply_override(browser["app_id"], clean_env):
-                applied += 1
-        return {"ok": True, "applied": applied, "total": len(found)}
+        """Apply flatpak overrides to the selected browser."""
+        browser = await asyncio.to_thread(
+            browsers.resolve_browser, self._settings.get("browser"))
+        if not browser:
+            return {"ok": False, "error": "no browser selected"}
+        ok = await self._apply_override(browser["app_id"])
+        return {"ok": ok, "browser": browser["label"]}
 
     async def _run_install(self, app_id: str, label: str) -> None:
         """Do the install and record how it went. Never raises."""

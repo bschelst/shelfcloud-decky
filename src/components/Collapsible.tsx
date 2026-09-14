@@ -49,7 +49,7 @@ export function Collapsible({
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          padding: "8px 12px",
+          padding: 8,
           cursor: "pointer",
           borderRadius: 4,
           background: focused ? theme.tint(accent, 0.12) : "transparent",

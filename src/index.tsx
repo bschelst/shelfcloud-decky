@@ -625,9 +625,12 @@ function Content() {
               layout="below"
               onClick={() => {
                 void applyOverrides().then((r) => {
-                  if (r.ok) {
-                    toaster.toast({ title: "Shelfcloud", body: `Gamepad permissions applied to ${r.applied} browser(s).` });
-                  }
+                  toaster.toast({
+                    title: "Shelfcloud",
+                    body: r.ok
+                      ? `Gamepad permissions applied to ${r.browser}.`
+                      : (r.error || "No browser selected."),
+                  });
                 });
               }}
             >
