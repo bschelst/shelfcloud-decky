@@ -24,7 +24,7 @@
 
 Cloud gaming services like Boosteroid, GeForce NOW, and Xbox Cloud don't show up in your Steam library — you have to open a browser, find the game, and launch it from there every time.
 
-**Shelfcloud fixes that.** Pick your games on the Shelfcloud website, and they appear on your Steam Deck as normal tiles with proper artwork. Launching one opens the cloud provider and goes straight into the game. No extra steps.
+**Shelfcloud fixes that.** Pick your games on the Shelfcloud website, and they appear as normal Steam tiles with proper artwork. Launching one opens the cloud provider and goes straight into the game. No extra steps.
 
 <br>
 
@@ -32,7 +32,7 @@ Cloud gaming services like Boosteroid, GeForce NOW, and Xbox Cloud don't show up
 
 ### Prerequisites
 
-- A **Steam Deck** running SteamOS with [Decky Loader](https://decky.xyz) installed
+- A **Steam Deck**, **Steam Machine**, or **Bazzite** device running SteamOS with [Decky Loader](https://decky.xyz) installed
 - A Chromium-based browser (Chrome, Edge, or Brave) — the plugin offers to install one for you if none is present, and automatically configures the flatpak permissions it needs (gamepad access for controller input in cloud streams)
 - An account on one or more supported cloud gaming services
 
@@ -40,7 +40,7 @@ Cloud gaming services like Boosteroid, GeForce NOW, and Xbox Cloud don't show up
 
 Shelfcloud is still in beta and not yet on the official Decky store. You can install it today through [AlphaStore](https://alphastore.schelstraete.org), a community plugin store for Decky Loader:
 
-1. Open **Decky Loader** settings on your Steam Deck
+1. Open **Decky Loader** settings on your device
 2. Go to **Store** settings and select **Custom**
 3. Enter: `https://alphastore.schelstraete.org`
 4. Go back to the store, search for **Shelfcloud** and install
@@ -123,7 +123,7 @@ Cloud gaming providers offer standalone desktop clients, but those don't support
 <details>
 <summary><strong>Can I use this on desktop Steam?</strong></summary>
 
-The plugin is built for Decky Loader, which runs on the Steam Deck. Desktop Steam doesn't support Decky plugins. You could adapt the sync logic, but that's not an offical use case today.
+The plugin is built for Decky Loader, which runs on the Steam Deck, Steam Machine, and Bazzite. Desktop Steam doesn't support Decky plugins. You could adapt the sync logic, but that's not an offical use case today.
 </details>
 
 <details>
