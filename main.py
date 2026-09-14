@@ -560,7 +560,12 @@ class Plugin:
         Python has neither restriction, so the bytes are fetched here and
         handed over ready to use.
         """
-        if not url or not url.startswith(("http://", "https://")):
+        # https only. http was accepted here when the gateway was a plaintext
+        # box on the LAN; it no longer is, and every artwork URL the catalog
+        # serves — 18,884 of them across five CDNs — is already https. Plain
+        # http would let anything on the path swap the image, and these bytes
+        # are written to disk and handed to Steam as a shortcut icon.
+        if not isinstance(url, str) or not url.startswith("https://"):
             return {"ok": False, "error": "unsupported url"}
 
         headers = {"User-Agent": ARTWORK_USER_AGENT}

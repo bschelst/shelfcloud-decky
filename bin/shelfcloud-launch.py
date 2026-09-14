@@ -23,8 +23,10 @@ session and the tile's playtime is accurate.
 
 import json
 import os
+import ssl
 import subprocess
 import sys
+import urllib.parse
 import urllib.request
 import time
 
@@ -35,6 +37,82 @@ import cdp  # noqa: E402
 CDP_PORT = 9223
 PAGE_TIMEOUT = 45.0
 CLICK_TIMEOUT = 60.0
+
+# Where this plugin's gateway lives. Fixed, and https.
+#
+# It used to be read from settings.json, which holds whatever address the
+# plugin was last pointed at — on this developer's Deck, a plaintext
+# http://192.168.x.x:8000. Every launch then sent the bearer token across the
+# LAN in clear and accepted a launch URL from whoever answered that port. The
+# plugin backend already ignores that setting and uses its own constant; the
+# launcher disagreeing with it is what kept the hole open.
+#
+# Must match DEFAULT_GATEWAY in main.py — tests/unit/test_gateway_default.py
+# checks that they agree.
+GATEWAY = "https://shelfcloud.schelstraete.org"
+
+# The only places a game is allowed to launch.
+#
+# Checked HERE, on the device, not merely on the gateway. The gateway is a
+# server, servers get compromised, and a launch URL it returns is opened in a
+# kiosk-mode browser carrying live Microsoft, NVIDIA and Boosteroid sessions —
+# with no address bar and no tab strip to show where it went. A phishing page
+# in that window is indistinguishable from the real sign-in.
+#
+# Every launch URL in the production catalog — 5,965 rows — is https on one of
+# these three hosts, so this costs nothing in practice.
+ALLOWED_LAUNCH_DOMAINS = (
+    "geforcenow.com",     # play.geforcenow.com
+    "boosteroid.com",     # cloud.boosteroid.com
+    "xbox.com",           # www.xbox.com
+)
+
+
+def _ssl_context():
+    """Verified TLS, with the bundled Mozilla roots added.
+
+    Same reasoning as main.py's copy: Decky's embedded Python ships its own
+    libssl and has been seen without the GTS root a Cloudflare-fronted host
+    presents, which fails an otherwise valid chain. load_verify_locations ADDS
+    to the default trust store — it never replaces it, and verification and
+    hostname checking stay on.
+    """
+    ctx = ssl.create_default_context()
+    bundle = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "..", "py_modules", "cacert.pem")
+    if os.path.isfile(bundle):
+        ctx.load_verify_locations(bundle)
+    return ctx
+
+
+def is_allowed_launch_url(url) -> bool:
+    """Is this somewhere a cloud game may legitimately be played?
+
+    https only: a launch carries provider session cookies, and http would both
+    expose them and let anything on the path rewrite the page.
+
+    The host must BE one of the allowed domains or sit beneath it. The dot in
+    `"." + domain` is the whole check — without it "xbox.com.evil.com" ends
+    with "xbox.com" and passes.
+
+    Credentials in the authority are refused outright:
+    "https://play.geforcenow.com@evil.com/" names the host evil.com while
+    reading, at a glance, as though it does not.
+    """
+    if not url or not isinstance(url, str):
+        return False
+    try:
+        parts = urllib.parse.urlsplit(url.strip())
+    except ValueError:
+        return False
+    if parts.scheme != "https":
+        return False
+    if parts.username or parts.password:
+        return False
+    host = (parts.hostname or "").lower().rstrip(".")
+    if not host:
+        return False
+    return any(host == d or host.endswith("." + d) for d in ALLOWED_LAUNCH_DOMAINS)
 
 # The provider's Play control.
 #
@@ -394,11 +472,15 @@ def resolve_launch(game_id: str, fallback_url: str) -> tuple:
         log(f"cannot read {SETTINGS_FILE} ({exc}); using the stored link")
         return fallback_url, "baked-in"
 
-    gateway = (settings.get("gateway_url") or "").rstrip("/")
+    # The address is the constant above, NOT settings["gateway_url"]. That key
+    # still exists in settings written by older builds and points at whatever
+    # the plugin was last aimed at — here, a plaintext LAN address. Reading it
+    # put the bearer token on the wire in clear and took a launch URL from
+    # whoever answered that port.
+    gateway = GATEWAY
     token = settings.get("api_token")
-    if not gateway or not token:
-        missing = "gateway address" if not gateway else "credential"
-        log(f"no {missing} in settings — not signed in; using the stored link. "
+    if not token:
+        log("no credential in settings — not signed in; using the stored link. "
             "This launch will not be counted.")
         return fallback_url, "not signed in"
 
@@ -410,7 +492,11 @@ def resolve_launch(game_id: str, fallback_url: str) -> tuple:
             headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
         )
         started = time.monotonic()
-        with urllib.request.urlopen(request, timeout=RESOLVE_TIMEOUT) as response:
+        # Verified TLS against the bundled CA bundle, the same one main.py
+        # uses: Decky's embedded Python ships its own libssl and has been seen
+        # missing roots that a Cloudflare-fronted host presents.
+        with urllib.request.urlopen(request, timeout=RESOLVE_TIMEOUT,
+                                    context=_ssl_context()) as response:
             payload = json.loads(response.read().decode())
         elapsed = int((time.monotonic() - started) * 1000)
     except Exception as exc:
@@ -427,6 +513,15 @@ def resolve_launch(game_id: str, fallback_url: str) -> tuple:
         log(f"gateway answered for game {game_id} with no launch_url "
             f"({str(payload)[:120]}); using the stored link")
         return fallback_url, "baked-in"
+
+    # Do not trust the gateway with where this device browses. A correct
+    # gateway only ever returns the three provider hosts; one that returns
+    # anything else is either compromised or answering for someone who is, and
+    # either way this is the point at which it stops.
+    if not is_allowed_launch_url(url):
+        log(f"gateway returned a URL outside the permitted providers "
+            f"({str(url)[:120]!r}) — REFUSED, using the stored link")
+        return fallback_url, "refused gateway url"
 
     log(f"gateway resolved game {game_id} -> {payload.get('name') or '?'} "
         f"via {payload.get('provider') or '?'} in {elapsed} ms")
@@ -608,6 +703,17 @@ def main() -> int:
 
     url, source = resolve_launch(game_id, url)
     log(f"launch URL from {source}")
+
+    # Last gate before a browser opens. resolve_launch already refuses a URL
+    # the gateway should not have sent, but the baked-in fallback reaches here
+    # too — it was written into the Steam shortcut by an earlier sync and has
+    # sat on disk ever since. Refusing to launch is the right outcome: a game
+    # that does not start is a complaint, and a fullscreen page pretending to
+    # be a provider sign-in is a stolen account.
+    if not is_allowed_launch_url(url):
+        log(f"REFUSED: {url!r} is not a permitted provider URL "
+            f"(source: {source}). Not launching.")
+        return 3
 
     pads = wait_for_gamepad()
     if len(pads) > 1:
