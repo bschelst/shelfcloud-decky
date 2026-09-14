@@ -170,6 +170,51 @@ def _icon_dir() -> str:
     return path
 
 
+def as_id(value: Any) -> Optional[int]:
+    """An integer id out of JSON, or None if it is anything else.
+
+    JSON promises nothing about types. An id can arrive as a string from a
+    proxy that rewrites bodies, as a float from a language whose numbers are
+    all floats, or as a dict from an error document served with the wrong
+    content type. Everything downstream — a URL path, a dropdown key — wants
+    an int or nothing at all, so the conversion happens once, here.
+
+    bool is rejected before int because it is a SUBCLASS of int: without that
+    line `True` quietly becomes the id 1, which is a real shelf.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value) if value.is_integer() else None
+    if isinstance(value, str):
+        try:
+            return int(value.strip())
+        except ValueError:
+            return None
+    return None
+
+
+def clean_shelf(entry: Any) -> Optional[Dict[str, Any]]:
+    """One shelf fit to render, or None if there is nothing to select.
+
+    Only a missing id drops the row, because an id is the whole of what a
+    selection sends. A missing name is given one instead of being dropped: the
+    device may be pointed AT this shelf, and a picker whose current value is
+    not among its options draws as an empty control — which reads as the
+    plugin being broken rather than as one shelf being odd.
+    """
+    if not isinstance(entry, dict):
+        return None
+    shelf_id = as_id(entry.get("id"))
+    if shelf_id is None:
+        return None
+    name = entry.get("name")
+    name = name.strip() if isinstance(name, str) and name.strip() else f"Shelf {shelf_id}"
+    return {"id": shelf_id, "name": name, "games": as_id(entry.get("games")) or 0}
+
+
 class Plugin:
     def __init__(self):
         self._settings: Dict[str, Any] = {}
@@ -634,6 +679,98 @@ class Plugin:
             "skipped": skipped,
             "tracked": self._synced,
         }
+
+    # ------------------------------------------------------------- shelves
+    #
+    # A shelf is a named library on the gateway; this device points at one. The
+    # Deck does not create or delete them — that is a job for a real keyboard —
+    # it only chooses which one it shows, which is the part you want to change
+    # while holding the machine.
+
+    async def get_shelves(self) -> Dict[str, Any]:
+        """The account's shelves, and which one this device is on.
+
+        Both come from the gateway rather than being cached here: the shelf can
+        be changed from the website or from another device, and a stale local
+        copy would show the wrong library with no way for the user to tell.
+        """
+        try:
+            shelves = await asyncio.to_thread(self._request, "/api/me/shelves")
+            devices = await asyncio.to_thread(self._request, "/api/me/devices")
+        except PermissionError:
+            return {"ok": False, "error": "not signed in", "signed_in": False}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        if not isinstance(shelves, dict) or not isinstance(devices, dict):
+            return {"ok": False, "error": "gateway returned an unexpected response"}
+
+        # `or []` is not enough: it rescues null, but a number or a string
+        # reaches the loop below and raises — a string iterates one character
+        # at a time and an int is not iterable at all.
+        shelf_rows = shelves.get("shelves")
+        device_rows = devices.get("devices")
+        if not isinstance(shelf_rows, list) or not isinstance(device_rows, list):
+            return {"ok": False, "error": "gateway returned an unexpected response"}
+
+        # Match on the id this gateway says is us. With no such id there is no
+        # device to speak of, and comparing against None would happily match
+        # the first row whose id is also unreadable.
+        this_id = as_id(devices.get("this_device"))
+        mine: Dict[str, Any] = {}
+        if this_id is not None:
+            mine = next((d for d in device_rows
+                         if isinstance(d, dict) and as_id(d.get("id")) == this_id), {})
+
+        name = mine.get("name")
+        return {
+            "ok": True,
+            "shelves": [s for s in map(clean_shelf, shelf_rows) if s is not None],
+            "device_id": this_id,
+            "shelf_id": as_id(mine.get("shelf_id")),
+            "device_name": name if isinstance(name, str) else None,
+        }
+
+    async def set_shelf(self, shelf_id: Optional[int]) -> Dict[str, Any]:
+        """Point this device at a shelf, or at None for the shared games.
+
+        The library this device should hold changes as a result, so the caller
+        syncs immediately afterwards — leaving the old tiles in place until the
+        next poll would look like the setting had not taken.
+        """
+        current = await self.get_shelves()
+        if not current.get("ok"):
+            return current
+
+        # `is None`, not falsiness: an id of 0 is a device, and treating it as
+        # a missing one would tell a signed-in user to sign in again.
+        #
+        # device_id has been through as_id(), which is what makes it safe to
+        # interpolate into the path below. Straight from the JSON it is
+        # whatever the response said, and a string there writes its own URL.
+        device_id = current.get("device_id")
+        if device_id is None:
+            # A token issued before shelves existed has no device attached.
+            return {"ok": False, "error": "Sign in again to use shelves on this device"}
+
+        # None is a real choice — the shared library — so an unreadable value
+        # must not quietly become it. Anything that is not an id, and any id
+        # this account does not have, is refused rather than sent on.
+        wanted = as_id(shelf_id)
+        if shelf_id is not None and wanted is None:
+            return {"ok": False, "error": "that is not a shelf"}
+        if wanted is not None and wanted not in {s["id"] for s in current["shelves"]}:
+            # Deleted from the website while this panel was open.
+            return {"ok": False, "error": "That shelf no longer exists"}
+
+        try:
+            await asyncio.to_thread(
+                self._request, f"/api/me/devices/{device_id}/shelf", "POST",
+                {"shelf_id": wanted},
+            )
+            return {"ok": True, "shelf_id": wanted}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
 
     # ------------------------------------------------- shortcut bookkeeping
 

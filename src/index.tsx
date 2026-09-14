@@ -34,11 +34,13 @@ import {
   installBrowser,
   previewOwned,
   syncSteamLibrary,
+  getShelves,
   getStatus,
   logout,
   pollLogin,
   recordShortcut,
   setSetting,
+  setShelf,
   startLogin,
   syncFinished,
   applyOverrides,
@@ -59,6 +61,16 @@ const LOGIN_POLL_MS = 2500;
 const LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
 const GATEWAY_URL = "https://shelfcloud.schelstraete.org";
 const GITHUB_URL = "https://github.com/bschelst/shelfcloud-decky";
+
+/** The shelf picker's stand-in for "no shelf", which the gateway spells null.
+ *
+ * A Dropdown option needs a key and null is not one. Negative because shelf
+ * ids come from a Postgres identity column and start at 1: 0 would merely be
+ * unlikely to collide, -1 cannot. A collision would be quiet and wrong — the
+ * shelf holding that id would read as "Shared games" and, when chosen, move
+ * the device to shared instead of to it.
+ */
+const SHARED = -1;
 
 /** How often to re-read the library count while a sync is running.
  *
@@ -319,6 +331,10 @@ async function doRemoveAll(): Promise<void> {
 function Content() {
   const [status, setStatus] = useState<Status | null>(null);
   const [owned, setOwned] = useState<number | null>(null);
+  // Which shelf this device shows, and what it could show. Loaded from the
+  // gateway rather than from settings: the shelf can be changed on the website
+  // or another device, so a local copy would go quietly out of date.
+  const [shelves, setShelves] = useState<Awaited<ReturnType<typeof getShelves>> | null>(null);
   // Two-press confirm: this deletes every tile the plugin made.
   const [confirmClear, setConfirmClear] = useState(false);
   const loginTimer = useRef<number | null>(null);
@@ -342,6 +358,12 @@ function Content() {
   // On mount, and again whenever a job finishes while the panel is open, so
   // the counts follow work that completed with the panel closed.
   useEffect(() => { void refresh(); }, [refresh, completed]);
+
+  // Alongside the status, and re-read after a sync: a sync is when the library
+  // changes, which is exactly when a shelf's game count is out of date.
+  useEffect(() => {
+    void getShelves().then(setShelves).catch(() => setShelves(null));
+  }, [completed]);
 
   // While a sync runs, keep the headline count honest.
   //
@@ -619,6 +641,63 @@ function Content() {
               />
             </Focusable>
           </PanelSectionRow>
+
+          {/* Only offered once a shelf exists. With none there is nothing to
+              choose between, and a one-option picker is a control that does
+              nothing but invite a press. */}
+          {shelves?.ok && (shelves.shelves?.length ?? 0) > 0 && (
+            <PanelSectionRow>
+              <Focusable style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                <div style={{ fontSize: "0.75em", opacity: 0.7 }}>Show the shelf</div>
+                <Dropdown
+                  disabled={signedOut || busy}
+                  // A Dropdown option needs a non-null key, but "no shelf" is
+                  // spelled null. SHARED is the stand-in, and it is -1 rather
+                  // than 0 because a shelf id comes from a Postgres identity
+                  // column: 0 is merely unlikely, a negative id is impossible.
+                  // With 0, a shelf that ever had that id would both display
+                  // as "Shared games" and, when picked, switch the device to
+                  // shared — the opposite of what was chosen.
+                  selectedOption={shelves.shelf_id ?? SHARED}
+                  rgOptions={[
+                    { data: SHARED, label: "Shared games" },
+                    ...(shelves.shelves ?? []).map((shelf) => ({
+                      data: shelf.id,
+                      label: `${shelf.name} (${shelf.games})`,
+                    })),
+                  ]}
+                  onChange={(option) => {
+                    const next = option.data === SHARED ? null : Number(option.data);
+                    void setShelf(next).then((result) => {
+                      if (!result.ok) {
+                        toaster.toast({ title: "Shelfcloud", body: result.error || "Could not change shelf" });
+                        return;
+                      }
+                      // The library this device should hold just changed, so
+                      // reconcile now. Waiting for the next poll would leave
+                      // the old tiles in place and read as the setting not
+                      // having taken.
+                      //
+                      // Only doSync() here, with no getShelves() beside it:
+                      // finishing a sync bumps `completed`, and the effect
+                      // keyed on it re-reads the shelves. Doing both launched
+                      // two overlapping reads whose order nothing enforced, so
+                      // the older answer could land last and put the picker
+                      // back to the shelf just switched away from.
+                      void doSync();
+                    }).catch((error) => {
+                      // Without this the promise rejects unhandled and the
+                      // control simply does nothing when pressed — no toast,
+                      // no reverted selection, nothing to act on. The backend
+                      // returns errors rather than raising, so this is the
+                      // last resort: the RPC bridge itself failing.
+                      toaster.toast({ title: "Shelfcloud", body: String(error) });
+                    });
+                  }}
+                />
+              </Focusable>
+            </PanelSectionRow>
+          )}
 
           <PanelSectionRow>
             <ButtonItem
