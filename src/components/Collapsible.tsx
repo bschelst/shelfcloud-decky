@@ -39,13 +39,17 @@ export function Collapsible({
     <div style={{ marginTop: 8 }}>
       <Focusable
         onActivate={() => setOpen((v) => !v)}
-        onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
+        onFocus={(e: React.FocusEvent) => {
+          if (e.currentTarget === e.target) setFocused(true);
+        }}
+        onBlur={(e: React.FocusEvent) => {
+          if (e.currentTarget === e.target) setFocused(false);
+        }}
         style={{
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          padding: 8,
+          padding: "8px 12px",
           cursor: "pointer",
           borderRadius: 4,
           background: focused ? theme.tint(accent, 0.12) : "transparent",
