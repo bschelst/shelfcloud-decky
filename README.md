@@ -5,8 +5,8 @@
 <h3 align="center">Your cloud games, in your Steam library.</h3>
 
 <p align="center">
-  <a href="https://github.com/bschelst/shelfcloud-decky/releases"><img src="https://img.shields.io/github/v/release/bschelst/shelfcloud-decky?style=flat-square&color=4d9fff&label=latest" alt="Latest release" /></a>
-  <a href="https://github.com/bschelst/shelfcloud-decky/blob/main/LICENSE"><img src="https://img.shields.io/github/license/bschelst/shelfcloud-decky?style=flat-square&color=555" alt="License" /></a>
+  <a href="https://github.com/bschelst/shelfcloud-decky/releases"><img src="https://img.shields.io/badge/version-0.1.0_beta-4d9fff?style=flat-square" alt="Version" /></a>
+  <a href="https://github.com/bschelst/shelfcloud-decky/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-GPL--2.0-555?style=flat-square" alt="License" /></a>
   <a href="https://shelfcloud.schelstraete.org"><img src="https://img.shields.io/badge/website-shelfcloud-4d9fff?style=flat-square" alt="Website" /></a>
   <a href="https://alphastore.schelstraete.org"><img src="https://img.shields.io/badge/install-AlphaStore-8ec5ff?style=flat-square" alt="AlphaStore" /></a>
 </p>
