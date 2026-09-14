@@ -10,3 +10,6 @@ venv/
 # Local secrets / device-specific config
 .env
 settings.json
+# scripting
+.cl*
+.ct*

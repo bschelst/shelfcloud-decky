@@ -1,3 +1,5 @@
+// Shelfcloud project - https://shelfcloud.schelstraete.org - bart@schelstraete.org
+//
 // The panel's header: one number, one bar, provider chips.
 //
 // Deliberately not a chart. A chart earns its place when there is a trend or a
@@ -8,11 +10,24 @@
 // The same bar doubles as the live sync progress, so the most prominent element
 // always answers "where am I?" — idle or working.
 
+import { theme } from "../lib/theme";
 import { providerLabel } from "../lib/types";
 
-const ACCENT = "#4da3ff";
-const GOOD = "#35c26a";
+// The header uses Shelfcloud's accent throughout, idle and working alike.
+//
+// It used to be green when idle and blue only while syncing, which read as a
+// status light — green for "healthy" — when it was never reporting health at
+// all: the number is a count and the bar is coverage. A colour implying a
+// state that does not exist is worse than no colour, and it made the header
+// the one element on the panel not speaking the plugin's own blue.
+//
+// Idle and working stay distinguishable without it: the bar keeps a deeper
+// blue for coverage and a lighter one for live progress, and the row beneath
+// swaps the provider chips for the progress line, which says outright which
+// of the two the bar is showing.
 const DIM = "rgba(255,255,255,0.55)";
+const BAR_IDLE = `linear-gradient(90deg, ${theme.accent}, ${theme.accentText})`;
+const BAR_WORKING = `linear-gradient(90deg, ${theme.accentText}, #bfe0ff)`;
 
 export interface LibrarySummaryProps {
   synced: number;
@@ -39,7 +54,7 @@ export function LibrarySummary({
           fontSize: "2.1em",
           fontWeight: 700,
           lineHeight: 1,
-          color: working ? ACCENT : GOOD,
+          color: theme.accent,
           fontVariantNumeric: "tabular-nums",   // digits stop jittering as it counts
         }}>
           {synced}
@@ -60,9 +75,7 @@ export function LibrarySummary({
           width: `${fill * 100}%`,
           height: "100%",
           borderRadius: 999,
-          background: working
-            ? `linear-gradient(90deg, ${ACCENT}, #8fd0ff)`
-            : `linear-gradient(90deg, ${GOOD}, #7de0a4)`,
+          background: working ? BAR_WORKING : BAR_IDLE,
           transition: "width 220ms ease",
         }} />
       </div>
@@ -89,9 +102,9 @@ export function LibrarySummary({
                 fontSize: "0.7em",
                 padding: "2px 7px",
                 borderRadius: 999,
-                background: "rgba(77,163,255,0.16)",
-                border: "1px solid rgba(77,163,255,0.35)",
-                color: "#cfe6ff",
+                background: theme.tint(theme.accent, 0.16),
+                border: `1px solid ${theme.tint(theme.accent, 0.35)}`,
+                color: theme.accentText,
                 whiteSpace: "nowrap",
               }}
             >
