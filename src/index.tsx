@@ -20,6 +20,7 @@ import {
   FaInfoCircle,
   FaLink,
   FaQuestionCircle,
+  FaGamepad,
   FaSignOutAlt,
   FaTrashAlt,
 } from "react-icons/fa";
@@ -40,6 +41,7 @@ import {
   setSetting,
   startLogin,
   syncFinished,
+  applyOverrides,
 } from "./lib/api";
 import { syncLibrary } from "./lib/sync";
 import { changeSummary, syncSummary } from "./lib/summary";
@@ -616,6 +618,21 @@ function Content() {
                 onChange={(option) => { void setSetting("sync_minutes", option.data).then(setStatus); }}
               />
             </Focusable>
+          </PanelSectionRow>
+
+          <PanelSectionRow>
+            <ButtonItem
+              layout="below"
+              onClick={() => {
+                void applyOverrides().then((r) => {
+                  if (r.ok) {
+                    toaster.toast({ title: "Shelfcloud", body: `Gamepad permissions applied to ${r.applied} browser(s).` });
+                  }
+                });
+              }}
+            >
+              <IconLabel icon={<FaGamepad size={12} />}>Fix gamepad permissions</IconLabel>
+            </ButtonItem>
           </PanelSectionRow>
 
           {/* A rule and real space before the destructive action.

@@ -144,6 +144,24 @@ def ensure_flathub_command() -> List[str]:
     ]
 
 
+FLATPAK_OVERRIDES = [
+    "--filesystem=/run/udev:ro",
+]
+
+
+def override_command(app_id: str) -> List[str]:
+    """Grant a browser the sandbox permissions cloud gaming needs.
+
+    Flatpak sandboxes deny /run/udev by default. Without it the browser
+    cannot enumerate input devices, so gamepads are invisible to the stream
+    — the cloud sees a keyboard-only session and offers no controller input.
+
+    Applied as a --user override so it survives browser updates and does not
+    need root.
+    """
+    return [FLATPAK_BIN, "--user", "override", *FLATPAK_OVERRIDES, app_id]
+
+
 def profile_dir(app_id: str) -> str:
     """A persistent browser profile, kept per browser.
 

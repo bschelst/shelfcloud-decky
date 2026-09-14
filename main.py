@@ -21,6 +21,7 @@ import json
 import os
 import random
 import shlex
+import ssl
 import subprocess
 import time
 import urllib.error
@@ -31,6 +32,26 @@ from typing import Any, Dict, List, Optional
 import decky
 
 import browsers
+
+
+def _ssl_context() -> ssl.SSLContext:
+    """An SSL context that trusts the bundled Mozilla CA bundle.
+
+    Decky's embedded Python ships its own libssl and may not include every
+    root certificate the system has. The GTS Root R4 (Google Trust Services)
+    that Cloudflare-proxied sites present is one that has been missing,
+    causing CERTIFICATE_VERIFY_FAILED on an otherwise valid chain.
+
+    The bundled cacert.pem (from curl.se, the same file certifi ships) is
+    loaded on top of whatever the system already trusts.
+    """
+    ctx = ssl.create_default_context()
+    bundle = os.path.join(os.path.dirname(__file__), "py_modules", "cacert.pem")
+    if os.path.isfile(bundle):
+        ctx.load_verify_locations(bundle)
+    return ctx
+
+SSL_CTX = _ssl_context()
 
 
 def _shell_join(parts: List[str]) -> str:
@@ -178,6 +199,7 @@ class Plugin:
         self._synced = await asyncio.to_thread(self._read_json, _state_file())
         decky.logger.info("Shelfcloud ready (gateway=%s, tracked=%d)",
                           self._gateway(), len(self._synced))
+        await self.apply_overrides()
         self._poll_task = asyncio.create_task(self._poll_loop())
 
     async def _unload(self):
@@ -234,7 +256,7 @@ class Plugin:
             request.add_header("Authorization", f"Bearer {token}")
 
         try:
-            with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT) as response:
+            with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT, context=SSL_CTX) as response:
                 payload = response.read().decode()
                 self._auth_ok = True
                 return json.loads(payload) if payload else None
@@ -506,7 +528,7 @@ class Plugin:
 
         try:
             request = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT) as response:
+            with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT, context=SSL_CTX) as response:
                 content_type = response.headers.get("Content-Type", "")
                 if not content_type.startswith("image/"):
                     return {"ok": False, "error": f"not an image ({content_type})"}
@@ -807,6 +829,33 @@ class Plugin:
         env.pop("LD_PRELOAD", None)
         return env
 
+    async def _apply_override(self, app_id: str, env: Optional[dict] = None) -> bool:
+        """Grant one browser the flatpak permissions cloud gaming needs."""
+        if env is None:
+            env = self._clean_env()
+        try:
+            result = await asyncio.to_thread(
+                subprocess.run, browsers.override_command(app_id),
+                capture_output=True, text=True, timeout=30, env=env,
+            )
+            if result.returncode == 0:
+                decky.logger.info("Applied flatpak override for %s", app_id)
+                return True
+            decky.logger.warning("Override failed for %s: %s", app_id, result.stderr)
+        except Exception as exc:
+            decky.logger.warning("Override failed for %s: %s", app_id, exc)
+        return False
+
+    async def apply_overrides(self) -> Dict[str, Any]:
+        """Apply flatpak overrides to every detected browser. Callable from the panel."""
+        clean_env = self._clean_env()
+        found = await asyncio.to_thread(browsers.detect_browsers)
+        applied = 0
+        for browser in found:
+            if await self._apply_override(browser["app_id"], clean_env):
+                applied += 1
+        return {"ok": True, "applied": applied, "total": len(found)}
+
     async def _run_install(self, app_id: str, label: str) -> None:
         """Do the install and record how it went. Never raises."""
         clean_env = self._clean_env()
@@ -839,6 +888,7 @@ class Plugin:
                     "message": f"Could not install {label}.",
                 })
             else:
+                await self._apply_override(app_id, clean_env)
                 self._install["message"] = f"{label} is installed."
                 decky.logger.info("Installed %s", app_id)
         except subprocess.TimeoutExpired:

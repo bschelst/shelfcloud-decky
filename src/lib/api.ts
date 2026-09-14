@@ -46,3 +46,5 @@ export const recordShortcut =
 export const forgetShortcut = callable<[game_id: number], unknown>("forget_shortcut");
 export const syncFinished =
   callable<[added: number, removed: number, updated: number], unknown>("sync_finished");
+export const applyOverrides =
+  callable<[], { ok: boolean; applied?: number; total?: number }>("apply_overrides");
