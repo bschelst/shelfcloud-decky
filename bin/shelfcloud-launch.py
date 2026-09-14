@@ -82,6 +82,12 @@ def _ssl_context():
                           "..", "py_modules", "cacert.pem")
     if os.path.isfile(bundle):
         ctx.load_verify_locations(bundle)
+    else:
+        # Said out loud, because the silent version of this was expensive: the
+        # installer copied py_modules/*.py and left the .pem behind, so the
+        # bundle existed everywhere except where it was needed.
+        log(f"CA bundle missing at {bundle} — falling back to the system trust "
+            "store. If launches stop resolving, reinstall the plugin.")
     return ctx
 
 

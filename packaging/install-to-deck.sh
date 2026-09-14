@@ -17,7 +17,18 @@ echo "Installing Shelfcloud from ${STAGING}"
 sudo mkdir -p "${PLUGIN_DIR}/dist" "${PLUGIN_DIR}/py_modules" "${PLUGIN_DIR}/bin"
 sudo cp "${STAGING}/plugin.json" "${STAGING}/package.json" "${STAGING}/main.py" "${PLUGIN_DIR}/"
 sudo cp "${STAGING}/dist/index.js" "${PLUGIN_DIR}/dist/"
-sudo cp "${STAGING}"/py_modules/*.py "${PLUGIN_DIR}/py_modules/"
+# Everything in py_modules, not just *.py.
+#
+# cacert.pem lives here and is a DATA file, so a *.py glob silently left it
+# behind on every install. Decky's plugin loader is a bundled binary carrying
+# its own trust store, which is missing the root our gateway presents: without
+# that bundle every request fails CERTIFICATE_VERIFY_FAILED while the same
+# request from the Deck's system python succeeds, which is a confusing way to
+# spend an evening.
+sudo cp -r "${STAGING}/py_modules/." "${PLUGIN_DIR}/py_modules/"
+# Bytecode compiled by whichever python staged it, which is not the one the
+# loader runs. Harmless until the day it is not.
+sudo rm -rf "${PLUGIN_DIR}/py_modules/__pycache__"
 sudo cp "${STAGING}"/bin/*.py "${PLUGIN_DIR}/bin/"
 sudo chmod +x "${PLUGIN_DIR}"/bin/*.py
 sudo chown -R root:root "${PLUGIN_DIR}"

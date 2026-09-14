@@ -49,6 +49,18 @@ def _ssl_context() -> ssl.SSLContext:
     bundle = os.path.join(os.path.dirname(__file__), "py_modules", "cacert.pem")
     if os.path.isfile(bundle):
         ctx.load_verify_locations(bundle)
+    else:
+        # Loudly, because the silent version of this cost an evening. The
+        # install script copied py_modules/*.py and left the .pem behind, so
+        # the bundle was in the repo, in the staging directory, and absent from
+        # the plugin — and the only symptom was CERTIFICATE_VERIFY_FAILED on
+        # every request, with the same request from the Deck's own python
+        # working fine.
+        decky.logger.error(
+            "CA bundle missing at %s — TLS will fall back to the loader's own "
+            "trust store, which does not carry the root our gateway presents. "
+            "Reinstall the plugin; the installer must copy all of py_modules, "
+            "not just *.py.", bundle)
     return ctx
 
 SSL_CTX = _ssl_context()
