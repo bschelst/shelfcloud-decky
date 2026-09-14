@@ -5,6 +5,9 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -47,12 +50,13 @@ jobs:
           zip -r "shelfcloud-decky-${TAG}.zip" "${PLUGIN_NAME}"
           cp "shelfcloud-decky-${TAG}.zip" "shelfcloud-decky.zip"
 
+      - name: Fetch tag annotation
+        run: git fetch --tags --force
+
       - name: Write release body
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
-          echo "Release ${TAG}" > release_body.md
-          echo "" >> release_body.md
-          git log -1 --format='%b' >> release_body.md
+          git tag -l --format='%(contents)' "${TAG}" > release_body.md
 
       - name: Create release
         uses: softprops/action-gh-release@v2
