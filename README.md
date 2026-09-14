@@ -33,7 +33,7 @@ Cloud gaming services like Boosteroid, GeForce NOW, and Xbox Cloud don't show up
 ### Prerequisites
 
 - A **Steam Deck** running SteamOS with [Decky Loader](https://decky.xyz) installed
-- A Chromium-based browser (Chrome, Edge, or Brave) — the plugin offers to install one for you if none is present
+- A Chromium-based browser (Chrome, Edge, or Brave) — the plugin offers to install one for you if none is present, and automatically configures the flatpak permissions it needs (gamepad access for controller input in cloud streams)
 - An account on one or more supported cloud gaming services
 
 ### Installation
@@ -69,6 +69,10 @@ Shelfcloud is a **sync agent**, not a game browser. The workflow is split:
 
 The plugin polls the gateway on a configurable interval (default: every 5 minutes) and reconciles your Steam library — adding new tiles, removing ones you un-selected, and updating artwork when better art becomes available.
 
+### Browser Setup
+
+If no supported browser is installed, the plugin offers to install one — Edge or Chrome — directly from the panel via flatpak. After installation it automatically applies the sandbox permissions cloud gaming needs, such as access to `/run/udev` so gamepads are visible to the stream. You can re-apply these permissions any time from **Settings > Fix gamepad permissions**.
+
 ### Launching a Game
 
 When you launch a tile, a small launcher script:
@@ -102,6 +106,9 @@ More providers may be added over time. Shelfcloud does not buy subscriptions or 
 - **&#128218; Bulk import** — "Add all my games" finds every Steam game you own that's also on a cloud service
 - **&#128268; Multi-provider** — one library, multiple cloud services, one Deck
 - **&#128247; Per-provider chips** — see at a glance how your library breaks down
+- **&#128268; Browser installer** — no browser? The plugin installs Edge or Chrome for you straight from the panel
+- **&#127918; Gamepad permissions** — flatpak overrides for controller access are applied automatically; a manual "Fix gamepad permissions" button is available in Settings if needed
+- **&#128218; Built-in help** — a full help & documentation modal accessible from the panel, covering setup, playing, syncing, troubleshooting, and privacy
 
 <br>
 
@@ -129,6 +136,12 @@ Games still launch from their last known link. Syncing pauses until the gateway 
 <summary><strong>Does Shelfcloud see my provider passwords?</strong></summary>
 
 No. Provider sign-ins happen in the browser's own profile. Shelfcloud never touches, transmits, or stores those credentials. See <a href="SECURITY.md">SECURITY.md</a> for more detail.
+</details>
+
+<details>
+<summary><strong>My controller doesn't work in the cloud stream</strong></summary>
+
+Flatpak browsers are sandboxed and don't have access to input devices by default. Shelfcloud applies the needed permissions automatically when it installs a browser, and on every plugin startup. If your gamepad still isn't detected, go to **Settings > Fix gamepad permissions** and try again. This runs `flatpak --user override --filesystem=/run/udev:ro` on your selected browser.
 </details>
 
 <details>
