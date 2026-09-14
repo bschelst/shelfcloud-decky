@@ -39,13 +39,20 @@ sys.path.insert(0, os.path.join(ROOT, "py_modules"))
 
 import main  # noqa: E402
 
-GATEWAY = "http://192.168.1.50:8000"
+# Read from the implementation, not written down again here. The plugin talks
+# to one fixed address — _gateway() returns DEFAULT_GATEWAY and the old
+# gateway_url setting is no longer read by anything — so a literal here would
+# be a second copy of a constant that already has two (see
+# test_gateway_default.py), and a stale one would make every assertion below
+# vacuous: with no match, no token is attached, and "no token" is exactly what
+# half of these tests expect to see.
+GATEWAY = main.DEFAULT_GATEWAY
 TOKEN = "plugin-token-eeeeeeeeeeeeeeeeeeee"
 
 
-def plugin(gateway=GATEWAY, token=TOKEN):
+def plugin(token=TOKEN):
     instance = main.Plugin()
-    instance._settings = {"gateway_url": gateway, "api_token": token}
+    instance._settings = {"api_token": token}
     return instance
 
 
@@ -70,8 +77,15 @@ def fetch(instance, url, response=None):
     """Call fetch_artwork, returning (result, the Request that went out)."""
     sent = {}
 
-    def fake_urlopen(request, timeout=None):
+    def fake_urlopen(request, timeout=None, **kwargs):
+        # **kwargs, not a fixed signature: fetch_artwork passes context= (the
+        # pinned SSL context), and a stub that refuses it raises INSIDE the
+        # try block, where the error is caught and returned as {"ok": False}.
+        # That is indistinguishable from "the fetch was refused" — the very
+        # thing these tests assert about gating — so each of them went on
+        # passing for the wrong reason from the day TLS was pinned.
         sent["request"] = request
+        sent["kwargs"] = kwargs
         return response or FakeResponse()
 
     with mock.patch.object(main.urllib.request, "urlopen", fake_urlopen):
@@ -109,12 +123,16 @@ def test_the_proxy_url_the_plugin_builds_is_one_it_will_authenticate():
             f"the {slot} proxy URL {url} did not match the gateway base")
 
 
-def test_a_gateway_url_with_a_trailing_slash_setting_still_matches():
-    """Users type the gateway address by hand; a trailing slash is expected."""
-    instance = plugin(gateway=GATEWAY + "/")
-    for url in instance._artwork_proxy({"id": 7}).values():
-        _, request = fetch(instance, url)
-        assert header_of(request, "Authorization") == f"Bearer {TOKEN}"
+def test_the_gateway_base_has_no_trailing_slash():
+    """A trailing slash would make the proxy URL "…org//api/artwork/…".
+
+    This replaces a test that set a hand-typed gateway address with a trailing
+    slash. There is no longer an address to type: _gateway() returns a fixed
+    constant, so the only way a slash gets in is by being edited into that
+    constant, and the comparison base and the built URL would then disagree
+    about a character neither of them prints.
+    """
+    assert not GATEWAY.endswith("/")
 
 
 # ----------------------------------------------- and nowhere else

@@ -113,9 +113,16 @@ def test_the_remote_is_ensured_before_installing():
             await p._install_task
         return calls
     calls = run(scenario())
-    assert len(calls) == 2
-    assert "remote-add" in calls[0]
-    assert "install" in calls[1]
+
+    # Assert the ORDER, which is the thing this test is named for, rather than
+    # the total number of commands. Pinning the count to 2 meant that adding a
+    # third, unrelated step — the --filesystem=/run/udev override that lets the
+    # browser see a controller — failed a test about remote-add ordering, which
+    # says nothing about whether the ordering broke.
+    flat = [" ".join(argv) for argv in calls]
+    remote_add = next(i for i, c in enumerate(flat) if "remote-add" in c)
+    install = next(i for i, c in enumerate(flat) if " install " in f" {c} ")
+    assert remote_add < install, f"installed before the remote existed: {flat}"
 
 
 # ---------------------------------------------------------------- failures
