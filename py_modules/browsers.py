@@ -1,3 +1,4 @@
+# Shelfcloud project - https://shelfcloud.schelstraete.org - bart@schelstraete.org
 """Browser detection and launch-command construction.
 
 Shelfcloud is not tied to one browser, but it is limited to Chromium-based ones:
@@ -58,6 +59,89 @@ def detect_browsers() -> List[Dict]:
                 found.append(dict(browser))
                 break
     return found
+
+
+# --------------------------------------------------------------- installation
+
+# The browsers offered for one-press installation, best first.
+#
+# Only these two. Every entry is something the plugin will download onto
+# someone's machine, so the list is short, well known, and the same pair the
+# Discover store puts in front of them. The rest of KNOWN_BROWSERS is still
+# detected and usable — it is simply not installed on the user's behalf.
+#
+# SteamOS ships no browser but does ship the Flathub remote, so both are
+# reachable on a stock Deck with nothing to configure. Edge leads for the same
+# reason it leads KNOWN_BROWSERS: Xbox Cloud has historically been fussiest.
+INSTALLABLE = [
+    {
+        "app_id": "com.microsoft.Edge",
+        "label": "Microsoft Edge",
+        "note": "Most reliable with Xbox Cloud.",
+        "recommended": True,
+    },
+    {
+        "app_id": "com.google.Chrome",
+        "label": "Google Chrome",
+        "note": "Works with all three services.",
+        "recommended": False,
+    },
+]
+
+FLATHUB_REPO = "https://dl.flathub.org/repo/flathub.flatpakrepo"
+
+# Long enough for a slow connection to pull the browser and, on a Deck with no
+# other flatpaks, the ~300 MB runtime it needs as well. Short enough that a
+# wedged download eventually reports failure rather than appearing to run for
+# ever behind a spinner.
+INSTALL_TIMEOUT = 15 * 60
+
+
+def installable_browsers() -> List[Dict]:
+    """The install offers, minus anything already present."""
+    have = {b["app_id"] for b in detect_browsers()}
+    return [dict(b) for b in INSTALLABLE if b["app_id"] not in have]
+
+
+def is_installable(app_id: str) -> bool:
+    """Whether this is one of the two the plugin will install.
+
+    The gate on a value that arrives from the frontend and ends up in an argv.
+    Checked against a literal list rather than validated by pattern: there are
+    exactly two right answers, so anything else is wrong by definition.
+    """
+    return any(b["app_id"] == app_id for b in INSTALLABLE)
+
+
+def install_command(app_id: str) -> List[str]:
+    """The exact argv used to install one browser.
+
+    A --user install, because plugin backends run as `deck` — verified on
+    hardware: Decky Loader itself runs as root but drops to the user for
+    plugins. It writes to ~/.local/share/flatpak, which detect_browsers already
+    scans and `flatpak run` already searches, so the install is visible to the
+    rest of the plugin the moment it finishes. No root, and no polkit prompt
+    that Game Mode has no way to show.
+
+    argv, never a shell string.
+    """
+    return [
+        FLATPAK_BIN, "install", "--user", "--assumeyes", "--noninteractive",
+        "flathub", app_id,
+    ]
+
+
+def ensure_flathub_command() -> List[str]:
+    """Add the Flathub remote for this user if it is somehow absent.
+
+    A no-op on stock SteamOS, which ships it. Kept because the install fails
+    with an unhelpful error when the remote is missing, and --if-not-exists
+    makes running it unconditionally harmless.
+    """
+    return [
+        FLATPAK_BIN, "remote-add", "--user", "--if-not-exists",
+        "flathub", FLATHUB_REPO,
+    ]
 
 
 def profile_dir(app_id: str) -> str:

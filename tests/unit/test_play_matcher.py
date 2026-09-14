@@ -1,0 +1,304 @@
+# Shelfcloud project - https://shelfcloud.schelstraete.org - bart@schelstraete.org
+"""The Play-button matcher, against real labels from the live providers.
+
+Why this exists: a Belgian Deck opened Brawlhalla on Xbox Cloud and the stream
+never started. The button read
+
+    NU SPELEN
+    Inbegrepen in je abonnement
+
+and all three mechanisms missed it — "spelen" was already in the word list, but
+the matcher compared the button's ENTIRE text to one word and capped it at 14
+characters, so a two-line label failed twice over. Xbox's structural selector
+(a[href*='/play/launch/']) did not match either: on that page the control is a
+<button>, not an anchor.
+
+The rule now is "a word from the list appears in the button's first line",
+which is what these tests pin down — together with the labels that must NOT be
+clicked, since clicking the wrong control navigates away from the game.
+
+Run: python3 -m pytest tests/unit
+"""
+
+import os
+import re
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+import importlib.util
+
+SRC = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "bin", "shelfcloud-launch.py",
+)
+_spec = importlib.util.spec_from_file_location("launcher", SRC)
+launcher = importlib.util.module_from_spec(_spec)
+sys.argv = ["x"]
+_spec.loader.exec_module(launcher)
+
+WORDS = launcher.PLAY_WORDS
+DENY = launcher.DENY_WORDS
+PHRASES = launcher.DENY_PHRASES
+CJK = re.compile(r"[　-鿿가-힯]")
+
+
+def flatten(line):
+    """Hyphens folded to spaces, so one phrase covers both spellings."""
+    return re.sub(r"\s+", " ", re.sub(r"[-_]+", " ", line)).strip()
+
+
+def words_of(line):
+    """Split between words, never inside one — mirrors wordsOf in the JS.
+
+    Splitting on every non-alphanumeric turned "Free-to-Play" into
+    ["free","to","play"], which is how the launcher came to click GeForce
+    NOW's filter chip and land on the games browser.
+    """
+    out = []
+    for raw in re.split(r"[\s,;:|/·•—–]+", line):
+        token = re.sub(r"^[^\w]+|[^\w]+$", "", raw, flags=re.UNICODE)
+        if token:
+            out.append(token)
+    return out
+
+
+def word_in(line, limit):
+    """Mirrors hits() in the JS: deny and match both read the same slice."""
+    if any(p in flatten(line) for p in PHRASES):
+        return False
+    tokens = words_of(line)[:limit]
+    if any(t in DENY for t in tokens):
+        return False
+    return any(line[:12].find(w) >= 0 if CJK.search(w) else w in tokens for w in WORDS)
+
+
+def hits(text, limit=4) -> bool:
+    """Python mirror of one round of the matcher in CLICK_PLAY_JS."""
+    line = (text or "").split("\n")[0].strip().lower()
+    return bool(line) and word_in(line, limit)
+
+
+def round_of(text, tag="button"):
+    """Which round of the real matcher would take this label, if any.
+
+    Round 1 is the tight rule — a short label that is itself an instruction.
+    Round 2 is the fallback for a label carrying a sub-label after it. The
+    rounds run across the whole page in order, so a round-1 control anywhere
+    beats a round-2 one.
+    """
+    line = (text or "").split("\n")[0].strip().lower()
+    if not line:
+        return None
+    button = tag == "button"
+    if len(line) <= 18 and word_in(line, 2 if button else 1):
+        return 1
+    if word_in(line, 4 if button else 1):
+        return 2
+    return None
+
+
+# ------------------------------------------------------- the reported failure
+
+def test_the_xbox_button_that_did_not_get_clicked():
+    assert hits("NU SPELEN\nInbegrepen in je abonnement")
+
+
+def test_the_old_rule_would_have_missed_it():
+    """The counter-test: without it, the fix above proves nothing."""
+    text = "NU SPELEN\nInbegrepen in je abonnement".strip().lower()
+    assert len(text) > 14                 # rejected by the old length cap
+    assert text not in WORDS              # and by the old exact match
+
+
+# ------------------------------------------------------- labels that must fire
+
+def test_localised_play_labels():
+    for label in ("PLAY", "Play now", "NU SPELEN", "Nu spelen", "JETZT SPIELEN",
+                  "Jouer maintenant", "JUGAR AHORA", "GIOCA ORA", "JOGAR AGORA",
+                  "SPELA NU", "Spill nå", "SPIL NU", "PELAA", "ZAGRAJ TERAZ",
+                  "Hrát", "JOACĂ ACUM", "OYNA", "ИГРАТЬ", "Грати"):
+        assert hits(label), label
+
+
+def test_two_line_labels_in_several_languages():
+    for label in ("PLAY\nIncluded with Game Pass",
+                  "NU SPELEN\nInbegrepen in je abonnement",
+                  "JETZT SPIELEN\nIn deinem Abo enthalten",
+                  "JOUER MAINTENANT\nInclus dans votre abonnement"):
+        assert hits(label), label
+
+
+def test_cjk_labels_match_as_substrings():
+    """No word breaks in these scripts, so tokenising cannot work."""
+    for label in ("プレイ", "遊ぶ", "开始游戏", "玩", "플레이", "게임하기"):
+        assert hits(label), label
+
+
+# --------------------------------------------------- labels that must NOT fire
+
+def test_navigation_links_are_not_clicked():
+    """Every one of these was on the live Xbox page beside the Play button."""
+    for label in ("Overslaan naar hoofdinhoud", "Meer informatie over Cloud Gaming",
+                  "PEGI 7", "XBOX-games", "XBOX Game Pass", "Microsoft-account",
+                  "Bestellingen volgen", "Communautaire voorschriften",
+                  "Xbox Live code of conduct", "Terms of transaction",
+                  "Uw Californië privacykeuzes", "Feedback"):
+        assert not hits(label), label
+
+
+def test_words_embedded_in_longer_words_do_not_match():
+    """'play' inside 'player' or 'playlist' is not a play button."""
+    for label in ("Playlist", "Player profile", "Replay", "Display settings"):
+        assert not hits(label), label
+
+
+def test_the_boosteroid_subscribe_button_is_not_a_play_button():
+    """Read straight out of the launcher log on the Deck:
+
+        19:23:09 [shelfcloud] clicked:subscribe and play
+
+    A play word in a button that takes money. It opened the account page.
+    Exactly 18 characters, so the length cap did not stop it either.
+    """
+    assert len("subscribe and play") == 18
+    assert not hits("Subscribe and Play")
+    assert round_of("Subscribe and Play") is None
+
+
+def test_other_commerce_labels_containing_a_play_word():
+    for label in ("Subscribe and play", "Buy and play", "Upgrade to play",
+                  "Purchase to play", "Abonneren en spelen", "Premium play",
+                  "Register to play"):
+        assert round_of(label) is None, label
+
+
+def test_the_deny_list_does_not_reject_the_xbox_button():
+    """The trap this nearly fell into: Xbox's sub-label says "Inbegrepen in je
+    abonnement", and "abonnement" is a deny word. It describes the game as
+    included — it is not an offer to subscribe. Deny must judge only the
+    leading words it reads, not the whole label.
+    """
+    assert "abonnement" in DENY
+    assert hits("NU SPELEN\nInbegrepen in je abonnement")
+    assert hits("NU SPELEN Inbegrepen in je abonnement")
+    assert hits("PLAY\nIncluded with your subscription")
+
+
+def test_the_geforce_now_filter_chip_is_not_a_play_button():
+    """Photographed on the Deck: the launcher clicked this and landed on the
+    games browser showing "341 / 6001 games" with the filter applied.
+
+    Splitting on every non-alphanumeric made "Free-to-Play" three words, the
+    last of which is "play". A hyphenated compound is one word.
+    """
+    assert words_of("free-to-play") == ["free-to-play"]
+    assert not hits("Free-to-Play")
+    assert round_of("Free-to-Play") is None
+
+
+def test_the_chip_is_refused_however_it_is_spelled():
+    """The tokeniser fix only covered the hyphenated form. The second failure
+    came through the aria-label, where GeForce NOW spells it with spaces:
+
+        19:47:03 [shelfcloud] clicked:button[aria-label*='Play' i]
+
+    Every word in "free to play" is innocent, so only the phrase catches it.
+    """
+    for label in ("Free to Play", "Free-to-Play", "FREE TO PLAY",
+                  "free_to_play", "Free  to  Play"):
+        assert not hits(label), label
+        assert round_of(label) is None, label
+
+
+def test_other_category_phrases_are_refused():
+    for label in ("How to play", "Ways to play", "Cross play", "Local play",
+                  "Play Store", "Google Play", "Play Pass", "Pay to play"):
+        assert round_of(label) is None, label
+
+
+def test_phrases_do_not_swallow_real_play_labels():
+    """The denial is phrase-level, so a bare instruction is untouched."""
+    for label in ("Play", "Play now", "NU SPELEN", "Jouer maintenant"):
+        assert round_of(label) is not None, label
+
+
+def test_other_hyphenated_labels_that_end_in_a_play_word():
+    for label in ("Free-to-play", "Play-to-earn", "Cross-play", "Couch-play",
+                  "Free-To-Play", "cloud-play"):
+        assert not hits(label), label
+
+
+def test_hyphenation_does_not_break_real_labels():
+    """The split must still separate genuine words."""
+    assert hits("Play now")
+    assert hits("NU SPELEN")
+    assert words_of("nu spelen") == ["nu", "spelen"]
+    # Punctuation around a word is trimmed, so these still read as Play.
+    for label in ("Play!", "(Play)", "» Play", "Play…"):
+        assert hits(label), label
+
+
+def test_a_sentence_mentioning_play_later_on_is_not_a_button():
+    assert not hits("Discover thousands of games you can play today with Game Pass")
+
+
+def test_an_inline_sub_label_still_matches():
+    """Some providers render both parts in one text node, so innerText has no
+    newline and the whole thing arrives as one long line."""
+    assert hits("NU SPELEN Inbegrepen in je abonnement")
+    assert hits("PLAY Included with Game Pass Ultimate")
+
+
+def test_anchors_are_held_to_their_first_word():
+    """Verified on the live page: this anchor sits in the Xbox footer."""
+    assert not hits("Google Play Store", limit=1)
+    assert hits("Play", limit=1)
+    assert hits("Spelen", limit=1)
+
+
+def test_empty_and_whitespace_labels():
+    for label in ("", "   ", "\n\n", None):
+        assert not hits(label)
+
+
+def test_only_the_first_line_is_considered():
+    """A play word buried in the sub-label must not make a link clickable."""
+    assert not hits("Meer informatie\nSpelen met Game Pass")
+
+
+# ------------------------------------------------------------- round ordering
+#
+# Widening the rule so Xbox's two-line button matched also let stray
+# long-labelled buttons match on other providers, and the first match wins —
+# which is how fixing Xbox broke GeForce NOW and Boosteroid. The tight rule now
+# sweeps the whole page before the loose one, so a real Play button is
+# preferred over something that merely contains the word, wherever each sits.
+
+def test_a_bare_play_button_is_round_one():
+    for label in ("Play", "PLAY", "NU SPELEN", "Jouer", "Spill nå", "ИГРАТЬ"):
+        assert round_of(label) == 1, label
+
+
+def test_a_label_with_a_sub_label_falls_to_round_two():
+    assert round_of("NU SPELEN Inbegrepen in je abonnement") == 2
+    assert round_of("PLAY Included with Game Pass Ultimate") == 2
+
+
+def test_a_bare_play_button_beats_a_long_one_wherever_it_sits():
+    """The regression, stated directly: a plain Play button must win."""
+    stray = "Play more games with a subscription"
+    real = "Play"
+    assert round_of(stray) == 2
+    assert round_of(real) == 1
+    assert round_of(real) < round_of(stray)
+
+
+def test_a_long_label_without_a_leading_play_word_never_matches():
+    assert round_of("Discover thousands of games you can play today") is None
+    assert round_of("Meer informatie over Cloud Gaming") is None
+
+
+def test_anchors_stay_tight_in_both_rounds():
+    assert round_of("Google Play Store", tag="a") is None
+    assert round_of("Play", tag="a") == 1

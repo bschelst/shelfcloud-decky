@@ -1,3 +1,5 @@
+// Shelfcloud project - https://shelfcloud.schelstraete.org - bart@schelstraete.org
+
 /** Shapes exchanged with the plugin backend (main.py). */
 
 /** Artwork per Steam library slot, already chosen by the backend. */
@@ -16,6 +18,9 @@ export interface DesiredGame {
   exe: string;
   options: string;
   artwork?: Artwork;
+  /** The same slots served back through the gateway, for art whose own host
+   *  sends no CORS header and so cannot be fetched from inside Steam. */
+  artwork_proxy?: Artwork;
 }
 
 /** A shortcut this plugin created, so it can be updated or removed later. */
@@ -41,13 +46,37 @@ export interface Browser {
   label: string;
 }
 
+/** A browser Shelfcloud offers to install, when none is present. */
+export interface InstallableBrowser {
+  app_id: string;
+  label: string;
+  note: string;
+  recommended: boolean;
+}
+
+/** Progress of a browser install. Lives in the backend rather than in the
+ *  panel so closing the panel mid-download does not lose it. */
+export interface InstallState {
+  running: boolean;
+  app_id: string | null;
+  label: string | null;
+  message: string;
+  error: string | null;
+  done: boolean;
+}
+
 export interface Status {
   signed_in: boolean;
+  /** Plugin version, read from package.json by the backend. "unknown" if
+   *  package.json could not be read — About shows that rather than a guess. */
+  version?: string;
   steam_id64?: string | null;
-  gateway_url: string;
   tracked: number;
   browser: Browser | null;
   browsers: Browser[];
+  /** Offered when `browsers` is empty; already-installed ones are filtered out. */
+  installable?: InstallableBrowser[];
+  install?: InstallState;
   sync_minutes: number;
   sync_choices: number[];
   by_provider: Record<string, number>;
@@ -73,6 +102,9 @@ export interface SyncResult {
   removed: number;
   updated: number;
   failed: number;
+  /** Names of the games newly added, so a notification can say which rather
+   *  than just how many. */
+  addedNames: string[];
 }
 
 const PROVIDER_LABELS: Record<string, string> = {
@@ -82,6 +114,8 @@ const PROVIDER_LABELS: Record<string, string> = {
   playstation: "PlayStation",
   shadow: "Shadow",
   airgpu: "AirGPU",
+  // Tiles recorded before providers were tracked. Fixed by the next sync.
+  unknown: "Other",
 };
 
 export function providerLabel(provider: string): string {

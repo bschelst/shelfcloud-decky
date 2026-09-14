@@ -1,3 +1,4 @@
+# Shelfcloud project - https://shelfcloud.schelstraete.org - bart@schelstraete.org
 """Minimal Chrome DevTools Protocol client.
 
 Just enough CDP to find a page and evaluate JavaScript in it — used to press the

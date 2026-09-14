@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Shelfcloud project - https://shelfcloud.schelstraete.org - bart@schelstraete.org
 """Launch one cloud game and press the provider's Play button.
 
 This is what a Shelfcloud Steam shortcut actually runs. It exists because the
@@ -9,15 +10,22 @@ Steam launches this, not the plugin, so the automation has to live here rather
 than in the plugin backend.
 
 Usage:
-    shelfcloud-launch.py <browser_app_id> <profile_dir> <url> [--no-autoplay]
+    shelfcloud-launch.py <browser_app_id> <profile_dir> <url>
+                         [--game-id N] [--provider KEY] [--no-autoplay] [--no-kiosk]
+
+The <url> is a fallback. With --game-id the gateway is asked where the game
+launches right now, so a changed URL or provider preference takes effect
+without re-syncing, and the launch can be counted.
 
 Exits when the browser exits, so Steam shows the game as running for the whole
 session and the tile's playtime is accurate.
 """
 
+import json
 import os
 import subprocess
 import sys
+import urllib.request
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "py_modules"))
@@ -28,30 +36,409 @@ CDP_PORT = 9223
 PAGE_TIMEOUT = 45.0
 CLICK_TIMEOUT = 60.0
 
-# The provider's Play control. Matched on visible text because the markup is
-# minified and class names change without warning; text is what the user sees
-# and is far more stable.
+# The provider's Play control.
+#
+# Text is the primary signal because the markup is minified and class names
+# change without warning. It is not sufficient on its own: xbox.com serves a
+# localised page (a Belgian browser gets "SPELEN", not "PLAY"), so the word list
+# has to cover the languages a Deck is likely set to, and each provider adds a
+# structural selector as a fallback that does not depend on language at all.
 CLICK_PLAY_JS = """
 (() => {
-  const wanted = ['play', 'spelen', 'jouer', 'spielen', 'jugar'];
-  const candidates = [...document.querySelectorAll('button, a, [role=button]')];
-  for (const el of candidates) {
-    const text = (el.innerText || '').trim().toLowerCase();
-    if (!text || text.length > 12) continue;
-    if (!wanted.includes(text)) continue;
+  const words = %(words)s;
+  const selectors = %(selectors)s;
+
+  const visible = (el) => {
     const box = el.getBoundingClientRect();
-    if (box.width === 0 || box.height === 0) continue;  // hidden
-    el.click();
-    return 'clicked:' + text;
+    return box.width > 0 && box.height > 0;
+  };
+
+  // A play control's label is its FIRST LINE. Providers hang a second line off
+  // the same button — Xbox renders
+  //     "NU SPELEN\\nInbegrepen in je abonnement"
+  // (play now / included in your subscription) — so matching the whole text
+  // fails, and a length cap on the whole text fails again. Both did.
+  const firstLine = (el) =>
+    (el.innerText || '').split('\\n')[0].trim().toLowerCase();
+
+  // Match a WORD inside that line, not the whole line. "nu spelen",
+  // "play now", "jetzt spielen" and "jouer maintenant" all carry a word from
+  // the list; none of them equals one.
+  //
+  // `limit` is how many leading words to consider. A play control puts the
+  // verb first, so looking only at the opening words is what separates
+  // "NU SPELEN Inbegrepen in je abonnement" from a sentence that merely
+  // mentions playing. It also covers providers that render the sub-label
+  // inline, where innerText collapses to a single long line and a length cap
+  // would throw the button away.
+  const CJK = /[\\u3000-\\u9fff\\uac00-\\ud7af]/;
+
+  // Split on separators BETWEEN words, never inside them. Splitting on every
+  // non-alphanumeric character turned GeForce NOW's "Free-to-Play" filter chip
+  // into ["free","to","play"], so the launcher clicked the filter and landed
+  // on the games browser instead of the game. A hyphenated compound is one
+  // word; only whitespace and list punctuation separate words.
+  const wordsOf = (line) => line
+    .split(/[\\s,;:|/·•—–]+/u)
+    .map((t) => t.replace(/^[^\\p{L}\\p{N}]+|[^\\p{L}\\p{N}]+$/gu, ''))
+    .filter(Boolean);
+
+  // Labels that mean "spend money" or "manage your account", whatever else
+  // they say. Boosteroid offers "Subscribe and Play", which contains a play
+  // word and is not a play button: clicking it opened the account page.
+  // A control carrying one of these is skipped outright — no play word can
+  // redeem it.
+  const deny = %(deny)s;
+
+  // Phrases that are a category, not an instruction. "Free to Play" is a genre
+  // filter; its words are individually innocent, so only the phrase catches
+  // it. Hyphens are folded to spaces first, so "Free-to-Play" and
+  // "Free to Play" are the same thing — GeForce NOW writes it both ways, in
+  // the visible label and in the aria-label.
+  const denyPhrases = %(deny_phrases)s;
+  const flatten = (line) => line.replace(/[-_]+/g, ' ').replace(/\\s+/g, ' ').trim();
+
+  const hits = (line, limit) => {
+    if (!line) return false;
+    if (denyPhrases.some((p) => flatten(line).includes(p))) return false;
+    // Judge only the words being read, not the whole label. Xbox's button
+    // says "NU SPELEN Inbegrepen in je abonnement" — "abonnement" is the
+    // sub-label explaining the game is included, not an offer to subscribe,
+    // and denying on it would break the very button this all started with.
+    // Boosteroid's "Subscribe and Play" is refused because "subscribe" is one
+    // of the leading words, which is where intent actually lives.
+    const tokens = wordsOf(line).slice(0, limit);
+    if (tokens.some((t) => deny.includes(t))) return false;
+    return words.some((w) => CJK.test(w)
+      ? line.slice(0, 12).includes(w)
+      : tokens.includes(w));
+  };
+
+  // A provider's own selector is a hint, not a warrant.
+  //
+  // GeForce NOW's is button[aria-label*='Play' i], and its "Free to Play"
+  // filter chip carries that in its aria-label too. querySelector returns the
+  // FIRST match in the document, which was the chip — so the launcher opened
+  // the games browser, and because the selector round ran before any text
+  // rule, neither the deny list nor the tokeniser ever got a look.
+  //
+  // Every match is now read the same way a text match is: take its accessible
+  // name, hold it to the same words, and skip it if it fails. The selector
+  // narrows where to look; the label still has to say "play".
+  for (const selector of selectors) {
+    for (const el of document.querySelectorAll(selector)) {
+      if (!visible(el)) continue;
+      const label = ((el.getAttribute('aria-label') || '') || firstLine(el))
+        .split('\\n')[0].trim().toLowerCase();
+      if (!hits(label, 4)) continue;
+      el.click();
+      return 'clicked:' + selector + ' [' + label.slice(0, 30) + ']';
+    }
+  }
+
+  // Precision before reach, in two rounds.
+  //
+  // Round one takes only a control whose label IS a play instruction: the
+  // first line is short and one of its words is a play word. "Play",
+  // "NU SPELEN", "Jouer maintenant" all qualify.
+  //
+  // Round two is the fallback for a provider that hangs a sub-label off the
+  // same control, giving one long line like
+  //     "NU SPELEN Inbegrepen in je abonnement"
+  //
+  // The rounds exist because reach alone caused a regression: widening the
+  // rule so Xbox's two-line button matched also let a stray long-labelled
+  // button on other providers match FIRST, and the first match wins. Running
+  // the tight rule across the whole page before the loose one means a real
+  // "Play" button is always preferred over something that merely contains the
+  // word, wherever each sits in the document.
+  //
+  // Within a round, buttons before anchors. The play control is a <button> on
+  // every provider checked, while a game page is full of anchors — footer
+  // navigation, legal links, a store link. Anchors are also held to their
+  // first word: verified on the live Xbox page, "Google Play Store" is an
+  // anchor whose SECOND word is "play".
+  const ROUNDS = [
+    // [maxLineLength, buttonWords, anchorWords]
+    //
+    // Two words, not three, in the tight round. A play instruction puts the
+    // verb first or second — "Play", "Play now", "NU SPELEN", "JETZT
+    // SPIELEN". At three, Boosteroid's "Subscribe and Play" qualified, and it
+    // is exactly 18 characters so the length cap did not save it either.
+    [18, 2, 1],      // a label that is itself an instruction
+    [Infinity, 4, 1] // ... or one carrying a sub-label after it
+  ];
+
+  for (const [maxLen, buttonWords, anchorWords] of ROUNDS) {
+    for (const [group, limit] of [['button, [role=button]', buttonWords], ['a', anchorWords]]) {
+      for (const el of document.querySelectorAll(group)) {
+        if (!visible(el)) continue;
+        const line = firstLine(el);
+        if (line.length > maxLen) continue;
+        if (!hits(line, limit)) continue;
+        el.click();
+        return 'clicked:' + line.slice(0, 40);
+      }
+    }
   }
   return 'not-found';
 })()
 """
 
+# Words meaning "play" in the languages SteamOS is commonly set to. Verified
+# needed: xbox.com localises by IP, so an English-only list silently fails —
+# a Belgian browser is served "NU SPELEN", not "PLAY".
+#
+# Single words only. The matcher looks for one of these as a word inside the
+# button's first line, so multi-word labels are covered without listing every
+# phrasing: "nu spelen", "jetzt spielen" and "jouer maintenant" are each caught
+# by their verb alone.
+#
+# Shared by every provider — Boosteroid, GeForce NOW and Xbox all use this one
+# list, so a language added here works everywhere.
+PLAY_WORDS = [
+    # English, Dutch, French, German, Spanish, Italian, Portuguese
+    "play", "spelen", "speel", "jouer", "spielen", "jugar", "juega",
+    "gioca", "giocare", "jogar", "jogue",
+    # Nordic. Both the infinitive and the imperative: Xbox labels the button
+    # "Spill nå" in Norwegian, not "Spille".
+    "spela", "spille", "spill", "spil", "pelaa",
+    # Central and Eastern Europe
+    "graj", "zagraj", "hrát", "hrat", "hrať", "joacă", "joaca", "játék",
+    "играть", "играй", "грати", "igraj",
+    # Turkish, Greek
+    "oyna", "παίξε", "παιξε",
+    # CJK — matched as substrings, since these scripts have no word breaks
+    "遊ぶ", "プレイ", "开始游戏", "立即游戏", "玩", "플레이", "게임하기",
+]
+
+# Words that disqualify a control no matter what else it says.
+#
+# Boosteroid offers "Subscribe and Play" — a play word in a button that takes
+# money, and clicking it opened the account page instead of the game. A play
+# word is not enough on its own; the label has to be an instruction to play,
+# not to buy or to sign in.
+#
+# Any of these appearing anywhere in the label rejects it outright, so a
+# provider adding "Upgrade and play" or "Buy to play" is refused too. The cost
+# of being wrong here is asymmetric: failing to click means the user presses
+# Play themselves, while clicking the wrong thing can start a purchase.
+DENY_WORDS = [
+    # subscribing
+    "subscribe", "subscription", "subscriptions", "abonneren", "abonnement",
+    "abonnieren", "abonner", "abonnement", "suscribirse", "suscripción",
+    "abbonati", "abbonamento", "assinar", "assinatura", "prenumerera",
+    "tilaa", "subskrybuj", "подписка", "подписаться", "abone", "abonelik",
+    # buying
+    "buy", "purchase", "kopen", "koop", "acheter", "comprar", "comprare",
+    "kaufen", "köp", "kjøp", "køb", "osta", "kup", "купить", "satın",
+    "checkout", "cart", "winkelwagen",
+    # upgrading and pricing
+    "upgrade", "premium", "trial", "plans", "pricing", "prijzen", "tarifs",
+    "preise", "precios",
+    # accounts
+    "account", "profile", "profiel", "signin", "signup", "register",
+    "registreren", "inloggen", "aanmelden", "connexion", "anmelden",
+]
+
+# Phrases that name a category rather than give an instruction.
+#
+# "Free to Play" is a genre filter on GeForce NOW. Every word in it is
+# innocent, so only the phrase catches it — and it appears both hyphenated on
+# the chip and spaced in the aria-label, which is how it slipped past a
+# tokeniser fix: the provider's own selector matched the chip's aria-label
+# before any text rule ran.
+#
+# Compared against the label with hyphens folded to spaces, so one entry
+# covers both spellings.
+DENY_PHRASES = [
+    "free to play", "play to earn", "pay to play", "cross play",
+    "couch play", "local play", "online play", "co op play",
+    "play store", "google play", "play pass", "play together",
+    "how to play", "ways to play", "learn to play", "ready to play",
+    "gratis spelen", "samen spelen", "hoe te spelen",
+]
+
 IS_STREAMING_JS = "location.href.includes('streaming') || !!document.querySelector('video')"
 
+# What the page offered, for the log when nothing matched. Every provider
+# words and marks up its Play button differently and changes it without
+# notice, so a bare "not found" costs a trip to the device to find out why.
+LIST_CANDIDATES_JS = """
+(() => {
+  const out = [];
+  for (const el of document.querySelectorAll('button, a, [role=button]')) {
+    const box = el.getBoundingClientRect();
+    if (box.width <= 0 || box.height <= 0) continue;
+    const line = (el.innerText || '').split('\\n')[0].trim();
+    if (!line || line.length > 40) continue;
+    out.push(el.tagName.toLowerCase() + ':' + line);
+  }
+  return out;
+})()
+"""
 
-def build_browser_command(app_id: str, profile: str, url: str) -> list:
+# What a provider looks like when the browser profile is not signed in.
+#
+# Both checks were verified against the live sites while signed out. They are
+# structural rather than textual on purpose: the visible wording is localised,
+# but the login URL and the routing are not.
+PROVIDERS = {
+    "boosteroid": {
+        "label": "Boosteroid",
+        "signed_out": "!!document.querySelector('a[href*=\"/login\"], input[type=password]')",
+        "selectors": [],
+        "setup_url": "https://cloud.boosteroid.com/",
+    },
+    "xbox_cloud": {
+        "label": "Xbox Cloud",
+        # Signed out, the page offers /auth/msa?action=logIn and no Play
+        # control. The locale prefix varies (/nl-BE/, /en-US/); the rest does
+        # not.
+        "signed_out": "!!document.querySelector('a[href*=\"/auth/msa\"]')",
+        # Signed in, the Play control links into the launch route.
+        "selectors": ["a[href*='/play/launch/']"],
+        "setup_url": "https://www.xbox.com/play",
+    },
+    "geforce_now": {
+        # The deeplink bounces to #/loginwall when the profile is not signed
+        # in — an unambiguous signal that needs no DOM inspection at all.
+        "label": "GeForce NOW",
+        "signed_out": "location.hash.includes('loginwall')",
+        "selectors": ["button[aria-label*='Play' i]"],
+        "setup_url": "https://play.geforcenow.com/",
+    },
+}
+
+
+def provider_profile(key: str) -> dict:
+    return PROVIDERS.get(key or "", {
+        "label": key or "the provider",
+        "signed_out": "false",
+        "selectors": [],
+        "setup_url": "",
+    })
+
+
+
+# Where the plugin keeps its gateway address and credential. The launcher is
+# started by Steam, not by the plugin, so it has to read them itself.
+SETTINGS_FILE = os.path.expanduser(
+    "~/homebrew/settings/Shelfcloud/settings.json")
+RESOLVE_TIMEOUT = 8
+
+# Steam runs this script and captures none of its output — stdout goes nowhere
+# a person can read. That mattered: when a launch quietly used the stored URL
+# instead of asking the gateway, there was no way to tell from the outside,
+# because a fallback is indistinguishable from success as far as the user is
+# concerned. The game still starts. Only the gateway's silence gives it away.
+LOG_FILE = os.path.expanduser("~/homebrew/logs/shelfcloud-launch.log")
+
+# Kept small on purpose. This lives on a Deck's internal storage and nothing
+# rotates it, so it trims itself rather than growing without end.
+LOG_MAX_BYTES = 256 * 1024
+LOG_KEEP_BYTES = 128 * 1024
+
+
+def log(message: str) -> None:
+    """Write one timestamped line, to the log file and to stdout.
+
+    Never raises: a launcher that dies because it could not log would be a
+    worse bug than the one this exists to diagnose.
+    """
+    line = f"[shelfcloud] {message}"
+    print(line)  # keep: log() is the writer
+    try:
+        os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+        if os.path.exists(LOG_FILE) and os.path.getsize(LOG_FILE) > LOG_MAX_BYTES:
+            with open(LOG_FILE, "rb") as handle:
+                handle.seek(-LOG_KEEP_BYTES, os.SEEK_END)
+                handle.readline()          # drop the half line we landed in
+                tail = handle.read()
+            with open(LOG_FILE, "wb") as handle:
+                handle.write(tail)
+        stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        with open(LOG_FILE, "a", encoding="utf-8") as handle:
+            handle.write(f"{stamp} {line}\n")
+    except Exception:
+        pass
+
+
+def resolve_launch(game_id: str, fallback_url: str) -> tuple:
+    """Ask the gateway where this game launches right now.
+
+    The URL used to be frozen into the Steam shortcut at sync time, so a launch
+    never reached the gateway: a URL that changed upstream stayed broken until
+    the next sync, and a changed provider preference needed a re-sync. Asking at
+    launch fixes both, and lets the gateway count what actually gets played.
+
+    The frozen URL is kept as a fallback and that is not belt-and-braces: the
+    gateway is a machine on the user's LAN, and a game must not become
+    unplayable because it is asleep. A slow gateway must not delay a launch
+    either, hence the short timeout.
+
+    Every path out of here is logged with its reason. A fallback is invisible
+    from the user's side — the game starts either way — so without a line
+    saying which route was taken, "the launch was not recorded" and "the
+    gateway was never asked" look identical from the server.
+    """
+    if not game_id:
+        log("no --game-id on this shortcut; using the stored link "
+            "(re-sync to get gateway resolution)")
+        return fallback_url, "baked-in"
+
+    try:
+        with open(SETTINGS_FILE, encoding="utf-8") as handle:
+            settings = json.load(handle)
+    except Exception as exc:
+        log(f"cannot read {SETTINGS_FILE} ({exc}); using the stored link")
+        return fallback_url, "baked-in"
+
+    gateway = (settings.get("gateway_url") or "").rstrip("/")
+    token = settings.get("api_token")
+    if not gateway or not token:
+        missing = "gateway address" if not gateway else "credential"
+        log(f"no {missing} in settings — not signed in; using the stored link. "
+            "This launch will not be counted.")
+        return fallback_url, "not signed in"
+
+    try:
+        request = urllib.request.Request(
+            f"{gateway}/api/me/launch/{game_id}",
+            data=b"",
+            method="POST",
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+        )
+        started = time.monotonic()
+        with urllib.request.urlopen(request, timeout=RESOLVE_TIMEOUT) as response:
+            payload = json.loads(response.read().decode())
+        elapsed = int((time.monotonic() - started) * 1000)
+    except Exception as exc:
+        # Distinguish "the gateway said no" from "the gateway is not there":
+        # a 401 needs a re-login, a refused connection needs the box woken up.
+        status = getattr(exc, "code", None)
+        detail = f"HTTP {status}" if status else type(exc).__name__
+        log(f"gateway {gateway} did not answer for game {game_id} "
+            f"({detail}: {exc}); using the stored link")
+        return fallback_url, "baked-in"
+
+    url = payload.get("launch_url") if isinstance(payload, dict) else None
+    if not url:
+        log(f"gateway answered for game {game_id} with no launch_url "
+            f"({str(payload)[:120]}); using the stored link")
+        return fallback_url, "baked-in"
+
+    log(f"gateway resolved game {game_id} -> {payload.get('name') or '?'} "
+        f"via {payload.get('provider') or '?'} in {elapsed} ms")
+    return url, f"gateway ({payload.get('provider')})"
+
+def build_browser_command(app_id: str, profile: str, url: str, kiosk: bool = True) -> list:
+    """Chromium command line for one session.
+
+    Kiosk is right for streaming and wrong for signing in: a Microsoft or
+    NVIDIA login can bounce through pages that need a visible tab strip and a
+    way back, and a kiosk window offers neither.
+    """
     return [
         "/usr/bin/flatpak", "run",
         "--branch=stable", "--arch=x86_64",
@@ -69,22 +456,30 @@ def build_browser_command(app_id: str, profile: str, url: str) -> list:
         "--password-store=basic",
         "--disable-background-networking",
         "--autoplay-policy=no-user-gesture-required",
-        "--kiosk",
+        *(["--kiosk"] if kiosk else []),
         url,
     ]
 
 
-def try_autoplay(url: str) -> None:
+def try_autoplay(url: str, provider: str = "") -> None:
     """Press Play once the game page is up. Best effort — never fatal.
 
     If anything here fails the user simply presses Play themselves, which is the
     behaviour they would have had anyway. Nothing is worth killing the session
     over.
     """
+    profile = provider_profile(provider)
+    click_js = CLICK_PLAY_JS % {
+        "words": json.dumps(PLAY_WORDS),
+        "deny": json.dumps(DENY_WORDS),
+        "deny_phrases": json.dumps(DENY_PHRASES),
+        "selectors": json.dumps(profile["selectors"]),
+    }
+
     host_marker = url.split("/")[2] if "//" in url else url
     target = cdp.wait_for_page(CDP_PORT, host_marker, timeout=PAGE_TIMEOUT)
     if not target:
-        print("[shelfcloud] game page never appeared; leaving Play to the user")
+        log("game page never appeared; leaving Play to the user")
         return
 
     ws_url = target.get("webSocketDebuggerUrl")
@@ -95,18 +490,48 @@ def try_autoplay(url: str) -> None:
     while time.monotonic() < deadline:
         try:
             if cdp.evaluate(ws_url, IS_STREAMING_JS):
-                print("[shelfcloud] already streaming")
+                log("already streaming")
                 return
-            result = cdp.evaluate(ws_url, CLICK_PLAY_JS)
+
+            # Stop early when the profile simply is not signed in. Clicking has
+            # nothing to find, and spending the full timeout on it buries the
+            # one message the user actually needs in a minute of silence.
+            if cdp.evaluate(ws_url, profile["signed_out"]):
+                log(f"not signed in to {profile['label']} in this browser.")
+                log("Sign in on this page — the profile is kept, "
+                      "so this is a one-off. Games launch straight in afterwards.")
+                return
+
+            result = cdp.evaluate(ws_url, click_js)
             if isinstance(result, str) and result.startswith("clicked"):
-                print(f"[shelfcloud] {result}")
+                log(f"{result}")
                 return
         except cdp.CDPError as exc:
             # Page may still be loading, or navigating between documents.
-            print(f"[shelfcloud] waiting for Play ({exc})")
+            log(f"waiting for Play ({exc})")
         time.sleep(1.5)
 
-    print("[shelfcloud] Play button not found in time; leaving it to the user")
+    # Nothing is auto-accepted on the user's behalf. Both providers show a
+    # consent dialog on a fresh profile — Microsoft's cookie banner, NVIDIA's
+    # "AGREE & CONTINUE" — and clicking an agreement for someone is not the
+    # launcher's business, so it says so instead.
+    log(f"Play not found on {profile['label']}. If a cookie or "
+          "terms dialog is showing, accept it once and press Play.")
+
+    # Then say what WAS on the page.
+    #
+    # Every provider labels this button differently and changes it without
+    # warning, so "not found" on its own costs a round trip: connect to the
+    # Deck, hope the page is still open, and read the DOM. Listing the
+    # candidates here turns the next failure into a log line that names the
+    # button we should have matched.
+    try:
+        labels = cdp.evaluate(ws_url, LIST_CANDIDATES_JS)
+        if labels:
+            log("clickable controls on the page were: "
+                + " | ".join(str(x) for x in labels[:12]))
+    except Exception:
+        pass
 
 
 def active_gamepads() -> list:
@@ -152,9 +577,25 @@ def wait_for_gamepad(timeout: float = 6.0) -> list:
 
 
 def main() -> int:
-    args = [a for a in sys.argv[1:] if a != "--no-autoplay"]
-    autoplay = "--no-autoplay" not in sys.argv[1:]
+    argv = sys.argv[1:]
+    autoplay = "--no-autoplay" not in argv
+    kiosk = "--no-kiosk" not in argv
 
+    provider = ""
+    if "--provider" in argv:
+        index = argv.index("--provider")
+        if index + 1 < len(argv):
+            provider = argv[index + 1]
+            argv = argv[:index] + argv[index + 2:]
+
+    game_id = ""
+    if "--game-id" in argv:
+        index = argv.index("--game-id")
+        if index + 1 < len(argv):
+            game_id = argv[index + 1]
+            argv = argv[:index] + argv[index + 2:]
+
+    args = [a for a in argv if not a.startswith("--")]
     if len(args) < 3:
         print(__doc__)
         return 2
@@ -162,26 +603,36 @@ def main() -> int:
     app_id, profile, url = args[0], args[1], args[2]
     os.makedirs(profile, exist_ok=True)
 
+    log(f"--- launch: game={game_id or '?'} provider={provider or '?'} "
+        f"browser={app_id}")
+
+    url, source = resolve_launch(game_id, url)
+    log(f"launch URL from {source}")
+
     pads = wait_for_gamepad()
     if len(pads) > 1:
         # Known issue: with several controllers connected the browser can bind
         # to the idle virtual pad and report no gamepad at all. Verified on
         # hardware — 4,473 events on the live pad, zero on the one Chrome
         # opened. Logged so it is diagnosable rather than mysterious.
-        print(f"[shelfcloud] {len(pads)} virtual gamepads: {pads}. "
+        log(f"{len(pads)} virtual gamepads: {pads}. "
               "If the controller does not work in-game, disconnect the extra one.")
     elif not pads:
-        print("[shelfcloud] no virtual gamepad yet; controller may not work")
+        log("no virtual gamepad yet; controller may not work")
 
-    browser = subprocess.Popen(build_browser_command(app_id, profile, url))
+    browser = subprocess.Popen(build_browser_command(app_id, profile, url, kiosk))
 
     if autoplay:
         try:
-            try_autoplay(url)
+            try_autoplay(url, provider)
         except Exception as exc:  # never let automation break the launch
-            print(f"[shelfcloud] autoplay failed, continuing: {exc}")
+            log(f"autoplay failed, continuing: {exc}")
 
-    return browser.wait()
+    started = time.monotonic()
+    code = browser.wait()
+    log(f"--- session ended after {int(time.monotonic() - started)}s "
+        f"(browser exit {code})")
+    return code
 
 
 if __name__ == "__main__":
