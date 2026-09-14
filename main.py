@@ -98,8 +98,44 @@ IDLE_INSTALL = {
 REQUEST_TIMEOUT = 20
 SYNC_EVENT = "shelfcloud/library"
 
+def _hardware_label() -> str:
+    """What kind of machine this is, for naming the device on the gateway.
+
+    The gateway names a new device from its User-Agent, and a browser's UA says
+    enough to guess with. This plugin's does not — every install would register
+    as "Shelfcloud plugin", which is no better than the "Unnamed device" it
+    replaces once someone owns a Deck and a Steam Machine.
+
+    The DMI product name is what distinguishes them. Valve ships two codenames
+    and neither means anything to a person, so they are translated; anything
+    else is reported as-is, which covers a Steam Machine or a desktop running
+    Bazzite without needing to know their names in advance.
+    """
+    known = {"Jupiter": "Steam Deck", "Galileo": "Steam Deck OLED"}
+    try:
+        with open("/sys/class/dmi/id/product_name", encoding="utf-8") as handle:
+            product = handle.read().strip()
+    except Exception:
+        product = ""
+    if product in known:
+        return known[product]
+    # Placeholders real boards ship with, which name nothing.
+    if product and product.lower() not in ("to be filled by o.e.m.", "system product name",
+                                           "default string", "none"):
+        # ';' and ')' would break out of the User-Agent comment this goes into.
+        return product.replace(";", " ").replace(")", " ")[:48]
+    try:
+        return os.uname().nodename[:48] or "Shelfcloud plugin"
+    except Exception:
+        return "Shelfcloud plugin"
+
+
 # Artwork is fetched here rather than in the browser; see fetch_artwork.
-ARTWORK_USER_AGENT = "Shelfcloud/0.1 (+https://github.com/bschelst/shelfcloud)"
+#
+# The hardware goes in the comment field so the gateway can name this device
+# something a person recognises in a list.
+ARTWORK_USER_AGENT = (
+    f"Shelfcloud/0.1 ({_hardware_label()}; +https://github.com/bschelst/shelfcloud)")
 ARTWORK_MAX_BYTES = 8 * 1024 * 1024
 
 # How often to check the gateway for library changes, in minutes.

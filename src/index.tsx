@@ -642,6 +642,19 @@ function Content() {
             </Focusable>
           </PanelSectionRow>
 
+          {/* Which machine the gateway thinks this is.
+              Shown because the website lists devices by name and lets them be
+              renamed, and without seeing the name here there is no way to tell
+              which row in that list is the Deck in your hands. Read-only: this
+              is the one screen with no keyboard worth typing on. */}
+          {shelves?.ok && shelves.device_name && (
+            <PanelSectionRow>
+              <div style={{ fontSize: "0.75em", opacity: 0.7 }}>
+                This device: <span style={{ opacity: 1 }}>{shelves.device_name}</span>
+              </div>
+            </PanelSectionRow>
+          )}
+
           {/* Only offered once a shelf exists. With none there is nothing to
               choose between, and a one-option picker is a control that does
               nothing but invite a press. */}
