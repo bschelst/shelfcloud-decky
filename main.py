@@ -261,12 +261,13 @@ class Plugin:
                 self._auth_ok = True
                 return json.loads(payload) if payload else None
         except urllib.error.HTTPError as exc:
-            # 401 is not a transient error. The token was revoked, expired, or
-            # the user signed out elsewhere — keeping it would leave the panel
-            # claiming to be signed in while every action failed.
             if exc.code == 401 and authenticated:
                 self._forget_credentials()
                 raise PermissionError("signed out — sign in again") from exc
+            raise
+        except urllib.error.URLError as exc:
+            if "CERTIFICATE_VERIFY_FAILED" in str(exc) or "SSL" in str(exc):
+                decky.logger.error("SSL error reaching %s: %s", url, exc)
             raise
 
     # ------------------------------------------------------------------ auth
