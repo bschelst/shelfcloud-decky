@@ -206,7 +206,7 @@ class Plugin:
         os.replace(temporary, path)
 
     def _gateway(self) -> str:
-        return (self._settings.get("gateway_url") or DEFAULT_GATEWAY).rstrip("/")
+        return DEFAULT_GATEWAY
 
     def _token(self) -> Optional[str]:
         return self._settings.get("api_token")
