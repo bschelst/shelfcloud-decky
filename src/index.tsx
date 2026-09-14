@@ -428,16 +428,16 @@ function Content() {
     // it finishes even though opening Steam's browser closes this panel and
     // unmounts everything here. This only watches for the result, and losing
     // the watcher no longer loses the sign-in.
-    finishJob("Finish signing in in the browser…");
+    setJob({ busy: false, message: "Finish signing in in the browser…" });
 
     const deadline = Date.now() + LOGIN_TIMEOUT_MS;
     loginTimer.current = window.setInterval(async () => {
       const poll = await pollLogin(start.session_token!);
       if (poll.ok && poll.status === "signed_in") {
         window.clearInterval(loginTimer.current!);
-        setJob({ message: "Signed in. Syncing…" });
+        finishJob("Signed in!");
         await refresh();
-        void sync(true);
+        void sync();
         return;
       }
       if (Date.now() > deadline) {
