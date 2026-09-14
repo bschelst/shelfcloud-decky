@@ -792,20 +792,35 @@ class Plugin:
         self._install_task = asyncio.create_task(self._run_install(app_id, label))
         return {"ok": True}
 
+    @staticmethod
+    def _clean_env() -> dict:
+        """A subprocess environment free of Decky's bundled libraries.
+
+        Decky's embedded Python ships its own libssl/libcrypto and sets
+        LD_LIBRARY_PATH to find them. That works for Python, but poisons
+        any subprocess that links the system OpenSSL — flatpak in particular
+        needs the system's version and crashes with "OPENSSL_3.5.0 not found"
+        when it picks up Decky's older copy instead.
+        """
+        env = os.environ.copy()
+        env.pop("LD_LIBRARY_PATH", None)
+        env.pop("LD_PRELOAD", None)
+        return env
+
     async def _run_install(self, app_id: str, label: str) -> None:
         """Do the install and record how it went. Never raises."""
+        clean_env = self._clean_env()
         try:
-            # A no-op on stock SteamOS; only matters if the remote is missing,
-            # where the install would otherwise fail with something obscure.
             await asyncio.to_thread(
                 subprocess.run, browsers.ensure_flathub_command(),
-                capture_output=True, timeout=60,
+                capture_output=True, timeout=60, env=clean_env,
             )
 
             self._install["message"] = f"Downloading {label}…"
             result = await asyncio.to_thread(
                 subprocess.run, browsers.install_command(app_id),
                 capture_output=True, text=True, timeout=browsers.INSTALL_TIMEOUT,
+                env=clean_env,
             )
 
             if result.returncode != 0:
