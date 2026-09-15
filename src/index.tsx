@@ -658,9 +658,16 @@ function Content() {
               is the one screen with no keyboard worth typing on. */}
           {shelves?.ok && shelves.device_name && (
             <PanelSectionRow>
-              <div style={{ fontSize: "0.75em", opacity: 0.7 }}>
-                This device: <span style={{ opacity: 1 }}>{shelves.device_name}</span>
-              </div>
+              {/* Decky's own row component, not a hand-rolled div.
+                  Every neighbour here is a Focusable that Steam indents and
+                  spaces for us; a bare div gets neither, so this line sat hard
+                  against the edge and collided with the row above it. Field is
+                  what the About section already uses for exactly this — a
+                  label with a read-only value — so it lines up by construction
+                  rather than by me guessing a margin. */}
+              <Field label="This device" bottomSeparator="none">
+                {shelves.device_name}
+              </Field>
             </PanelSectionRow>
           )}
 
