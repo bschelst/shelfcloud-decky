@@ -375,9 +375,38 @@ DENY_PHRASES = [
     "play store", "google play", "play pass", "play together",
     "how to play", "ways to play", "learn to play", "ready to play",
     "gratis spelen", "samen spelen", "hoe te spelen",
+    # Luna's top navigation, which sits on every game page. As a <div
+    # role=button> it lands in the BUTTON group, where two leading words are
+    # read — so "Remote Play" matched on "play" and would have navigated away
+    # from the game. Luna keeps this label in English even on localised sites,
+    # so one phrase covers every market.
+    "remote play",
+    # Signed out, Luna's PRIMARY button reads "Play free with Prime" and leads
+    # to a subscription signup. The signed-out check and the :not(_log_in)
+    # selector both already stop it; this is the third layer, because the cost
+    # of being wrong here is starting a purchase rather than a game.
+    "free with prime", "gratis met prime",
 ]
 
-IS_STREAMING_JS = "location.href.includes('streaming') || !!document.querySelector('video')"
+# Is the game actually running yet?
+#
+# This used to be "is there a <video> on the page", and that is not the same
+# question. Luna's game detail page carries a TRAILER — paused, muted, 0x0 —
+# so the answer was yes before anything had been clicked, the launcher logged
+# "already streaming" and returned, and Play was never pressed. Verified on the
+# device: one <video> with src m.media-amazon.com/images/I/*.mp4, paused=true,
+# videoWidth=0, sitting right next to an enabled "Play now" button.
+#
+# A stream that is really running is PLAYING and has real dimensions. A trailer
+# that happens to be auto-playing muted is still excluded by the size test on
+# Luna, where it reports 0x0 until someone opens it.
+IS_STREAMING_JS = """
+(() => {
+  if (location.href.includes('streaming')) return true;
+  return [...document.querySelectorAll('video')].some(
+    (v) => !v.paused && !v.ended && v.videoWidth > 1 && v.videoHeight > 1);
+})()
+"""
 
 # What the page offered, for the log when nothing matched. Every provider
 # words and marks up its Play button differently and changes it without
@@ -428,6 +457,18 @@ PROVIDERS = {
     },
     "amazon_luna": {
         "label": "Amazon Luna",
+        # The launch URL is luna.amazon.com, and Luna REDIRECTS it to the
+        # viewer's own country: luna.amazon.de, luna.amazon.co.uk,
+        # luna.amazon.com.be. Matching on the host we asked for therefore finds
+        # the page in some markets and not others.
+        #
+        # It is worth being precise about how this hid: Belgium redirects to
+        # luna.amazon.com.be, which CONTAINS "luna.amazon.com", so the substring
+        # match succeeded here by accident. Germany (luna.amazon.de) and the UK
+        # (luna.amazon.co.uk) do not contain it and would have found nothing,
+        # waited out the 45s timeout and left Play to the user — a bug that
+        # only ever appeared for people abroad.
+        "page_match": "luna.amazon.",
         # Two element ids, both read off the live signed-out page. Ids, not
         # text: Luna localises by IP like Xbox does, and a Belgian browser is
         # served "Inloggen" rather than "Sign in".
@@ -440,12 +481,21 @@ PROVIDERS = {
             "!!document.querySelector('#item_secondary_nav_button_sign_in, "
             "[data-test-id=\"primary_entitled_button_log_in\"]')"
         ),
-        # No provider selector. The signed-in control could not be verified
-        # without a Luna account, and a guessed selector here would be read
-        # BEFORE the text rules — which is exactly how GeForce NOW's filter
-        # chip once got clicked instead of the game. The shared text matcher
-        # handles Luna's "Nu spelen" / "Play now" on its own.
-        "selectors": [],
+        # Read off the live signed-in page rather than guessed. Both states use
+        # the same prefix and differ only in the suffix:
+        #
+        #   primary_entitled_button_purchase_detail   signed in  -> "Play now"
+        #   primary_entitled_button_log_in            signed out -> "Play free with Prime"
+        #
+        # The :not() is the important half. Signed out, that button carries a
+        # play word, is on no deny list, and leads to a Prime signup — so a
+        # selector matching the prefix alone would press "subscribe" for anyone
+        # whose session had expired. Excluding the log-in suffix means this can
+        # only ever match a control that plays something.
+        "selectors": [
+            'button[data-test-id^="primary_entitled_button"]'
+            ':not([data-test-id$="_log_in"])'
+        ],
         "setup_url": "https://luna.amazon.com/",
     },
 }
@@ -633,10 +683,18 @@ def try_autoplay(url: str, provider: str = "") -> None:
         "selectors": json.dumps(profile["selectors"]),
     }
 
+    # How to recognise the game's page once the browser has it open.
+    #
+    # The host we asked for is the right default — Boosteroid, GeForce NOW and
+    # Xbox all stay on it (Xbox localises by PATH, /nl-BE/play/..., so its host
+    # never changes). A provider that redirects across country DOMAINS declares
+    # its own marker instead; see amazon_luna above.
     host_marker = url.split("/")[2] if "//" in url else url
-    target = cdp.wait_for_page(CDP_PORT, host_marker, timeout=PAGE_TIMEOUT)
+    marker = profile.get("page_match") or host_marker
+    target = cdp.wait_for_page(CDP_PORT, marker, timeout=PAGE_TIMEOUT)
     if not target:
-        log("game page never appeared; leaving Play to the user")
+        log(f"game page never appeared (looked for {marker!r}); "
+            "leaving Play to the user")
         return
 
     ws_url = target.get("webSocketDebuggerUrl")
