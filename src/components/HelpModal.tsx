@@ -12,6 +12,7 @@
 import { ConfirmModal, DialogButton, Focusable } from "@decky/ui";
 import { FC, ReactNode, RefObject, useRef } from "react";
 import {
+  FaBookOpen,
   FaCog,
   FaGamepad,
   FaListUl,
@@ -116,6 +117,7 @@ const HelpModal: FC<HelpModalProps> = ({ closeModal, version }) => {
   const aboutRef = useRef<HTMLDivElement>(null);
   const startRef = useRef<HTMLDivElement>(null);
   const gamesRef = useRef<HTMLDivElement>(null);
+  const shelvesRef = useRef<HTMLDivElement>(null);
   const playingRef = useRef<HTMLDivElement>(null);
   const syncRef = useRef<HTMLDivElement>(null);
   const settingsRef = useRef<HTMLDivElement>(null);
@@ -156,6 +158,7 @@ const HelpModal: FC<HelpModalProps> = ({ closeModal, version }) => {
           <TocButton icon={<Logo size={16} />} label="About" onClick={() => jump(aboutRef)} />
           <TocButton icon={<FaPlay size={14} />} label="Getting started" onClick={() => jump(startRef)} />
           <TocButton icon={<FaListUl size={14} />} label="Adding games" onClick={() => jump(gamesRef)} />
+          <TocButton icon={<FaBookOpen size={14} />} label="Shelves" onClick={() => jump(shelvesRef)} />
           <TocButton icon={<FaGamepad size={14} />} label="Playing" onClick={() => jump(playingRef)} />
           <TocButton icon={<FaSyncAlt size={14} />} label="Syncing" onClick={() => jump(syncRef)} />
           <TocButton icon={<FaCog size={14} />} label="Settings" onClick={() => jump(settingsRef)} />
@@ -175,9 +178,10 @@ const HelpModal: FC<HelpModalProps> = ({ closeModal, version }) => {
               <SectionHeader icon={<Logo size={18} />} title="About Shelfcloud" />
               <p style={{ lineHeight: 1.6, marginBottom: 8 }}>
                 Cloud games do not appear in your Steam library on their own.
-                Shelfcloud puts them there: you select games on Shelfcloud, and
-                they show up on this Deck as normal Steam tiles with artwork.
-                Launching one opens the provider and goes straight into that game.
+                Shelfcloud puts them there: you select games on the Shelfcloud
+                website — from any device — and they show up here as normal
+                Steam tiles with artwork. Launching one opens the provider and
+                goes straight into that game.
               </p>
               <p style={{ lineHeight: 1.6 }}>Supported services:</p>
               <ul style={LIST}>
@@ -206,11 +210,12 @@ const HelpModal: FC<HelpModalProps> = ({ closeModal, version }) => {
                 back and press anything.
               </Step>
               <Step n={2}>
-                Under <strong>Settings</strong>, choose the browser to play in.
-                Chrome or Edge, installed from Discover in Desktop Mode.{" "}
-                <span style={{ color: theme.warn }}>Firefox is not offered</span> —
-                cloud providers need the video and gamepad support the Chromium
-                browsers have.
+                Under <strong>Settings</strong>, choose the browser to play in
+                (Chrome or Edge). If none is installed, the plugin offers to
+                install one for you and sets up gamepad permissions automatically.{" "}
+                <span style={{ color: theme.warn }}>Firefox is not supported</span> —
+                cloud providers need the video codecs and gamepad APIs that only
+                Chromium browsers have.
               </Step>
               <Step n={3}>
                 Select some games on Shelfcloud, then press <strong>Sync now</strong>.
@@ -232,6 +237,36 @@ const HelpModal: FC<HelpModalProps> = ({ closeModal, version }) => {
                   you have. The number on the button is how many are waiting.
                 </li>
               </ul>
+            </HelpSection>
+          </Scrolls>
+
+          <Scrolls>
+            <HelpSection sectionRef={shelvesRef}>
+              <SectionHeader icon={<FaBookOpen />} title="Shelves" />
+              <p style={{ lineHeight: 1.6, marginBottom: 8 }}>
+                A <strong>shelf</strong> is a named collection of games you
+                create on the Shelfcloud website. Each device can be pointed at
+                a different shelf, so you can tailor what appears on each machine.
+              </p>
+              <ul style={LIST}>
+                <li>
+                  <strong>Shared library</strong> — the default. Every device
+                  sees these games.
+                </li>
+                <li style={{ marginTop: 6 }}>
+                  <strong>A shelf</strong> — only devices pointed at it see its
+                  games (plus the shared ones).
+                </li>
+              </ul>
+              <p style={{ lineHeight: 1.6, marginTop: 8 }}>
+                Pick which shelf this device uses under{" "}
+                <strong>Settings &gt; Shelf</strong>. Create and manage shelves
+                on the website.
+              </p>
+              <p style={{ lineHeight: 1.6, marginTop: 8, opacity: 0.8 }}>
+                If you only have one device, you do not need shelves — the shared
+                library is all you need.
+              </p>
             </HelpSection>
           </Scrolls>
 
@@ -275,8 +310,19 @@ const HelpModal: FC<HelpModalProps> = ({ closeModal, version }) => {
               <ul style={LIST}>
                 <li><strong>Browser</strong> — which browser games play in.</li>
                 <li style={{ marginTop: 6 }}>
+                  <strong>Shelf</strong> — which shelf this device syncs.
+                  "Shared games" is the default; choose a named shelf to get a
+                  different game set on this device.
+                </li>
+                <li style={{ marginTop: 6 }}>
                   <strong>Sync every</strong> — how often to check for changes. More
                   often is not better; every few minutes is plenty.
+                </li>
+                <li style={{ marginTop: 6 }}>
+                  <strong>Fix gamepad permissions</strong> — re-applies the flatpak
+                  sandbox overrides that let the browser see your controller. Done
+                  automatically on startup and after a browser install, but
+                  available here if something went wrong.
                 </li>
                 <li style={{ marginTop: 6 }}>
                   <strong style={{ color: theme.bad }}>Remove all games</strong> —
@@ -284,7 +330,7 @@ const HelpModal: FC<HelpModalProps> = ({ closeModal, version }) => {
                   on Shelfcloud are kept, so a sync brings them all back.
                 </li>
                 <li style={{ marginTop: 6 }}>
-                  <strong>Sign out</strong> — forgets this Deck's credential.
+                  <strong>Sign out</strong> — forgets this device's credential.
                   Existing tiles stay, but stop updating.
                 </li>
               </ul>
@@ -306,20 +352,24 @@ const HelpModal: FC<HelpModalProps> = ({ closeModal, version }) => {
                   profile is kept, so it should only happen once.
                 </li>
                 <li style={{ marginTop: 8 }}>
-                  <strong>A tile does nothing.</strong> Every launch is logged on
-                  this Deck at{" "}
+                  <strong>A tile does nothing.</strong> Every launch is logged at{" "}
                   <span style={{ opacity: 0.85, wordBreak: "break-all" }}>
                     ~/homebrew/logs/shelfcloud-launch.log
                   </span>
                   , including why it did what it did.
                 </li>
                 <li style={{ marginTop: 8 }}>
+                  <strong>Controller not detected in the stream.</strong>{" "}
+                  Go to <strong>Settings &gt; Fix gamepad permissions</strong>.
+                  This grants the browser access to input devices inside its
+                  flatpak sandbox.
+                </li>
+                <li style={{ marginTop: 8 }}>
                   <strong style={{ color: theme.warn }}>
                     "Could not reach the gateway".
                   </strong>{" "}
-                  The machine running Shelfcloud's server is asleep or off the
-                  network. Games still start from their last known link, so this is
-                  rarely fatal.
+                  The Shelfcloud server is asleep or off the network. Games still
+                  start from their last known link, so this is rarely fatal.
                 </li>
               </ul>
             </HelpSection>
