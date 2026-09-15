@@ -5,7 +5,7 @@
 // This lives on the frontend because only here does SteamClient exist. The
 // backend decides *what* the library should contain; this makes it so.
 
-import { fetchArtwork, saveIcon } from "./api";
+import { fetchArtwork, saveIcon, strayShortcuts } from "./api";
 import { addToProviderCollections, type CollectionMember } from "./collection";
 import { providerLabel, type DesiredGame, type SyncResult, type TrackedShortcut } from "./types";
 
@@ -208,6 +208,68 @@ async function applyArtwork(appId: number, game: DesiredGame): Promise<ArtworkOu
   return { applied, visible };
 }
 
+/** Make the tracked map agree with the shortcuts Steam actually has.
+ *
+ *  Two repairs, both invisible to reconcile on its own:
+ *
+ *  A tile that exists but is not tracked gets ADOPTED — recorded against the
+ *  game it already names — instead of being left for the main loop to
+ *  duplicate. Its artwork fingerprint is left empty so the next pass dresses
+ *  it, since nothing here knows what art it carries.
+ *
+ *  A game with more than one tile keeps one and the rest are removed. The
+ *  keeper is the already-tracked tile where there is one, otherwise the oldest,
+ *  because that is the one likelier to hold playtime and a controller layout.
+ *
+ *  Never fatal. This is a repair, and a plugin that refuses to sync because it
+ *  could not read a Steam file is worse than one with a duplicate tile.
+ */
+async function adoptStrayShortcuts(
+  tracked: Record<string, TrackedShortcut>,
+  callbacks: SyncCallbacks,
+): Promise<void> {
+  let report;
+  try {
+    report = await strayShortcuts();
+  } catch {
+    return;
+  }
+  if (!report?.ok || !Array.isArray(report.shortcuts)) return;
+
+  for (const entry of report.shortcuts) {
+    const key = String(entry.game_id);
+    const extras = (entry.app_ids ?? []).filter((id) => id !== entry.keep);
+
+    for (const appId of extras) {
+      try {
+        await SteamClient.Apps.RemoveShortcut(appId);
+        console.warn(`[shelfcloud] removed a duplicate tile for game ${entry.game_id}`);
+      } catch {
+        /* Steam kept it; the next sync will try again */
+      }
+    }
+
+    const known = tracked[key];
+    if (known && known.app_id === entry.keep) continue;     // already agreed
+
+    // Either untracked, or tracked against a tile that is now gone. Adopt the
+    // survivor so the main loop updates it rather than adding another.
+    const adopted: TrackedShortcut = {
+      app_id: entry.keep,
+      name: known?.name ?? "",
+      launch: known?.launch ?? "",
+      art: "",            // unknown; let the next pass re-apply artwork
+    };
+    tracked[key] = adopted;
+    try {
+      await callbacks.record(entry.game_id, entry.keep, adopted.name,
+                             adopted.launch, "", "");
+    } catch {
+      /* the in-memory map is already right; the file catches up next time */
+    }
+  }
+}
+
 export interface SyncCallbacks {
   record: (
     gameId: number, appId: number, name: string, options: string, art: string,
@@ -273,6 +335,16 @@ export async function syncLibrary(
 ): Promise<SyncResult> {
   const result: SyncResult = { added: 0, removed: 0, updated: 0, failed: 0, addedNames: [] };
   const desiredIds = new Set(desired.map((g) => g.game_id));
+
+  // Before anything is created, make what this plugin believes agree with what
+  // Steam actually has.
+  //
+  // Reconcile below works from `tracked`, so a tile created but never recorded
+  // is invisible to it and the loop cheerfully makes a second one for the same
+  // game. Nothing ever removes either, because neither is tracked. shortcuts.vdf
+  // is the only place that knows, and every tile of ours carries --game-id, so
+  // it can say which game each belongs to.
+  await adoptStrayShortcuts(tracked, callbacks);
 
   // Tiles are sorted into their provider's collection as the sync runs, in
   // batches, rather than all at once when it finishes.

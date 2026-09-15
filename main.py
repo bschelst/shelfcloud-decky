@@ -32,6 +32,7 @@ from typing import Any, Dict, List, Optional
 import decky
 
 import browsers
+import shortcuts
 
 
 def _ssl_context() -> ssl.SSLContext:
@@ -835,6 +836,57 @@ class Plugin:
         }
         await self._save_state()
         return {"ok": True}
+
+    async def stray_shortcuts(self) -> Dict:
+        """Shelfcloud tiles Steam has that this plugin does not account for.
+
+        Reconcile can only remove what it tracks, so a shortcut created but
+        never recorded — a restart between the two, a rolled-back state file —
+        is invisible to it forever, and the next sync makes a SECOND tile for
+        the same game. That is how "Ad Infinitum" ended up on the shelf twice.
+
+        shortcuts.vdf is the only place that knows the truth, and every tile of
+        ours carries `--game-id N` in its launch options, so the file says which
+        game each one belongs to.
+
+        Reports rather than repairs: removing a shortcut is SteamClient's job,
+        and rewriting this file under a running Steam loses whatever it flushes
+        next.
+        """
+        try:
+            found = await asyncio.to_thread(shortcuts.shelfcloud_shortcuts)
+        except Exception as exc:
+            decky.logger.error("could not read shortcuts.vdf: %s", exc)
+            return {"ok": False, "error": str(exc), "shortcuts": []}
+
+        # What this plugin believes, so the caller can prefer the tile that
+        # already carries artwork and playtime over an accidental twin.
+        tracked: Dict[int, int] = {}
+        for game_id, entry in self._synced.items():
+            app_id = as_id((entry or {}).get("app_id"))
+            key = as_id(game_id)
+            if key is not None and app_id is not None:
+                tracked[key] = app_id
+
+        by_game: Dict[int, List[int]] = {}
+        for entry in found:
+            by_game.setdefault(entry["game_id"], []).append(entry["app_id"])
+
+        return {
+            "ok": True,
+            "shortcuts": [
+                {
+                    "game_id": game_id,
+                    "app_ids": app_ids,
+                    # Keep the one already tracked; failing that the oldest,
+                    # which is the one likelier to hold playtime.
+                    "keep": tracked[game_id] if tracked.get(game_id) in app_ids
+                            else app_ids[0],
+                    "tracked": tracked.get(game_id),
+                }
+                for game_id, app_ids in by_game.items()
+            ],
+        }
 
     async def forget_shortcut(self, game_id: int) -> Dict:
         self._synced.pop(str(game_id), None)

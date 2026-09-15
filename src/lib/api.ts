@@ -58,6 +58,24 @@ export const setShelf =
 export const recordShortcut =
   callable<[game_id: number, app_id: number, name: string, options: string, art: string, provider: string], unknown>("record_shortcut");
 export const forgetShortcut = callable<[game_id: number], unknown>("forget_shortcut");
+
+/** Every Shelfcloud tile Steam actually has, read from shortcuts.vdf.
+ *
+ *  The plugin's own record can drift: a shortcut created but never written
+ *  down is invisible to reconcile, and the next sync then makes a SECOND tile
+ *  for the same game. This is the file's answer rather than the plugin's. */
+export const strayShortcuts = callable<[], {
+  ok: boolean;
+  error?: string;
+  shortcuts: Array<{
+    game_id: number;
+    app_ids: number[];
+    /** The one to keep: the tracked tile if there is one, else the oldest. */
+    keep: number;
+    tracked?: number | null;
+  }>;
+}>("stray_shortcuts");
+
 export const syncFinished =
   callable<[added: number, removed: number, updated: number], unknown>("sync_finished");
 export const applyOverrides =
