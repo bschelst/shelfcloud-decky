@@ -48,7 +48,7 @@ import {
 import { syncLibrary } from "./lib/sync";
 import { changeSummary, syncSummary } from "./lib/summary";
 import { LibrarySummary } from "./components/LibrarySummary";
-import { Logo, LogoMono } from "./components/Logo";
+import { Logo, LogoMono, NotificationLogo } from "./components/Logo";
 import { Collapsible, IconLabel } from "./components/Collapsible";
 import HelpModal from "./components/HelpModal";
 import { NoBrowser } from "./components/NoBrowser";
@@ -261,10 +261,12 @@ async function doSync(quiet = false): Promise<void> {
       setJob({ message: line, progress: match && all > 0 ? done / all : getJob().progress });
     });
     finishJob(syncSummary(total, result, skipped));
-    if (!quiet) toaster.toast({ title: "Shelfcloud", body: changeSummary(result) });
+    if (!quiet) toaster.toast({ title: "Shelfcloud", body: changeSummary(result),
+                               logo: <NotificationLogo /> });
   } catch (error) {
     finishJob(String(error));
-    if (!quiet) toaster.toast({ title: "Sync failed", body: String(error) });
+    if (!quiet) toaster.toast({ title: "Sync failed", body: String(error),
+                               logo: <NotificationLogo /> });
   }
 }
 
@@ -692,7 +694,8 @@ function Content() {
                     const next = option.data === SHARED ? null : Number(option.data);
                     void setShelf(next).then((result) => {
                       if (!result.ok) {
-                        toaster.toast({ title: "Shelfcloud", body: result.error || "Could not change shelf" });
+                        toaster.toast({ title: "Shelfcloud", body: result.error || "Could not change shelf",
+                                        logo: <NotificationLogo /> });
                         return;
                       }
                       // The library this device should hold just changed, so
@@ -713,7 +716,8 @@ function Content() {
                       // no reverted selection, nothing to act on. The backend
                       // returns errors rather than raising, so this is the
                       // last resort: the RPC bridge itself failing.
-                      toaster.toast({ title: "Shelfcloud", body: String(error) });
+                      toaster.toast({ title: "Shelfcloud", body: String(error),
+                                      logo: <NotificationLogo /> });
                     });
                   }}
                 />
@@ -731,6 +735,7 @@ function Content() {
                     body: r.ok
                       ? `Gamepad permissions applied to ${r.browser}.`
                       : (r.error || "No browser selected."),
+                    logo: <NotificationLogo />,
                   });
                 });
               }}
@@ -874,14 +879,17 @@ function Content() {
  */
 function newGamesToast(names: string[]) {
   if (names.length === 1) {
-    return { title: "Added to your library", body: names[0] };
+    return { title: "Added to your library", body: names[0],
+             logo: <NotificationLogo /> };
   }
   if (names.length <= 3) {
-    return { title: `${names.length} games added`, body: names.join(", ") };
+    return { title: `${names.length} games added`, body: names.join(", "),
+             logo: <NotificationLogo /> };
   }
   return {
     title: `${names.length} games added`,
     body: `${names.slice(0, 2).join(", ")} and ${names.length - 2} more`,
+    logo: <NotificationLogo />,
   };
 }
 

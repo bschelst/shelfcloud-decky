@@ -92,7 +92,7 @@ export function LogoMono() {
   );
 }
 
-export function Logo({ size = 20 }: { size?: number }) {
+export function Logo({ size = 20 }: { size?: number | string }) {
   const gradientId = `shelfcloud-mark-${nextId++}`;
   return (
     <svg
@@ -135,6 +135,43 @@ export function Logo({ size = 20 }: { size?: number }) {
         <rect x="150" y="167" width="13" height="19" rx="3.5" />
       </g>
     </svg>
+  );
+}
+
+/** The mark as it should appear on a Steam notification.
+ *
+ *  toaster.toast() takes `logo` as a ReactNode, NOT a path or a URL — which is
+ *  the whole reason this works. An <img> pointing into the plugin directory
+ *  would not load: this bundle runs at https://steamloopback.host, so a
+ *  plugin-local file is cross-origin, the same rule that forced artwork
+ *  through the Python backend. There is no image file to ship and none to get
+ *  wrong.
+ *
+ *  Sizing follows Steam's own notification layout rather than a guess: a
+ *  container fixed at 36px with the mark at 1em inside it. The em is what
+ *  matters — Steam scales notification text with the system font size, so a
+ *  hard pixel size is right on one Deck and wrong on a TV. 36px is the base
+ *  the notification logo slot is built around (~40-48px including padding).
+ *
+ *  Logo rather than LogoMono: a notification is not a list row. Nothing here
+ *  recolours on selection, and the coloured mark is what makes a Shelfcloud
+ *  toast recognisable at a glance among Steam's own.
+ */
+export function NotificationLogo() {
+  return (
+    <div
+      style={{
+        position: "relative",
+        width: "1em",
+        height: "1em",
+        fontSize: "36px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <Logo size="1em" />
+    </div>
   );
 }
 
