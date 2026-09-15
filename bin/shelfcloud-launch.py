@@ -59,12 +59,23 @@ GATEWAY = "https://shelfcloud.schelstraete.org"
 # with no address bar and no tab strip to show where it went. A phishing page
 # in that window is indistinguishable from the real sign-in.
 #
-# Every launch URL in the production catalog — 5,965 rows — is https on one of
-# these three hosts, so this costs nothing in practice.
+# Every launch URL in the production catalog is https on one of these hosts, so
+# this costs nothing in practice.
+#
+# Luna is pinned to the FULL host, not to "amazon.com". The entry below is a
+# suffix rule, so "amazon.com" would admit every host Amazon serves — retail
+# pages, seller-controlled content, arbitrary S3-backed subdomains — to a
+# fullscreen browser holding the user's provider sessions. "luna.amazon.com" is
+# the only Amazon host a Shelfcloud launch ever needs.
+#
+# That host is also why the catalog stores luna.amazon.com links rather than the
+# play.amazon.<tld> URL Luna's own API returns: one host to allow instead of a
+# dozen country variants, and it redirects each user to their own Luna domain.
 ALLOWED_LAUNCH_DOMAINS = (
     "geforcenow.com",     # play.geforcenow.com
     "boosteroid.com",     # cloud.boosteroid.com
     "xbox.com",           # www.xbox.com
+    "luna.amazon.com",    # Amazon Luna — full host on purpose, see above
 )
 
 
@@ -415,6 +426,28 @@ PROVIDERS = {
         "selectors": ["button[aria-label*='Play' i]"],
         "setup_url": "https://play.geforcenow.com/",
     },
+    "amazon_luna": {
+        "label": "Amazon Luna",
+        # Two element ids, both read off the live signed-out page. Ids, not
+        # text: Luna localises by IP like Xbox does, and a Belgian browser is
+        # served "Inloggen" rather than "Sign in".
+        #
+        # This check earns its keep more than the others. Signed out, Luna's
+        # PRIMARY button reads "Speel gratis met Prime" — it carries a play
+        # word, is not on any deny list, and leads to a Prime signup. Detecting
+        # signed-out first is what stops the launcher pressing it.
+        "signed_out": (
+            "!!document.querySelector('#item_secondary_nav_button_sign_in, "
+            "[data-test-id=\"primary_entitled_button_log_in\"]')"
+        ),
+        # No provider selector. The signed-in control could not be verified
+        # without a Luna account, and a guessed selector here would be read
+        # BEFORE the text rules — which is exactly how GeForce NOW's filter
+        # chip once got clicked instead of the game. The shared text matcher
+        # handles Luna's "Nu spelen" / "Play now" on its own.
+        "selectors": [],
+        "setup_url": "https://luna.amazon.com/",
+    },
 }
 
 
@@ -544,9 +577,9 @@ def resolve_launch(game_id: str, fallback_url: str) -> tuple:
         return fallback_url, "baked-in"
 
     # Do not trust the gateway with where this device browses. A correct
-    # gateway only ever returns the three provider hosts; one that returns
-    # anything else is either compromised or answering for someone who is, and
-    # either way this is the point at which it stops.
+    # gateway only ever returns one of the permitted provider hosts; one that
+    # returns anything else is either compromised or answering for someone who
+    # is, and either way this is the point at which it stops.
     if not is_allowed_launch_url(url):
         log(f"gateway returned a URL outside the permitted providers "
             f"({str(url)[:120]!r}) — REFUSED, using the stored link")

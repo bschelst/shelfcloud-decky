@@ -51,12 +51,54 @@ allowed = launcher.is_allowed_launch_url
     "https://play.geforcenow.com/games?game-id=abc-123&lang=en_US",
     "https://cloud.boosteroid.com/application/682",
     "https://www.xbox.com/play/games/forza-horizon-5/9NKX70BBCDRN",
+    "https://luna.amazon.com/game/alan-wake-2/B0GFWDM8NP?autoplay=1",
+    "https://luna.amazon.com/game/fortnite?autoplay=1",   # the one ASIN-less title
     "https://cloud.boosteroid.com/",          # the setup URLs the launcher uses
     "https://play.geforcenow.com/",
     "https://www.xbox.com/play",
+    "https://luna.amazon.com/",
 ])
 def test_the_providers_are_allowed(url):
     assert allowed(url) is True
+
+
+# ------------------------------------------------------------- Amazon Luna
+#
+# Luna is the one provider pinned to a FULL host rather than a registrable
+# domain, because "amazon.com" as a suffix rule would admit everything Amazon
+# serves. These tests are what keeps that decision from being casually undone.
+
+@pytest.mark.parametrize("hostile", [
+    "https://www.amazon.com/dp/B0GFWDM8NP",        # retail
+    "https://amazon.com/",
+    "https://sellercentral.amazon.com/",
+    "https://s3.amazonaws.com/bucket/page.html",
+    "https://luna.amazon.com.evil.com/game/x",     # suffix lookalike
+    "https://notluna.amazon.com/game/x",
+    "https://luna.amazon.de/game/x",               # real Luna, but not our host
+])
+def test_only_the_luna_host_is_allowed_not_amazon_at_large(hostile):
+    """Widening this entry to "amazon.com" would pass every one of these.
+
+    The launch opens in a kiosk browser with no address bar, carrying live
+    provider sessions — so "somewhere on amazon.com" is not a safe answer.
+    luna.amazon.de is refused for the same reason and costs nothing: the
+    catalog stores luna.amazon.com links, which redirect each user to their own
+    country's Luna domain anyway.
+    """
+    assert allowed(hostile) is False, hostile
+
+
+def test_the_luna_launch_url_the_catalog_actually_builds_is_allowed():
+    """Guards the contract between the two repos.
+
+    The gateway's sources/amazon_luna.py builds exactly this shape. If either
+    side changes host or scheme, every Luna tile stops launching — and the
+    failure appears on the device, not in the gateway's tests.
+    """
+    built = "https://luna.amazon.com/game/{slug}/{asin}?autoplay=1".format(
+        slug="alien-isolation", asin="B09HFKWMTQ")
+    assert allowed(built) is True
 
 
 def test_a_subdomain_of_a_provider_is_allowed():
