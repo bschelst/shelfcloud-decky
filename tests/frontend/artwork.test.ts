@@ -247,3 +247,94 @@ describe("the icon", () => {
     expect(apps.SetShortcutIcon).not.toHaveBeenCalled();
   });
 });
+
+// --------------------------------------------------- finishing, or not
+//
+// A tile is "done" once its artwork fingerprint is recorded, and a recorded
+// fingerprint is never revisited. So what counts as done decides whether a
+// blank tile ever gets a second chance.
+//
+// It used to be "any slot applied". With the capsule failing while hero and
+// logo succeeded that is two slots, which read as success — and produced a
+// tile blank in the grid whose detail page had full artwork, marked finished
+// and never retried. "007 First Light" looked exactly like that on hardware.
+
+describe("when artwork counts as finished", () => {
+  /** Like callbacks(), but with `record` typed so its arguments can be read.
+   *  The fingerprint is argument 5. */
+  const recording = () => ({
+    record: vi.fn(async (
+      _gameId: number, _appId: number, _name: string, _options: string,
+      _art: string, _provider: string,
+    ) => {}),
+    forget: vi.fn(async () => {}),
+  });
+
+  /** Fail exactly one slot, by URL; every other download succeeds. */
+  function failSlot(url: string) {
+    vi.mocked(fetchArtwork).mockImplementation(async (wanted: string) =>
+      (wanted === url
+        ? { ok: false, error: "boom" }
+        : { ok: true, base64: "aGk=", kind: "jpg" }) as never);
+  }
+
+  it("does not record a fingerprint when the visible slot failed", async () => {
+    failSlot(GAME.artwork!.capsule!);
+    const cb = recording();
+
+    await syncLibrary([GAME], {}, cb);
+
+    // The other slots still went on. That is the partial success which used to
+    // be mistaken for a whole one.
+    expect(appliedOrder).not.toContain(CAPSULE);
+    expect(appliedOrder.length).toBeGreaterThan(0);
+    expect(cb.record.mock.calls[0][4]).toBe("");     // empty = retry next sync
+  });
+
+  it("records a fingerprint when the visible slot went on but another failed", async () => {
+    failSlot(GAME.artwork!.hero!);
+    const cb = recording();
+
+    await syncLibrary([GAME], {}, cb);
+
+    expect(appliedOrder).toContain(CAPSULE);
+    expect(cb.record.mock.calls[0][4]).not.toBe("");  // grid is right; stop
+  });
+
+  it("treats a game with no capsule art as settled rather than retrying forever", async () => {
+    const cb = recording();
+    await syncLibrary(
+      [{ ...GAME, artwork: { hero: GAME.artwork!.hero, logo: GAME.artwork!.logo } }],
+      {}, cb);
+
+    // Nothing to put in the grid, so nothing to retry. Recording it stops the
+    // next sync re-downloading art for a game that will never have a capsule.
+    expect(cb.record.mock.calls[0][4]).not.toBe("");
+  });
+
+  it("re-applies art to a tile whose fingerprint predates the current revision", async () => {
+    // Its own game_id, not GAME's. artUnavailable is module-scoped and lives
+    // for the whole file — an earlier test syncs GAME with no artwork at all,
+    // which marks id 1 unavailable for every test after it, and the update
+    // path skips artwork for anything in that set. Reusing the id here tested
+    // that set, not the revision bump.
+    const game: DesiredGame = { ...GAME, game_id: 77 };
+    const cb = recording();
+    const tracked = {
+      "77": {
+        app_id: 4242,
+        name: "Fortnite (GeForce NOW)",
+        launch: game.options,
+        // Revision 4 — recorded before partial failures were caught, which is
+        // exactly why the bump exists: the URLs still match, so nothing else
+        // would ever look at this tile again.
+        art: `4|${game.artwork!.capsule}|${game.artwork!.header}`
+           + `|${game.artwork!.hero}|${game.artwork!.logo}`,
+      },
+    };
+
+    await syncLibrary([game], tracked, cb);
+
+    expect(appliedOrder).toContain(CAPSULE);
+  });
+});

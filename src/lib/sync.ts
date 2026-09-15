@@ -92,6 +92,24 @@ async function fetchSlot(game: DesiredGame, slot: ArtSlot) {
   return viaGateway ? fetchArtworkBase64(viaGateway) : undefined;
 }
 
+/** What came of one game's artwork.
+ *
+ *  `applied` counts every slot that went on, including the icon. `visible` is
+ *  narrower and is the one that decides whether we are finished: did the
+ *  CAPSULE — the only slot drawn in the library grid — get its picture?
+ *
+ *  They are separate because a count cannot tell them apart. With the capsule
+ *  failing and hero and logo succeeding, `applied` is 2, which read as success,
+ *  the fingerprint was stored, and the tile was never retried. The result is a
+ *  blank tile whose detail page has full artwork — which is exactly what
+ *  "007 First Light" looked like: hero and logo on, grid blank, and the plugin
+ *  certain it had finished the job.
+ */
+interface ArtworkOutcome {
+  applied: number;
+  visible: boolean;
+}
+
 /** Fill each library art slot. Never fatal: a blank tile still plays.
  *
  *  Returns how many slots were actually applied, which is not the same as how
@@ -115,19 +133,21 @@ async function fetchSlot(game: DesiredGame, slot: ArtSlot) {
  *  something Steam documents as safe. The downloads are where the time goes,
  *  so there is nothing to gain by racing the writes as well.
  */
-async function applyArtwork(appId: number, game: DesiredGame): Promise<number> {
+async function applyArtwork(appId: number, game: DesiredGame): Promise<ArtworkOutcome> {
   let applied = 0;
 
   const applySlot = async (
     image: Awaited<ReturnType<typeof fetchSlot>>,
     assetType: number,
   ) => {
-    if (!image) return;
+    if (!image) return false;
     try {
       await SteamClient.Apps.SetCustomArtworkForApp(appId, image.data, image.kind, assetType as never);
       applied += 1;
+      return true;
     } catch {
       /* keep going: one bad slot must not cost the others */
+      return false;
     }
   };
 
@@ -139,7 +159,15 @@ async function applyArtwork(appId: number, game: DesiredGame): Promise<number> {
   const background = Promise.all(BACKGROUND_SLOTS.map(([slot]) => fetchSlot(game, slot)));
 
   const capsule = await fetchSlot(game, visibleSlot);
-  await applySlot(capsule, visibleType);
+  const capsuleWentOn = await applySlot(capsule, visibleType);
+
+  // Whether the tile the user actually looks at got its picture.
+  //
+  // "No capsule to apply" counts as settled: the gateway has no grid art for
+  // this game, so retrying every sync forever would change nothing. A capsule
+  // that EXISTS and failed does not count, and that is the whole point — see
+  // ArtworkOutcome.
+  const visible = capsuleWentOn || !game.artwork?.[visibleSlot];
 
   const images = await background;
   for (let i = 0; i < BACKGROUND_SLOTS.length; i++) {
@@ -177,7 +205,7 @@ async function applyArtwork(appId: number, game: DesiredGame): Promise<number> {
     }
   }
 
-  return applied;
+  return { applied, visible };
 }
 
 export interface SyncCallbacks {
@@ -206,8 +234,13 @@ export interface SyncCallbacks {
  *         matching their stored fingerprint and never repaired.
  * 3 -> 4: icons again, via SetShortcutIcon this time — the call Steam actually
  *         provides for them, verified on hardware.
+ * 4 -> 5: not a new slot — a repair. Tiles whose capsule failed while their
+ *         hero and logo succeeded were recorded as finished, so their stored
+ *         fingerprint still matches the art they were meant to get and nothing
+ *         would ever look at them again. Bumping is the only way to reach a
+ *         tile that is already wrongly marked done.
  */
-const ART_REVISION = "4";
+const ART_REVISION = "5";
 
 /**
  * A fingerprint of the artwork a tile currently carries.
@@ -310,13 +343,14 @@ export async function syncLibrary(
         SteamClient.Apps.SetShortcutStartDir(appId, START_DIR);
         SteamClient.Apps.SetShortcutLaunchOptions(appId, game.options);
 
-        // Record the fingerprint only for art that actually went on. It used to
-        // be stored regardless, so a tile whose artwork failed looked done and
-        // was never retried — a blank tile forever, with nothing logged.
+        // Record the fingerprint only once the VISIBLE slot went on. It used to
+        // be stored whenever any slot did, so a game whose capsule failed but
+        // whose hero and logo succeeded counted as done — a blank tile with a
+        // fully dressed detail page, never retried.
         const appliedNew = await applyArtwork(appId, game);
-        if (appliedNew === 0) artUnavailable.add(game.game_id);
+        if (appliedNew.applied === 0) artUnavailable.add(game.game_id);
         await callbacks.record(game.game_id, appId, title, game.options,
-                               appliedNew > 0 ? art : "", game.provider);
+                               appliedNew.visible ? art : "", game.provider);
         pending.push({ appId, provider: game.provider });
         result.added++;
         result.addedNames.push(game.name);
@@ -340,16 +374,16 @@ export async function syncLibrary(
         // Do not re-attempt art already known to be unavailable this session.
         const tryArt = artChanged && !artUnavailable.has(game.game_id);
 
-        let appliedArt = 0;
+        let appliedArt: ArtworkOutcome = { applied: 0, visible: false };
         if (tryArt) {
           if (!launchChanged) step("Artwork", game.name);
           appliedArt = await applyArtwork(existing.app_id, game);
-          if (appliedArt === 0) artUnavailable.add(game.game_id);
+          if (appliedArt.applied === 0) artUnavailable.add(game.game_id);
         }
         if (launchChanged || tryArt) {
-          // Keep the old fingerprint when nothing applied, so a later session
-          // tries again rather than marking a blank tile as finished.
-          const recordedArt = tryArt && appliedArt === 0 ? (existing.art ?? "") : art;
+          // Keep the old fingerprint until the visible slot goes on, so a later
+          // session tries again rather than marking a blank tile as finished.
+          const recordedArt = tryArt && !appliedArt.visible ? (existing.art ?? "") : art;
           await callbacks.record(game.game_id, existing.app_id, title, game.options,
                                  recordedArt, game.provider);
           result.updated++;
