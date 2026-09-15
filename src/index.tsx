@@ -656,28 +656,21 @@ function Content() {
               renamed, and without seeing the name here there is no way to tell
               which row in that list is the Deck in your hands. Read-only: this
               is the one screen with no keyboard worth typing on. */}
-          {shelves?.ok && shelves.device_name && (
-            <PanelSectionRow>
-              {/* Decky's own row component, not a hand-rolled div.
-                  Every neighbour here is a Focusable that Steam indents and
-                  spaces for us; a bare div gets neither, so this line sat hard
-                  against the edge and collided with the row above it. Field is
-                  what the About section already uses for exactly this — a
-                  label with a read-only value — so it lines up by construction
-                  rather than by me guessing a margin. */}
-              <Field label="This device" bottomSeparator="none">
-                {shelves.device_name}
-              </Field>
-            </PanelSectionRow>
-          )}
-
           {/* Only offered once a shelf exists. With none there is nothing to
               choose between, and a one-option picker is a control that does
               nothing but invite a press. */}
           {shelves?.ok && (shelves.shelves?.length ?? 0) > 0 && (
             <PanelSectionRow>
               <Focusable style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                <div style={{ fontSize: "0.75em", opacity: 0.7 }}>Use shelf</div>
+                {/* The device goes in the LABEL rather than on a line of its
+                    own. This section is a column of label-above, control-below
+                    pairs, and a read-only value has no control to sit under —
+                    so as its own row it read as stray text wedged between two
+                    dropdowns. Here it is the context the control needs anyway:
+                    which machine this setting is about. */}
+                <div style={{ fontSize: "0.75em", opacity: 0.7 }}>
+                  {shelves.device_name ? `Shelf for ${shelves.device_name}` : "Use shelf"}
+                </div>
                 <Dropdown
                   disabled={signedOut || busy}
                   // A Dropdown option needs a non-null key, but "no shelf" is
@@ -851,6 +844,17 @@ function Content() {
               </span>
             </Field>
           </PanelSectionRow>
+          {/* The name the website lists this machine under, so the row you
+              rename there can be matched to the Deck in your hands. A fact
+              rather than a setting, so it belongs here with the others —
+              Field is the row Decky draws them with, already used above. */}
+          {shelves?.ok && shelves.device_name && (
+            <PanelSectionRow>
+              <Field label="This device" bottomSeparator="none">
+                {shelves.device_name}
+              </Field>
+            </PanelSectionRow>
+          )}
         </Collapsible>
       </PanelSection>
 
