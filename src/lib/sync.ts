@@ -262,8 +262,11 @@ async function adoptStrayShortcuts(
     };
     tracked[key] = adopted;
     try {
+      // No DesiredGame here — this is reconciling a tile Steam already had.
+      // The empty url leaves any fallback already recorded untouched; the
+      // next full sync fills it in from the gateway.
       await callbacks.record(entry.game_id, entry.keep, adopted.name,
-                             adopted.launch, "", "");
+                             adopted.launch, "", "", "");
     } catch {
       /* the in-memory map is already right; the file catches up next time */
     }
@@ -273,7 +276,7 @@ async function adoptStrayShortcuts(
 export interface SyncCallbacks {
   record: (
     gameId: number, appId: number, name: string, options: string, art: string,
-    provider: string,
+    provider: string, url: string,
   ) => Promise<unknown>;
   forget: (gameId: number) => Promise<unknown>;
   onProgress?: (message: string) => void;
@@ -422,7 +425,8 @@ export async function syncLibrary(
         const appliedNew = await applyArtwork(appId, game);
         if (appliedNew.applied === 0) artUnavailable.add(game.game_id);
         await callbacks.record(game.game_id, appId, title, game.options,
-                               appliedNew.visible ? art : "", game.provider);
+                               appliedNew.visible ? art : "", game.provider,
+                               game.url ?? "");
         pending.push({ appId, provider: game.provider });
         result.added++;
         result.addedNames.push(game.name);
@@ -457,7 +461,7 @@ export async function syncLibrary(
           // session tries again rather than marking a blank tile as finished.
           const recordedArt = tryArt && !appliedArt.visible ? (existing.art ?? "") : art;
           await callbacks.record(game.game_id, existing.app_id, title, game.options,
-                                 recordedArt, game.provider);
+                                 recordedArt, game.provider, game.url ?? "");
           result.updated++;
         }
         pending.push({ appId: existing.app_id, provider: game.provider });

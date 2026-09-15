@@ -56,7 +56,8 @@ export const setShelf =
   callable<[shelf_id: number | null], { ok: boolean; shelf_id?: number | null; error?: string }>("set_shelf");
 
 export const recordShortcut =
-  callable<[game_id: number, app_id: number, name: string, options: string, art: string, provider: string], unknown>("record_shortcut");
+  callable<[game_id: number, app_id: number, name: string, options: string, art: string,
+           provider: string, url: string], unknown>("record_shortcut");
 export const forgetShortcut = callable<[game_id: number], unknown>("forget_shortcut");
 
 /** Every Shelfcloud tile Steam actually has, read from shortcuts.vdf.

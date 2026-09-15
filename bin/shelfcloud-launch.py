@@ -10,12 +10,20 @@ Steam launches this, not the plugin, so the automation has to live here rather
 than in the plugin backend.
 
 Usage:
-    shelfcloud-launch.py <browser_app_id> <profile_dir> <url>
+    shelfcloud-launch.py <browser_app_id> <profile_dir> [url]
                          [--game-id N] [--provider KEY] [--no-autoplay] [--no-kiosk]
 
-The <url> is a fallback. With --game-id the gateway is asked where the game
-launches right now, so a changed URL or provider preference takes effect
-without re-syncing, and the launch can be counted.
+A game tile passes NO url. --game-id is what resolves a launch: the gateway is
+asked where the game goes right now, so a changed URL or provider preference
+takes effect without re-syncing, and the launch can be counted. When the
+gateway does not answer, the offline URL is read from synced.json by game id.
+
+It lives there rather than on this command line because Steam shows launch
+options verbatim in a game's properties, and a provider deep link is not
+something anyone needs to read there.
+
+[url] is still accepted, for the website tile (which has no game id) and for
+shortcuts written before the URL moved off the command line.
 
 Exits when the browser exits, so Steam shows the game as running for the whole
 session and the tile's playtime is accurate.
@@ -529,7 +537,37 @@ def provider_profile(key: str) -> dict:
 # started by Steam, not by the plugin, so it has to read them itself.
 SETTINGS_FILE = os.path.expanduser(
     "~/homebrew/settings/Shelfcloud/settings.json")
+
+# What the plugin remembers about every tile it made, keyed by game id. The
+# offline launch URL lives here rather than in the Steam shortcut, because
+# Steam displays launch options verbatim in a game's properties and a provider
+# deep link is not something anyone needs to read there.
+STATE_FILE = os.path.expanduser(
+    "~/homebrew/settings/Shelfcloud/synced.json")
 RESOLVE_TIMEOUT = 8
+
+
+def stored_fallback(game_id: str) -> str:
+    """The offline launch URL for this game, or "" if there is not a usable one.
+
+    Never raises: this runs on the path where the gateway has ALREADY failed,
+    so an unreadable or malformed state file must degrade to "no fallback"
+    rather than take the launch down with it.
+
+    The URL is checked here as well as at the end of main(). This file is
+    written by the plugin, but it is also just a file on disk — and it is read
+    precisely when the gateway cannot be consulted to correct it.
+    """
+    if not game_id:
+        return ""
+    try:
+        with open(STATE_FILE, encoding="utf-8") as handle:
+            state = json.load(handle)
+        entry = state.get(str(game_id))
+        url = (entry or {}).get("url")
+    except Exception:
+        return ""
+    return url if isinstance(url, str) and is_allowed_launch_url(url) else ""
 
 # Steam runs this script and captures none of its output — stdout goes nowhere
 # a person can read. That mattered: when a launch quietly used the stored URL
@@ -586,6 +624,12 @@ def resolve_launch(game_id: str, fallback_url: str) -> tuple:
     saying which route was taken, "the launch was not recorded" and "the
     gateway was never asked" look identical from the server.
     """
+    # The offline route, looked up before the gateway is tried so every path
+    # below has something to fall back to. A shortcut written before the URL
+    # moved off the command line still passes one positionally; that keeps
+    # working, and is preferred only when local state has nothing.
+    fallback_url = fallback_url or stored_fallback(game_id)
+
     if not game_id:
         log("no --game-id on this shortcut; using the stored link "
             "(re-sync to get gateway resolution)")
@@ -825,11 +869,17 @@ def main() -> int:
             argv = argv[:index] + argv[index + 2:]
 
     args = [a for a in argv if not a.startswith("--")]
-    if len(args) < 3:
+    # The URL is OPTIONAL now, and normally absent: a game tile carries
+    # --game-id and the launcher resolves the URL from the gateway, falling
+    # back to synced.json. Two callers still pass one positionally — a shortcut
+    # written before that change, and the website tile, which has no game id to
+    # resolve from.
+    if len(args) < 2:
         print(__doc__)
         return 2
 
-    app_id, profile, url = args[0], args[1], args[2]
+    app_id, profile = args[0], args[1]
+    url = args[2] if len(args) > 2 else ""
     os.makedirs(profile, exist_ok=True)
 
     log(f"--- launch: game={game_id or '?'} provider={provider or '?'} "
@@ -838,12 +888,17 @@ def main() -> int:
     url, source = resolve_launch(game_id, url)
     log(f"launch URL from {source}")
 
+    if not url:
+        log("no launch URL: the gateway did not answer and nothing is stored "
+            f"for game {game_id or '?'}. Sync once while the gateway is up.")
+        return 4
+
     # Last gate before a browser opens. resolve_launch already refuses a URL
-    # the gateway should not have sent, but the baked-in fallback reaches here
-    # too — it was written into the Steam shortcut by an earlier sync and has
-    # sat on disk ever since. Refusing to launch is the right outcome: a game
-    # that does not start is a complaint, and a fullscreen page pretending to
-    # be a provider sign-in is a stolen account.
+    # the gateway should not have sent, but the stored fallback reaches here
+    # too — written by an earlier sync and sat on disk ever since. Refusing to
+    # launch is the right outcome: a game that does not start is a complaint,
+    # and a fullscreen page pretending to be a provider sign-in is a stolen
+    # account.
     if not is_allowed_launch_url(url):
         log(f"REFUSED: {url!r} is not a permitted provider URL "
             f"(source: {source}). Not launching.")

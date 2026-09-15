@@ -564,22 +564,33 @@ class Plugin:
 
         launcher = os.path.join(decky.DECKY_PLUGIN_DIR, "bin", "shelfcloud-launch.py")
         profile = browsers.profile_dir(browser["app_id"])
-        # The launcher needs to know the provider, not just the URL: what a
-        # signed-out page looks like and where the Play control lives differ per
-        # provider, and Xbox serves the page in the browser's language.
-        # The URL is passed as a fallback; --game-id lets the launcher ask the
-        # gateway where the game goes right now. That keeps a changed URL or a
-        # changed provider preference working without a re-sync, and lets the
-        # gateway count launches — while a sleeping gateway still leaves the
-        # game playable.
+        # NO URL on the command line.
+        #
+        # Steam shows launch options verbatim in a game's properties, so the
+        # provider's deep link sat there in the interface for every tile — and
+        # it is not something a person needs to read, or should have to.
+        #
+        # --game-id is what actually resolves a launch: the launcher asks the
+        # gateway where the game goes right now, which keeps a changed URL or a
+        # changed provider preference working without a re-sync and lets the
+        # gateway count launches. The fallback for a gateway that is asleep now
+        # lives in synced.json beside everything else this plugin remembers,
+        # read by game id — off the command line and out of the interface.
+        #
+        # --provider stays: what a signed-out page looks like and where the
+        # Play control lives differ per provider, and that has to be known
+        # before any URL is resolved.
         options = _shell_join([
-            launcher, browser["app_id"], profile, provider["launch_url"],
+            launcher, browser["app_id"], profile,
             "--game-id", str(game_id),
             "--provider", provider["provider"],
         ])
 
         return {
             "game_id": game_id,
+            # Recorded locally as the offline fallback, never put on the
+            # command line.
+            "url": provider["launch_url"],
             "name": name,
             "provider": provider["provider"],
             "exe": "/usr/bin/python3",
@@ -851,10 +862,28 @@ class Plugin:
     # ------------------------------------------------- shortcut bookkeeping
 
     async def record_shortcut(self, game_id: int, app_id: int, name: str,
-                              options: str, art: str = "", provider: str = "") -> Dict:
+                              options: str, art: str = "", provider: str = "",
+                              url: str = "") -> Dict:
+        """Remember a tile, and where its game launches if the gateway is down.
+
+        `url` is the offline fallback. It used to be an argument in the Steam
+        shortcut, which put a provider deep link in the game's properties for
+        anyone to read; it lives here instead, keyed by game id, and the
+        launcher looks it up only when the gateway does not answer.
+
+        https only, and checked here rather than trusted: this file is what the
+        launcher falls back to, so a bad value written now is a bad URL opened
+        later, when the gateway is unreachable and nothing can correct it.
+        """
+        previous = self._synced.get(str(game_id)) or {}
+        keep = url if isinstance(url, str) and url.startswith("https://") else ""
         self._synced[str(game_id)] = {
             "app_id": app_id, "name": name, "launch": options,
             "art": art, "provider": provider,
+            # Keep the previous fallback rather than blanking it when a caller
+            # omits one — an older frontend that does not send `url` yet must
+            # not silently strip the offline route from every tile it touches.
+            "url": keep or previous.get("url", ""),
         }
         await self._save_state()
         return {"ok": True}

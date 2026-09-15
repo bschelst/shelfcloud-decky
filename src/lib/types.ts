@@ -17,6 +17,10 @@ export interface DesiredGame {
   provider: string;
   exe: string;
   options: string;
+  /** Where this game launches when the gateway cannot be reached.
+   *  Recorded in the plugin's own state, never on the Steam command line —
+   *  Steam shows launch options verbatim in a game's properties. */
+  url?: string;
   artwork?: Artwork;
   /** The same slots served back through the gateway, for art whose own host
    *  sends no CORS header and so cannot be fetched from inside Steam. */
@@ -107,16 +111,31 @@ export interface SyncResult {
   addedNames: string[];
 }
 
+/** How each provider is written for a person to read.
+ *
+ * THE ONE PLACE. This name goes into the Steam tile's title — "Fortnite
+ * (Amazon Luna)" — so a provider missing here does not fail, it ships: the
+ * fallback returns the raw key and the tile reads "Fortnite (amazon_luna)",
+ * which is exactly what happened when Luna was added.
+ *
+ * The plugin briefly had two of these maps, one here and one in theme.ts, and
+ * adding a provider to the other one is what made the miss invisible. theme.ts
+ * now keeps only colours and reads its labels from here.
+ */
 const PROVIDER_LABELS: Record<string, string> = {
   boosteroid: "Boosteroid",
   geforce_now: "GeForce NOW",
   xbox_cloud: "Xbox Cloud",
+  amazon_luna: "Amazon Luna",
   playstation: "PlayStation",
   shadow: "Shadow",
   airgpu: "AirGPU",
   // Tiles recorded before providers were tracked. Fixed by the next sync.
   unknown: "Other",
 };
+
+/** Every provider this build can name, for tests that check nothing is missed. */
+export const KNOWN_PROVIDERS = Object.keys(PROVIDER_LABELS);
 
 export function providerLabel(provider: string): string {
   return PROVIDER_LABELS[provider] ?? provider;

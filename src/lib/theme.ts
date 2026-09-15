@@ -8,6 +8,8 @@
 // cloud blue drawn from the same family as Steam's own selection colour, and
 // the neutrals are blue-biased rather than pure grey.
 
+import { providerLabel } from "./types";
+
 export const theme = {
   /** Shelfcloud's own colour. Used for focus, headings and the active state. */
   accent: "#4d9fff",
@@ -44,15 +46,20 @@ export const theme = {
  * These are identity, not decoration — a row tinted GeForce green should mean
  * GeForce and nothing else, which is why they never double as status colours.
  */
-export const providerTheme: Record<string, { label: string; color: string }> = {
-  boosteroid: { label: "Boosteroid", color: "#7b61ff" },
-  geforce_now: { label: "GeForce NOW", color: "#76b900" },
-  xbox_cloud: { label: "Xbox Cloud", color: "#107c10" },
+// Colours ONLY. The label comes from types.ts, which is the one place a
+// provider is named — this file used to carry its own copy, and keeping two in
+// step is exactly what failed when Luna was added: the guide here knew the
+// name, and the Steam tile title did not, so it shipped as
+// "Fortnite (amazon_luna)".
+const PROVIDER_COLORS: Record<string, string> = {
+  boosteroid: "#7b61ff",
+  geforce_now: "#76b900",
+  xbox_cloud: "#107c10",
   // Luna's own purple. Far enough from Boosteroid's that a tinted row still
   // names one service at a glance, which is the only thing these are for.
-  amazon_luna: { label: "Amazon Luna", color: "#c86dd7" },
+  amazon_luna: "#c86dd7",
 };
 
 export function providerInfo(key: string) {
-  return providerTheme[key] ?? { label: key, color: theme.textDim };
+  return { label: providerLabel(key), color: PROVIDER_COLORS[key] ?? theme.textDim };
 }
