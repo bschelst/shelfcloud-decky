@@ -43,5 +43,18 @@ else
     echo "Kept existing settings (sign-in preserved)."
 fi
 
+# Close the settings directory to other plugins.
+#
+# settings.json holds the bearer token, and Decky drops to the `deck` user for
+# EVERY plugin backend — so at the default 0644 any other installed plugin
+# could read this account's credential straight off the disk, with no
+# escalation needed. New files are written 0600 by the plugin itself; this
+# repairs the ones already on disk, including installs that predate that.
+if sudo test -d "${SETTINGS_DIR}"; then
+    sudo chmod 700 "${SETTINGS_DIR}"
+    sudo find "${SETTINGS_DIR}" -maxdepth 1 -type f -name '*.json*' -exec chmod 600 {} +
+    echo "Settings locked to the deck user only."
+fi
+
 sudo systemctl restart plugin_loader
 echo "Done. Decky is restarting — open Shelfcloud from the Decky menu."

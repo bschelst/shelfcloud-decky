@@ -319,6 +319,19 @@ class Plugin:
         temporary = path + ".tmp"
         with open(temporary, "w", encoding="utf-8") as handle:
             json.dump(data, handle, indent=2)
+
+        # 0600, because settings.json holds the bearer token.
+        #
+        # Decky runs as root but drops to `deck` for plugin backends — ALL of
+        # them, this one included. At the default 0644 any other installed
+        # plugin could simply read this file and walk off with the credential,
+        # no privilege escalation required. The mode is set on the temporary
+        # file before the rename so the finished file is never briefly
+        # world-readable.
+        try:
+            os.chmod(temporary, 0o600)
+        except OSError:
+            pass
         os.replace(temporary, path)
 
     def _gateway(self) -> str:
@@ -473,10 +486,16 @@ class Plugin:
         Falls back to provider images for games the gateway could not resolve.
         """
         def url(*keys) -> Optional[str]:
-            """First value that is actually a usable URL, else None."""
+            """First value that is actually a usable URL, else None.
+
+            https only, at the point the value is first accepted. fetch_artwork
+            checks again before anything is downloaded, but a plain-http URL
+            would otherwise be baked into a persisted shortcut on the strength
+            of a second, separate check staying correct forever.
+            """
             for key in keys:
                 value = game.get(key)
-                if isinstance(value, str) and value.startswith(("http://", "https://")):
+                if isinstance(value, str) and value.startswith("https://"):
                     return value
             return None
 
@@ -527,7 +546,10 @@ class Plugin:
         # A route is only usable with somewhere to go and something to call it.
         providers = [
             p for p in providers
-            if isinstance(p.get("launch_url"), str) and p["launch_url"].startswith(("http://", "https://"))
+            # https only: this URL is written into a Steam shortcut and opened
+            # later by the launcher, which checks the scheme and the host again.
+            # Refusing here too keeps a plain-http link from ever being stored.
+            if isinstance(p.get("launch_url"), str) and p["launch_url"].startswith("https://")
             and isinstance(p.get("provider"), str) and p["provider"]
         ]
         if not providers:

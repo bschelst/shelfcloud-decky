@@ -104,8 +104,31 @@ def is_allowed_launch_url(url) -> bool:
     Credentials in the authority are refused outright:
     "https://play.geforcenow.com@evil.com/" names the host evil.com while
     reading, at a glance, as though it does not.
+
+    A URL containing a backslash, a tab or a newline is refused before it is
+    parsed at all, because on those this checker and the browser DISAGREE about
+    what the host is — and the browser is the one that opens the page.
+
+    Python's urlsplit follows RFC 3986, where "\\" is an ordinary character.
+    Chromium follows the WHATWG URL Standard, where "\\" ends the authority
+    exactly like "/". So
+
+        https://evil.com\\cloud.boosteroid.com/steal
+
+    has host "evil.com\\cloud.boosteroid.com" here — which ends with
+    ".boosteroid.com" and passes every check below — and host "evil.com" in the
+    browser, which then opens an attacker's page in kiosk mode with the user's
+    provider sessions. Tab, CR and LF are the same class of bug: a browser
+    strips them from a URL before resolving it, so they can move the host
+    boundary after this function has approved it.
+
+    No legitimate provider URL contains any of them, so refusing is free.
     """
     if not url or not isinstance(url, str):
+        return False
+    # Before parsing, and on the RAW string: .strip() would remove a trailing
+    # newline that is part of the attack.
+    if any(c in url for c in "\\\t\r\n"):
         return False
     try:
         parts = urllib.parse.urlsplit(url.strip())

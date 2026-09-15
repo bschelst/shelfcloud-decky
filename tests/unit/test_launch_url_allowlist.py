@@ -91,6 +91,51 @@ def test_a_suffix_lookalike_is_refused():
         assert allowed(hostile) is False, hostile
 
 
+@pytest.mark.parametrize("hostile", [
+    "https://evil.com\\cloud.boosteroid.com/steal",
+    "https://evil.com\\www.xbox.com/",
+    "https://evil.com\\play.geforcenow.com/games",
+    "https://evil.com\\\\www.xbox.com/",
+    "https://evil.com/\\www.xbox.com/",
+    "https://www.xbox.com\\@evil.com/",
+])
+def test_a_backslash_is_refused_because_the_browser_reads_it_as_a_slash(hostile):
+    """The check and the browser must agree on what the host is.
+
+    Python's urlsplit follows RFC 3986, where "\\" is an ordinary character, so
+    the host of
+
+        https://evil.com\\cloud.boosteroid.com/steal
+
+    is "evil.com\\cloud.boosteroid.com" — which ends with ".boosteroid.com" and
+    passed every other rule here. Chromium follows the WHATWG URL Standard,
+    where "\\" ends the authority exactly like "/", so the SAME string opens
+    evil.com: an attacker's page, in kiosk mode, with the user's provider
+    sessions and no address bar to reveal it.
+
+    A parser differential, and the browser is the parser that matters.
+    """
+    assert allowed(hostile) is False
+
+
+@pytest.mark.parametrize("hostile", [
+    "https://evil.com\t.boosteroid.com/",
+    "https://evil.com\n.xbox.com/",
+    "https://evil.com\r.xbox.com/",
+    "https://www.xbox.com\n",
+])
+def test_tabs_and_newlines_are_refused(hostile):
+    """Browsers strip these from a URL before resolving it, which can move the
+    host boundary after this function has approved the string."""
+    assert allowed(hostile) is False
+
+
+def test_the_raw_string_is_checked_before_it_is_stripped():
+    """A trailing newline is part of the attack, so .strip() must not remove it
+    before the check has had a chance to see it."""
+    assert allowed("https://evil.com\\www.xbox.com/\n") is False
+
+
 def test_credentials_in_the_authority_are_refused():
     """"https://play.geforcenow.com@evil.com/" is a URL whose HOST is evil.com.
 
