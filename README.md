@@ -33,6 +33,7 @@ Cloud gaming services like Boosteroid, GeForce NOW, and Xbox Cloud don't show up
 
 ### Prerequisites
 
+- A **Steam account** — Shelfcloud uses Steam sign-in, no separate account needed
 - A device running **SteamOS** or **Bazzite** (Steam Deck, Steam Machine, or any compatible hardware) with [Decky Loader](https://decky.xyz) installed
 - A Chromium-based browser (Chrome, Edge, or Brave) — the plugin offers to install one for you if none is present, and automatically configures the flatpak permissions it needs (gamepad access for controller input in cloud streams)
 - An account on one or more supported cloud gaming services
