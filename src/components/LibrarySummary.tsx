@@ -35,6 +35,8 @@ export interface LibrarySummaryProps {
   available: number;
   /** The shelf this device shows, when it is on one. See below. */
   shelfName?: string | null;
+  /** How many games sit on that shelf itself, excluding the shared ones. */
+  shelfGames?: number | null;
   byProvider: Record<string, number>;
   /** When syncing, 0..1 — the bar shows work done instead of coverage. */
   progress?: number | null;
@@ -42,7 +44,7 @@ export interface LibrarySummaryProps {
 }
 
 export function LibrarySummary({
-  synced, available, shelfName, byProvider, progress, progressLabel,
+  synced, available, shelfName, shelfGames, byProvider, progress, progressLabel,
 }: LibrarySummaryProps) {
   const working = typeof progress === "number";
 
@@ -53,6 +55,14 @@ export function LibrarySummary({
   // shelf is ignoring 354 games", and a coverage bar drawn from 6/360 makes a
   // full shelf look 2% full.
   const onShelf = Boolean(shelfName);
+
+  // The shelf's own count comes from the gateway; the shared half is whatever
+  // is left of what this device holds. Clamped both ways because the two are
+  // read at different moments — mid-sync `synced` can trail the shelf count,
+  // and a negative "shared" would be worse than a stale one.
+  const onShelfCount = Math.max(0, Math.min(synced, shelfGames ?? 0));
+  const sharedCount = Math.max(0, synced - onShelfCount);
+
   // Guard against a zero denominator before the first Steam-library sync.
   const coverage = available > 0 ? Math.min(1, synced / available) : 0;
   const fill = working ? Math.max(0, Math.min(1, progress!))
@@ -72,7 +82,11 @@ export function LibrarySummary({
         </div>
         <div style={{ fontSize: "0.8em", color: DIM, paddingBottom: 2 }}>
           {onShelf
-            ? `on ${shelfName}`
+            // Both halves, so the total adds up in front of the reader. A
+            // device on a shelf holds that shelf's games AND the shared ones,
+            // so 3 on Bart with 3 shared is 6 — and "6 on Bart" states
+            // something false about a shelf the user knows holds three.
+            ? `${onShelfCount} on ${shelfName} + ${sharedCount} shared`
             : available > synced ? `of ${available} playable` : "games in your library"}
         </div>
       </div>

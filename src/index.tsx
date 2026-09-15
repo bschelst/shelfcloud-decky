@@ -538,6 +538,9 @@ function Content() {
               shelfName={shelves?.ok && typeof shelves.shelf_id === "number"
                 ? (shelves.shelves ?? []).find((s) => s.id === shelves.shelf_id)?.name ?? null
                 : null}
+              shelfGames={shelves?.ok && typeof shelves.shelf_id === "number"
+                ? (shelves.shelves ?? []).find((s) => s.id === shelves.shelf_id)?.games ?? 0
+                : null}
               available={busy && totalWhenSyncStarted.current !== null
                 ? totalWhenSyncStarted.current
                 : (owned ?? 0) + status.tracked}
