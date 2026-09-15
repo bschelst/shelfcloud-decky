@@ -76,6 +76,20 @@ ALLOWED_LAUNCH_DOMAINS = (
     "boosteroid.com",     # cloud.boosteroid.com
     "xbox.com",           # www.xbox.com
     "luna.amazon.com",    # Amazon Luna — full host on purpose, see above
+    # Our own site. The plugin makes a "Shelfcloud (website)" tile so the
+    # catalogue can be browsed under Steam Input — Steam's built-in browser
+    # forwards no controller input, so the d-pad is dead there.
+    #
+    # It was missing, so that tile could never launch: every URL goes through
+    # this check, the gateway's own host was not on the list, and the launcher
+    # refused its own website with exit 3. Nothing said so on screen — the tile
+    # simply did nothing.
+    #
+    # DERIVED from GATEWAY rather than typed again, so the two cannot drift.
+    # Admitting it grants nothing new: this is the host the launcher already
+    # asks where every game goes, so trusting it to answer and refusing to open
+    # it was the inconsistent half.
+    urllib.parse.urlsplit(GATEWAY).hostname or "",
 )
 
 

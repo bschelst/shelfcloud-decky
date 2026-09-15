@@ -89,6 +89,42 @@ def test_only_the_luna_host_is_allowed_not_amazon_at_large(hostile):
     assert allowed(hostile) is False, hostile
 
 
+# ------------------------------------------------------- our own website tile
+#
+# The plugin makes a "Shelfcloud (website)" tile so the catalogue can be
+# browsed under Steam Input. Its URL goes through the same check as a game's,
+# and the gateway's host was NOT on the list — so the launcher refused its own
+# website with exit 3 and the tile silently did nothing.
+
+def test_the_website_tile_can_actually_launch():
+    assert allowed(launcher.GATEWAY) is True
+    assert allowed(launcher.GATEWAY + "/games") is True
+
+
+def test_the_gateway_entry_is_derived_from_the_gateway_constant():
+    """Typed twice, they drift; the day GATEWAY moves, the website tile breaks
+    again and nothing says why."""
+    import urllib.parse
+    host = urllib.parse.urlsplit(launcher.GATEWAY).hostname
+    assert host in launcher.ALLOWED_LAUNCH_DOMAINS
+
+
+def test_the_old_plaintext_lan_gateway_is_still_refused():
+    """Shortcuts synced before the gateway became a constant still carry
+    http://192.168.x.x:8000 in their launch options. Admitting our own host
+    must not admit that: it is http, and on a LAN address that may now belong
+    to somebody else entirely."""
+    assert allowed("http://192.168.129.164:8000") is False
+    assert allowed("http://shelfcloud.schelstraete.org/") is False
+
+
+def test_a_lookalike_of_our_own_host_is_refused():
+    for hostile in ("https://shelfcloud.schelstraete.org.evil.com/",
+                    "https://notshelfcloud.schelstraete.org/",
+                    "https://shelfcloud.schelstraete.org@evil.example/"):
+        assert allowed(hostile) is False, hostile
+
+
 def test_the_luna_launch_url_the_catalog_actually_builds_is_allowed():
     """Guards the contract between the two repos.
 
