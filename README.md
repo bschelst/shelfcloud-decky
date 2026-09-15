@@ -15,6 +15,7 @@
   <a href="#-getting-started">Getting Started</a> &middot;
   <a href="#-how-it-works">How it Works</a> &middot;
   <a href="#-supported-services">Services</a> &middot;
+  <a href="#-features">Features</a> &middot;
   <a href="#-faq">FAQ</a>
 </p>
 
@@ -69,6 +70,14 @@ Shelfcloud is a **sync agent**, not a game browser. The workflow is split:
 
 The plugin polls the gateway on a configurable interval (default: every 5 minutes) and reconciles your Steam library — adding new tiles, removing ones you un-selected, and updating artwork when better art becomes available.
 
+### Shelves
+
+A **shelf** is a named collection of games you curate on the Shelfcloud website. Each device can be pointed at a different shelf, or at the shared library that every device sees.
+
+This is useful when you have multiple devices — say, a Steam Deck for portable play and a Steam Machine in the living room. The Deck might get a shelf with games that work well on a small screen and controller, while the living room machine gets a shelf tuned for big screen and higher bandwidth. Games you add to the shared library appear on every device; games on a shelf appear only on devices pointed at that shelf.
+
+You manage shelves on the website and pick which shelf a device uses from **Settings** in the Decky panel. The plugin identifies itself by device name so you can tell your devices apart.
+
 ### Browser Setup
 
 If no supported browser is installed, the plugin offers to install one — Edge or Chrome — directly from the panel via flatpak. After installation it automatically applies the sandbox permissions cloud gaming needs, such as access to `/run/udev` so gamepads are visible to the stream. You can re-apply these permissions any time from **Settings > Fix gamepad permissions**.
@@ -105,9 +114,11 @@ More providers may be added over time. Shelfcloud does not buy subscriptions or 
 - **&#127918; One-click launch** — tile opens the browser and starts the game automatically
 - **&#128218; Bulk import** — "Add all my games" finds every Steam game you own that's also on a cloud service
 - **&#128268; Multi-provider** — one library, multiple cloud services, one Deck
+- **&#128218; Shelves** — curate different game lists for different devices; each device picks its shelf from Settings
 - **&#128247; Per-provider chips** — see at a glance how your library breaks down
 - **&#128268; Browser installer** — no browser? The plugin installs Edge or Chrome for you straight from the panel
 - **&#127918; Gamepad permissions** — flatpak overrides for controller access are applied automatically; a manual "Fix gamepad permissions" button is available in Settings if needed
+- **&#128736; Device identity** — each device registers its name so you can tell them apart on the website
 - **&#128218; Built-in help** — a full help & documentation modal accessible from the panel, covering setup, playing, syncing, troubleshooting, and privacy
 
 <br>
@@ -136,6 +147,12 @@ Games still launch from their last known link. Syncing pauses until the gateway 
 <summary><strong>Does Shelfcloud see my provider passwords?</strong></summary>
 
 No. Provider sign-ins happen in the browser's own profile. Shelfcloud never touches, transmits, or stores those credentials. See <a href="SECURITY.md">SECURITY.md</a> for more detail.
+</details>
+
+<details>
+<summary><strong>What's the difference between shelves and the shared library?</strong></summary>
+
+The **shared library** is your default game list — every device sees it. A **shelf** is an optional, named subset you create on the website. When you point a device at a shelf, it syncs only the games on that shelf (plus the shared ones). This lets you tailor each device without removing games from other devices. If you only have one device, you don't need shelves — the shared library is all you need.
 </details>
 
 <details>
