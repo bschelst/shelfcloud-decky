@@ -23,7 +23,7 @@
 
 ## What is Shelfcloud?
 
-Cloud gaming services like Boosteroid, GeForce NOW, and Xbox Cloud don't show up in your Steam library — you have to open a browser, find the game, and launch it from there every time.
+Cloud gaming services like Boosteroid, GeForce NOW, Xbox Cloud and Amazon Luna don't show up in your Steam library — you have to open a browser, find the game, and launch it from there every time.
 
 **Shelfcloud fixes that.** Pick your games on the Shelfcloud website, and they appear as normal Steam tiles with proper artwork. Launching one opens the cloud provider and goes straight into the game. No extra steps.
 
@@ -102,6 +102,18 @@ Your provider credentials stay in the browser profile — Shelfcloud never sees 
 | &#9729;&#65039; **Boosteroid** | &#9989; Fully supported |
 | &#127918; **GeForce NOW** | &#9989; Fully supported |
 | &#127775; **Xbox Cloud Gaming** | &#9989; Fully supported |
+| &#128038; **Amazon Luna** | &#9989; Fully supported |
+
+Boosteroid and GeForce NOW stream games you already own. Xbox Cloud Gaming and
+Amazon Luna are the other kind — the subscription *is* the catalog, so owning a
+game on Steam grants nothing there. Both are **off by default** and must be
+switched on in **My Services** on the website, so a tile never launches into a
+paywall you did not ask for.
+
+Both also sell more than one plan, with different games on each (Game Pass
+Essential/Premium/Ultimate, Luna with Prime or Luna Premium). Tell Shelfcloud
+which one you have and games above it are marked, instead of failing at the
+paywall after you have already added them.
 
 More providers may be added over time. Shelfcloud does not buy subscriptions or access for you — you'll need whatever each service requires.
 
@@ -174,7 +186,7 @@ Open an issue on <a href="https://github.com/bschelst/shelfcloud-decky/issues">G
 
 Shelfcloud is an independent, open-source project. It is **not affiliated with,
 endorsed by, or sponsored by** Valve, Steam, Microsoft, Xbox, NVIDIA, GeForce
-NOW, Boosteroid, or any other service named here. All product names, logos and
+NOW, Boosteroid, Amazon, Amazon Luna, or any other service named here. All product names, logos and
 trademarks are the property of their respective owners, and are used only to
 say which service carries which game.
 

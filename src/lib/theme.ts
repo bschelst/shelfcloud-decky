@@ -48,6 +48,9 @@ export const providerTheme: Record<string, { label: string; color: string }> = {
   boosteroid: { label: "Boosteroid", color: "#7b61ff" },
   geforce_now: { label: "GeForce NOW", color: "#76b900" },
   xbox_cloud: { label: "Xbox Cloud", color: "#107c10" },
+  // Luna's own purple. Far enough from Boosteroid's that a tinted row still
+  // names one service at a glance, which is the only thing these are for.
+  amazon_luna: { label: "Amazon Luna", color: "#c86dd7" },
 };
 
 export function providerInfo(key: string) {

@@ -54,10 +54,31 @@ The following components are in scope:
 
 ### Launch security
 
-- The launcher receives URLs from the gateway. It validates that URLs start with `http://` or `https://` before opening them
+- The launcher receives URLs from the gateway, and does **not** trust them. Every
+  URL — whether the gateway returned it just now or it was baked into the Steam
+  shortcut at sync time — is checked **on the device** against an allow-list of
+  provider hosts before a browser opens: `play.geforcenow.com`,
+  `cloud.boosteroid.com`, `www.xbox.com` and `luna.amazon.com`. Anything else is
+  refused and logged, and the game does not launch.
+- **https only.** A launch carries provider session cookies; over http they are
+  readable by anything on the path, which can also rewrite the page.
+- Amazon Luna is pinned to the **full host** `luna.amazon.com`, not to
+  `amazon.com`. The allow-list matches subdomains, so the broader form would
+  admit every host Amazon serves — retail pages, seller-controlled content,
+  arbitrary storage subdomains — into a fullscreen browser with no address bar.
+- URLs containing a backslash, tab, carriage return or newline are refused before
+  parsing. Python and Chromium disagree about where the hostname ends in those,
+  and the browser is the one that opens the page.
+- Credentials in the URL authority (`https://cloud.boosteroid.com@evil.example/`)
+  are refused: they name one host while reading as another.
 - Browser profiles are isolated per-browser (Chrome and Edge get separate profiles)
 - Launch commands are shell-quoted to prevent injection via special characters in URLs
 - The install script validates browser app IDs against a known allowlist before installing anything
+
+This check exists because the gateway is a server, and servers get compromised.
+A launch URL it returns is opened in a kiosk-mode browser holding live provider
+sessions, with no address bar and no tab strip to show where it went — a
+phishing page in that window is indistinguishable from the real sign-in.
 
 ## Best Practices for Users
 

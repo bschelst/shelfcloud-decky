@@ -185,15 +185,37 @@ const HelpModal: FC<HelpModalProps> = ({ closeModal, version }) => {
               </p>
               <p style={{ lineHeight: 1.6 }}>Supported services:</p>
               <ul style={LIST}>
-                {["boosteroid", "geforce_now", "xbox_cloud"].map((key) => {
+                {[
+                  ["boosteroid", "streams games you already own"],
+                  ["geforce_now", "streams games you already own"],
+                  ["xbox_cloud", "the subscription is the catalogue"],
+                  ["amazon_luna", "the subscription is the catalogue"],
+                ].map(([key, note]) => {
                   const p = providerInfo(key);
                   return (
-                    <li key={key}>
+                    <li key={key} style={{ marginTop: 4 }}>
                       <strong style={{ color: p.color }}>{p.label}</strong>
+                      <span style={{ opacity: 0.75 }}> — {note}</span>
                     </li>
                   );
                 })}
               </ul>
+              <p style={{ lineHeight: 1.6, marginTop: 8 }}>
+                The distinction matters. Boosteroid and GeForce NOW play games
+                you already own. On <strong>Xbox Cloud</strong> and{" "}
+                <strong>Amazon Luna</strong> the subscription <em>is</em> the
+                catalogue — owning a game on Steam grants nothing there — so
+                both stay <strong>off until you switch them on</strong> under
+                My Services on the website. That way a tile never opens a
+                paywall you did not ask for.
+              </p>
+              <p style={{ lineHeight: 1.6, marginTop: 8 }}>
+                Both also sell several plans with different games on each
+                (Game Pass Essential, Premium or Ultimate; Luna with Prime or
+                Luna Premium). Say which one you have on the website and games
+                above it are marked before you add them, rather than failing at
+                the paywall afterwards.
+              </p>
               <p style={{ lineHeight: 1.6, marginTop: 8, opacity: 0.8 }}>
                 Shelfcloud does not buy or subscribe to anything. You need
                 whatever access each game already requires.
