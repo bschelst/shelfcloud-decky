@@ -153,3 +153,81 @@ def evaluate(ws_url: str, expression: str, timeout: float = 15.0) -> Any:
         raise CDPError("timed out waiting for evaluate result")
     finally:
         ws.close()
+
+
+def hold_platform(ws_url: str, user_agent: str, platform: str = "Windows",
+                  platform_version: str = "10.0.0", timeout: float = 15.0) -> "_WebSocket":
+    """Tell one page it is running on another OS, and keep telling it.
+
+    Returns the OPEN socket. The caller must keep that object alive for as long
+    as the lie has to hold — a CDP emulation override belongs to the session
+    that set it, so closing the socket reverts it instantly. That is exactly
+    why evaluate() cannot be used for this: it opens and closes a socket per
+    call, so an override set through it is gone before the page reads it.
+
+    Why this is needed at all, when the launcher already passes --user-agent:
+    that flag changes the User-Agent STRING and nothing else. Measured on the
+    device with the flag on, navigator.platform was still "Linux x86_64" and
+    navigator.userAgentData.platform was still "Linux", and there is no
+    command-line flag for either (--disable-features=UserAgentClientHint was
+    tried and changed nothing). Emulation.setUserAgentOverride is the only
+    thing that moves the string, navigator.platform, navigator.userAgentData
+    and the Sec-CH-UA-Platform request headers together.
+
+    No CDP domain is enabled here on purpose. Domains push events, nothing
+    reads this socket once it is set up, and an unread socket whose peer keeps
+    writing eventually blocks that peer. With no domain enabled the only
+    traffic is the reply below, which is read before returning.
+    """
+    ws = _WebSocket(ws_url, timeout=timeout)
+    try:
+        ws.send_text(json.dumps({
+            "id": 1,
+            "method": "Emulation.setUserAgentOverride",
+            "params": {
+                "userAgent": user_agent,
+                "platform": platform,
+                "userAgentMetadata": {
+                    "brands": [
+                        {"brand": "Microsoft Edge", "version": "153"},
+                        {"brand": "Chromium", "version": "153"},
+                        {"brand": "Not_A Brand", "version": "8"},
+                    ],
+                    "fullVersion": "153.0.0.0",
+                    "platform": platform,
+                    "platformVersion": platform_version,
+                    "architecture": "x86",
+                    "bitness": "64",
+                    "model": "",
+                    "mobile": False,
+                },
+            },
+        }))
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            message = json.loads(ws.recv_text())
+            if message.get("id") == 1:
+                if "error" in message:
+                    raise CDPError(f"override refused: {message['error']}")
+                return ws
+        raise CDPError("timed out setting the platform override")
+    except Exception:
+        ws.close()
+        raise
+
+
+def reload_page(ws: "_WebSocket", timeout: float = 15.0) -> None:
+    """Reload so the document is built with the override already in force.
+
+    Without this the page has already run its checks against the real platform
+    and cached the answer; the override would only affect whatever it asks
+    afterwards. Page.enable is deliberately NOT sent — reload does not need it,
+    and enabling the domain would start an event stream nobody reads.
+    """
+    ws.send_text(json.dumps({"id": 2, "method": "Page.reload",
+                             "params": {"ignoreCache": False}}))
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if json.loads(ws.recv_text()).get("id") == 2:
+            return
+    raise CDPError("timed out reloading the page")

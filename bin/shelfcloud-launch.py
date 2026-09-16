@@ -770,6 +770,47 @@ def build_browser_command(app_id: str, profile: str, url: str, kiosk: bool = Tru
     ]
 
 
+def hold_platform_override(url: str, provider: str = ""):
+    """Make the page believe it is on a supported OS, for the whole session.
+
+    Luna has TWO gates, and they read different things:
+
+      "Unsupported Browser" — reads the User-Agent STRING. The --user-agent
+                              flag in build_browser_command settles this one.
+      "Unsupported OS"      — reads navigator.platform / navigator.userAgentData,
+                              which that flag does not touch. Measured with the
+                              flag on: platform "Linux x86_64", uaData "Linux".
+
+    So the flag alone gets past the first gate and straight into the second,
+    which is exactly what happened. This closes the second one.
+
+    Returns the held socket, which the caller must keep alive — see
+    cdp.hold_platform. Returns None when the provider asks for nothing, which
+    is every provider but Luna.
+
+    Best effort, like try_autoplay: if this fails the user is no worse off than
+    before it existed, and a game that does not stream is not worth aborting a
+    launch over.
+    """
+    profile = provider_profile(provider)
+    user_agent = profile.get("user_agent")
+    if not user_agent:
+        return None
+
+    marker = profile.get("page_match") or (url.split("/")[2] if "//" in url else url)
+    target = cdp.wait_for_page(CDP_PORT, marker, timeout=PAGE_TIMEOUT)
+    if not target or not target.get("webSocketDebuggerUrl"):
+        log(f"page never appeared for the platform override (looked for {marker!r})")
+        return None
+
+    held = cdp.hold_platform(target["webSocketDebuggerUrl"], user_agent,
+                             profile.get("platform", "Windows"))
+    cdp.reload_page(held)
+    log(f"{profile['label']}: reporting {profile.get('platform', 'Windows')} "
+        "for this session")
+    return held
+
+
 def try_autoplay(url: str, provider: str = "") -> None:
     """Press Play once the game page is up. Best effort — never fatal.
 
@@ -963,6 +1004,17 @@ def main() -> int:
         app_id, profile, url, kiosk,
         user_agent=provider_profile(provider).get("user_agent", "")))
 
+    # Before autoplay, and regardless of it: the OS gate blocks a Play the user
+    # presses by hand just as surely as one the launcher presses.
+    #
+    # `held` is not an unused variable. It is the open socket, and the override
+    # lives exactly as long as this reference does.
+    held = None
+    try:
+        held = hold_platform_override(url, provider)
+    except Exception as exc:  # never let automation break the launch
+        log(f"platform override failed, continuing: {exc}")
+
     if autoplay:
         try:
             try_autoplay(url, provider)
@@ -971,6 +1023,8 @@ def main() -> int:
 
     started = time.monotonic()
     code = browser.wait()
+    if held is not None:
+        held.close()
     log(f"--- session ended after {int(time.monotonic() - started)}s "
         f"(browser exit {code})")
     return code
