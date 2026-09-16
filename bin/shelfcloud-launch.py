@@ -1031,23 +1031,41 @@ def active_gamepads() -> list:
     return pads
 
 
-def wait_for_gamepad(timeout: float = 6.0) -> list:
-    """Give Steam Input a moment to create its virtual pads before starting the
-    browser.
+def wait_for_gamepad(timeout: float = 6.0, settle: float = 1.0) -> list:
+    """Wait until Steam Input has FINISHED making its virtual pads.
 
-    The browser enumerates input devices at startup, and udev hotplug events do
-    not reach it reliably inside the flatpak sandbox — so a pad that appears
-    after it starts may never be noticed. Waiting costs a second and avoids
-    launching into a game with no controller.
+    The browser enumerates input devices once, at startup, and udev hotplug
+    events do not reach it reliably inside the flatpak sandbox — so a pad that
+    appears after it starts may never be noticed at all.
+
+    This used to return on the first pad it saw, which is the wrong moment when
+    two controllers are connected: Steam creates them a fraction apart, so
+    returning on pad 0 could launch the browser before pad 1 existed, and the
+    external controller was then invisible for the whole session. The symptom
+    is indistinguishable from the controller being in the wrong slot, which is
+    part of why that was hard to pin down.
+
+    So wait for the set to stop GROWING rather than to become non-empty: once
+    the list has been unchanged for `settle` seconds, Steam is done. Costs
+    about a second on a launch that already takes several.
+
+    Returns whatever exists at `timeout` if pads keep churning, and [] if none
+    ever appear — both are honest answers, and the caller only logs them.
     """
     deadline = time.monotonic() + timeout
+    pads: list = []
+    last_change = None
+
     while time.monotonic() < deadline:
-        pads = active_gamepads()
-        if pads:
+        current = active_gamepads()
+        if current != pads:
+            pads = current
+            last_change = time.monotonic()
+        elif pads and last_change is not None \
+                and time.monotonic() - last_change >= settle:
             return pads
         time.sleep(0.3)
-    return []
-
+    return pads
 
 def main() -> int:
     argv = sys.argv[1:]

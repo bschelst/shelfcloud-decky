@@ -332,3 +332,55 @@ def test_a_cdp_failure_is_reported_not_raised(monkeypatch):
         raise cdp.CDPError("page went away")
     monkeypatch.setattr(cdp, "evaluate", boom)
     launcher.log_browser_gamepads("https://luna.amazon.com/game/x", "amazon_luna")
+
+
+# ------------------------------------------- waiting for Steam Input's pads
+
+class FakeTime:
+    """A clock that only moves when something sleeps."""
+    def __init__(self):
+        self.now = 0.0
+    def monotonic(self):
+        return self.now
+    def sleep(self, seconds):
+        self.now += seconds
+
+
+def _with_pads(monkeypatch, sequence):
+    """active_gamepads() answers the next entry on each call, then repeats."""
+    calls = {"i": 0}
+    def fake():
+        i = min(calls["i"], len(sequence) - 1)
+        calls["i"] += 1
+        return list(sequence[i])
+    monkeypatch.setattr(launcher, "active_gamepads", fake)
+    clock = FakeTime()
+    monkeypatch.setattr(launcher, "time", clock)
+    return clock
+
+
+def test_it_waits_for_the_SECOND_pad_not_just_the_first(monkeypatch):
+    """The bug this replaces: returning on pad 0 could launch the browser
+    before pad 1 existed, and the external controller was then invisible for
+    the whole session — a symptom indistinguishable from a wrong slot."""
+    _with_pads(monkeypatch, [[], ["pad 0"], ["pad 0", "pad 1"]])
+    assert launcher.wait_for_gamepad() == ["pad 0", "pad 1"]
+
+
+def test_a_single_controller_still_returns(monkeypatch):
+    _with_pads(monkeypatch, [["pad 0"]])
+    assert launcher.wait_for_gamepad() == ["pad 0"]
+
+
+def test_no_controller_at_all_is_not_an_error(monkeypatch):
+    """Returns [] rather than hanging or raising; the caller only logs it."""
+    _with_pads(monkeypatch, [[]])
+    assert launcher.wait_for_gamepad(timeout=2.0) == []
+
+
+def test_it_cannot_wait_forever(monkeypatch):
+    """Pads that keep churning must not hold a launch open indefinitely."""
+    churn = [["a"], ["a", "b"], ["a"], ["a", "b"], ["a"]] * 20
+    clock = _with_pads(monkeypatch, churn)
+    launcher.wait_for_gamepad(timeout=3.0)
+    assert clock.now <= 4.0, "must give up at the timeout"
