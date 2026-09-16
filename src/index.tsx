@@ -22,6 +22,7 @@ import {
   FaQuestionCircle,
   FaGamepad,
   FaSignOutAlt,
+  FaSteam,
   FaTrashAlt,
 } from "react-icons/fa";
 
@@ -340,6 +341,12 @@ function Content() {
   // Two-press confirm: this deletes every tile the plugin made.
   const [confirmClear, setConfirmClear] = useState(false);
   const loginTimer = useRef<number | null>(null);
+  // A sign-in that has been STARTED but not yet handed to the browser.
+  //
+  // The gap exists so the pairing code can be read before Steam's browser
+  // takes the screen and closes this panel.
+  const [pendingLogin, setPendingLogin] =
+    useState<{ url: string; code: string; session: string } | null>(null);
   // "of N playable", held still for the duration of a sync — see below.
   const totalWhenSyncStarted = useRef<number | null>(null);
 
@@ -446,7 +453,27 @@ function Content() {
     // on its blank data:text/html placeholder — verified on hardware. The
     // steam://openurl protocol actually navigates, and is the same mechanism
     // boosteroid-steamos uses for Google sign-in.
-    openInSteamBrowser(start.login_url);
+    // NOT opened here any more.
+    //
+    // Opening Steam's browser closes the Quick Access Menu, and the pairing
+    // code lives in the Quick Access Menu — so firing this immediately meant
+    // the panel vanished before the code had been on screen for a frame. The
+    // user then reached a page asking for a code they had never seen, and the
+    // only way to find it was to guess that reopening the QAM over the browser
+    // would show it.
+    //
+    // The code is shown first, with a button to continue. Nothing is being
+    // memorised under time pressure: it is on screen, the user reads it, and
+    // presses Open when ready. The QAM can still be reopened over the browser
+    // to check it, because the backend keeps it for the life of the sign-in.
+    setPendingLogin({ url: start.login_url, code: start.confirm_code || "",
+                      session: start.session_token });
+    setJob({ busy: false, message: "" });
+  }, [refresh, sync]);
+
+  const openSteamSignIn = useCallback((url: string, session: string) => {
+    setPendingLogin(null);
+    openInSteamBrowser(url);
 
     // The backend waits for the sign-in to complete and stores the token, so
     // it finishes even though opening Steam's browser closes this panel and
@@ -456,7 +483,7 @@ function Content() {
 
     const deadline = Date.now() + LOGIN_TIMEOUT_MS;
     loginTimer.current = window.setInterval(async () => {
-      const poll = await pollLogin(start.session_token!);
+      const poll = await pollLogin(session);
       if (poll.ok && poll.status === "signed_in") {
         window.clearInterval(loginTimer.current!);
         finishJob("Signed in!");
@@ -518,7 +545,10 @@ function Content() {
   // action that closes this panel — a code displayed once, in the panel, would
   // be gone by the time it was needed. It comes from the backend's status so
   // reopening the panel over the browser shows it again.
-  const pairingCode = status.pending_login_code || "";
+  // Either a sign-in we just started (code in hand, browser not yet opened) or
+  // one already in flight (code recovered from the backend, because this panel
+  // was closed by the browser and has since been reopened over it).
+  const pairingCode = pendingLogin?.code || status.pending_login_code || "";
 
   return (
     <>
@@ -557,6 +587,29 @@ function Content() {
               </div>
             </Focusable>
           </PanelSectionRow>
+
+          {pendingLogin ? (
+            <PanelSectionRow>
+              {/* The browser is opened HERE, not when sign-in was pressed.
+                  Opening it closes this panel, so doing it immediately meant
+                  the code was never on screen at all. */}
+              <ButtonItem
+                layout="below"
+                onClick={() => openSteamSignIn(pendingLogin.url, pendingLogin.session)}
+              >
+                <IconLabel icon={<FaSteam size={12} />}>
+                  Open Steam sign-in
+                </IconLabel>
+              </ButtonItem>
+            </PanelSectionRow>
+          ) : (
+            <PanelSectionRow>
+              <div style={{ fontSize: 11, opacity: 0.7 }}>
+                Waiting for the browser. Reopen this panel any time to see the
+                code again.
+              </div>
+            </PanelSectionRow>
+          )}
         </PanelSection>
       ) : null}
       <PanelSection title="Shelfcloud">
