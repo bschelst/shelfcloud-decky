@@ -86,6 +86,10 @@ export interface Status {
    *  panel that first displayed it. */
   pending_login_code?: string;
   sync_minutes: number;
+  /** Opt-in: swap the first two controller slots when one of our tiles starts.
+   *  Off unless the user turns it on — it changes Steam state for every game,
+   *  so it must never be a default. */
+  swap_controller_order: boolean;
   sync_choices: number[];
   by_provider: Record<string, number>;
   last_error?: string | null;

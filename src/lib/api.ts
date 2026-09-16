@@ -11,6 +11,10 @@ import type {
 
 export const getStatus = callable<[], Status>("get_status");
 export const setSetting = callable<[key: string, value: unknown], Status>("set_setting");
+/** Did we launch this pid? Steam sends unAppID 0 for non-Steam shortcuts, and
+ *  every tile we make is one, so the process is the only way to tell. */
+export const isShelfcloudProcess =
+  callable<[pid: number], { ok: boolean; ours: boolean }>("is_shelfcloud_process");
 
 /** Start installing one of the offered browsers. Returns as soon as it has
  *  started; progress is read from `status.install`, so closing the panel
