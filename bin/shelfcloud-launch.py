@@ -869,73 +869,6 @@ def log_browser_gamepads(url: str, provider: str = "") -> None:
     log(f"browser gamepads: {seen}")
 
 
-# Steam leaves gamepad slot 0 empty, and the web player only reads slot 0.
-#
-# Measured on the device. Steam Input creates FOUR virtual pads and puts both
-# connected controllers in the same one:
-#
-#     pad 0 [event18]  pad 1 [event24]  pad 2 [event25]  pad 3 [event26]
-#     Steam Deck Controller   nControllerIndex=15  nXInputIndex=1
-#     Steam Controller        nControllerIndex=5   nXInputIndex=1
-#
-# Both on slot 1, so pad 0 exists with nothing behind it. A provider's web
-# player reads the FIRST gamepad, finds that empty slot and waits forever,
-# which is why the controller does nothing until the order is changed by hand.
-# Native games are unaffected: they take input from whichever pad sends it.
-#
-# SteamClient.Input.SwapControllerOrder does not fix it - tried with the real
-# controller indices, during a live game, and nothing moved.
-#
-# So close the hole where it actually matters: present the pads that really
-# exist, in order, to this page. Slot 0 is then the controller in the user's
-# hands. Nothing outside this browser window is touched - no Steam state, no
-# other game, nothing persisted - so it cannot affect a setup that was already
-# working.
-REORDER_GAMEPADS_JS = """
-(() => {
-  if (window.__shelfcloudPads) return "already installed";
-  const real = navigator.getGamepads.bind(navigator);
-
-  // A Gamepad's `index` is readonly and players do read it, so the object is
-  // proxied rather than just moved down the array.
-  const wrap = (pad, index) => new Proxy(pad, {
-    get(target, prop) {
-      if (prop === "index") return index;
-      const value = target[prop];
-      return typeof value === "function" ? value.bind(target) : value;
-    },
-  });
-
-  navigator.getGamepads = function () {
-    const live = [...real()].filter(Boolean);
-    const out = [null, null, null, null];
-    live.forEach((pad, i) => { out[i] = wrap(pad, i); });
-    return out;
-  };
-  window.__shelfcloudPads = true;
-
-  // A player that latched on at gamepadconnected needs telling again.
-  const first = [...real()].filter(Boolean)[0];
-  if (first) {
-    try {
-      window.dispatchEvent(new GamepadEvent("gamepadconnected",
-                                            { gamepad: wrap(first, 0) }));
-    } catch (e) { /* some engines refuse a synthetic GamepadEvent */ }
-  }
-  return "installed";
-})();
-"""
-
-
-def wants_gamepad_reorder() -> bool:
-    """Has the user turned the controller fix on? Off unless they have."""
-    try:
-        with open(SETTINGS_FILE, encoding="utf-8") as handle:
-            return bool(json.load(handle).get("swap_controller_order", False))
-    except (OSError, ValueError):
-        return False
-
-
 def hold_platform_override(url: str, provider: str = ""):
     """Make the page believe it is on a supported OS, for the whole session.
 
@@ -960,8 +893,7 @@ def hold_platform_override(url: str, provider: str = ""):
     """
     profile = provider_profile(provider)
     user_agent = profile.get("user_agent")
-    reorder = wants_gamepad_reorder()
-    if not user_agent and not reorder:
+    if not user_agent:
         return None
 
     marker = profile.get("page_match") or (url.split("/")[2] if "//" in url else url)
@@ -970,32 +902,16 @@ def hold_platform_override(url: str, provider: str = ""):
         log(f"page never appeared for the platform override (looked for {marker!r})")
         return None
 
-    if user_agent:
-        held = cdp.hold_platform(target["webSocketDebuggerUrl"], user_agent,
-                                 profile.get("platform", "Windows"))
-    else:
-        held = cdp.open_session(target["webSocketDebuggerUrl"])
-
-    startup = []
-    if profile.get("startup_js") == "NEUTRALISE_APP_HANDOFF_JS":
-        startup.append(NEUTRALISE_APP_HANDOFF_JS)
-    if reorder:
-        # BEFORE the page's own scripts, not after. A player captures
-        # navigator.getGamepads when it starts; replacing it afterwards is
-        # simply ignored, which is what happened the first time this was
-        # tried — the override was installed, reported installed, and the page
-        # went on calling the function it had already taken a reference to.
-        startup.append(REORDER_GAMEPADS_JS)
-
-    if startup:
-        cdp.add_startup_script(held, "\n".join(startup))
+    held = cdp.hold_platform(target["webSocketDebuggerUrl"], user_agent,
+                             profile.get("platform", "Windows"))
+    wants_shim = profile.get("startup_js") == "NEUTRALISE_APP_HANDOFF_JS"
+    if wants_shim:
+        cdp.add_startup_script(held, NEUTRALISE_APP_HANDOFF_JS)
     cdp.reload_page(held)
-    if startup:
+    if wants_shim:
         # add_startup_script had to enable the Page domain, so from here on the
         # browser is pushing events at this socket. Drain them or it wedges.
         cdp.drain_in_background(held)
-    if reorder:
-        log("gamepad order will be corrected before the page loads")
     log(f"{profile['label']}: reporting {profile.get('platform', 'Windows')} "
         "for this session")
     return held

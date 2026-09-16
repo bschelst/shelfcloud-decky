@@ -5,7 +5,6 @@ import {
   ButtonItem,
   Dropdown,
   Field,
-  ToggleField,
   Focusable,
   Navigation,
   PanelSection,
@@ -898,39 +897,6 @@ function Content() {
             <ButtonItem layout="below" disabled={signedOut} onClick={() => void signOut()}>
               <IconLabel icon={<FaSignOutAlt size={12} />}>Sign out</IconLabel>
             </ButtonItem>
-          </PanelSectionRow>
-          {/* Opt-in, and off by default on purpose.
-
-              Steam seats its own built-in controls in the first controller
-              slot, so an external controller lands in the second. Native games
-              take input from whichever pad sends it, so nobody notices — but a
-              cloud provider's web player reads the FIRST gamepad, so the
-              external controller does nothing at all until the order is
-              swapped in the Quick Access Menu. Measured on a Deck: the pad
-              being pressed arrived at index 1, never 0.
-
-              Measured on the device: Steam Input makes four virtual pads and
-              puts BOTH controllers on slot 1, so slot 0 exists with nothing
-              behind it and the player waits on an empty slot forever.
-
-              The launcher corrects the order inside the game page only, so no
-              Steam setting changes and no other game is affected. Off by
-              default all the same: most setups do not need it, and a fix
-              applied to everyone is a change to people it cannot help. */}
-          <PanelSectionRow>
-            <ToggleField
-              label="Fix controller order in cloud games"
-              description={
-                "For external controllers. Steam can leave the first gamepad "
-                + "slot empty, and cloud games only read that slot, so the "
-                + "controller does nothing. This corrects the order inside the "
-                + "game page only \u2014 no Steam setting is changed."
-              }
-              checked={status.swap_controller_order}
-              onChange={(value) => {
-                void setSetting("swap_controller_order", value).then(setStatus);
-              }}
-            />
           </PanelSectionRow>
         </Collapsible>
 

@@ -1151,10 +1151,6 @@ class Plugin:
             "installable": await asyncio.to_thread(browsers.installable_browsers),
             "install": dict(self._install),
             "sync_minutes": self._sync_minutes(),
-            # Off unless the user turned it on. See swap_controller_order in
-            # the frontend for why this cannot be a default.
-            "swap_controller_order": bool(
-                self._settings.get("swap_controller_order", False)),
             "sync_choices": SYNC_INTERVAL_CHOICES,
             "last_error": self._last_error,
             # Only while a sign-in is in flight; the browser that
