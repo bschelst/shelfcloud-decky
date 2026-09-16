@@ -43,6 +43,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import cdp  # noqa: E402
 
 CDP_PORT = 9223
+
+# Identifies this launcher to the gateway. It must be SOMETHING: the proxy in
+# front of the gateway rejects urllib's default with 403.
+USER_AGENT = "Shelfcloud-Launcher/0.1 (+https://github.com/bschelst/shelfcloud)"
 PAGE_TIMEOUT = 45.0
 CLICK_TIMEOUT = 60.0
 
@@ -479,6 +483,26 @@ PROVIDERS = {
     },
     "amazon_luna": {
         "label": "Amazon Luna",
+        # Luna refuses to play on Linux.
+        #
+        # Not a capability problem — measured on the device, this browser
+        # reports "probably" for h264, h265, vp9 AND av1, has MediaSource and
+        # has EME. Luna is reading the platform out of the User-Agent and
+        # refusing on that alone, so the page shows "Unsupported Browser" and
+        # the stream never starts even though everything it needs is present.
+        #
+        # Verified over CDP on the live page: overriding only
+        # navigator.userAgent is enough — Luna does not consult
+        # navigator.userAgentData, which is why a command-line flag works here
+        # and no CDP-session override is needed (that one dies with the
+        # debugging session anyway).
+        #
+        # Same Edge version the browser really is, so nothing else about the
+        # page changes; only the platform is different.
+        "user_agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36 Edg/153.0.0.0"
+        ),
         # The launch URL is luna.amazon.com, and Luna REDIRECTS it to the
         # viewer's own country: luna.amazon.de, luna.amazon.co.uk,
         # luna.amazon.com.be. Matching on the host we asked for therefore finds
@@ -659,7 +683,21 @@ def resolve_launch(game_id: str, fallback_url: str) -> tuple:
             f"{gateway}/api/me/launch/{game_id}",
             data=b"",
             method="POST",
-            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/json",
+                # Without this, urllib sends "Python-urllib/3.x" and the
+                # reverse proxy in front of the gateway answers 403 — measured:
+                # every other User-Agent reaches the app and gets a normal 401
+                # for a bad token, that one never arrives at all.
+                #
+                # The failure was invisible, which is why it lasted: the
+                # launcher falls back to the stored URL and the game still
+                # starts, so nothing looked wrong. It only meant no launch was
+                # ever resolved live and none was ever counted. The plugin
+                # backend has always sent a User-Agent; this one never did.
+                "User-Agent": USER_AGENT,
+            },
         )
         started = time.monotonic()
         # Verified TLS against the bundled CA bundle, the same one main.py
@@ -697,7 +735,8 @@ def resolve_launch(game_id: str, fallback_url: str) -> tuple:
         f"via {payload.get('provider') or '?'} in {elapsed} ms")
     return url, f"gateway ({payload.get('provider')})"
 
-def build_browser_command(app_id: str, profile: str, url: str, kiosk: bool = True) -> list:
+def build_browser_command(app_id: str, profile: str, url: str, kiosk: bool = True,
+                          user_agent: str = "") -> list:
     """Chromium command line for one session.
 
     Kiosk is right for streaming and wrong for signing in: a Microsoft or
@@ -721,6 +760,11 @@ def build_browser_command(app_id: str, profile: str, url: str, kiosk: bool = Tru
         "--password-store=basic",
         "--disable-background-networking",
         "--autoplay-policy=no-user-gesture-required",
+        # Only where a provider asks for it; see PROVIDERS. Spoofing globally
+        # would be wrong — Xbox localises its page by what the browser says it
+        # is, and lying to every provider to satisfy one is how a fix for one
+        # game breaks three others.
+        *([f"--user-agent={user_agent}"] if user_agent else []),
         *(["--kiosk"] if kiosk else []),
         url,
     ]
@@ -915,7 +959,9 @@ def main() -> int:
     elif not pads:
         log("no virtual gamepad yet; controller may not work")
 
-    browser = subprocess.Popen(build_browser_command(app_id, profile, url, kiosk))
+    browser = subprocess.Popen(build_browser_command(
+        app_id, profile, url, kiosk,
+        user_agent=provider_profile(provider).get("user_agent", "")))
 
     if autoplay:
         try:

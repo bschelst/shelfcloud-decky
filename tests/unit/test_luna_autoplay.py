@@ -202,3 +202,53 @@ def test_controls_that_must_never_be_clicked(label):
 def test_the_rest_of_lunas_page_is_ignored(label):
     """Read off the live page, so this is the real surrounding furniture."""
     assert _matcher()(label, 2) is False
+
+
+# --------------------------------------------------- Luna refuses Linux
+
+def test_luna_asks_for_a_user_agent_override():
+    """Luna shows "Unsupported Browser" on Linux and never starts the stream.
+
+    Not a capability problem: measured on the device, the same browser reports
+    "probably" for h264, h265, vp9 AND av1, has MediaSource and has EME. Luna
+    reads the platform out of the User-Agent and refuses on that alone.
+    """
+    assert LUNA.get("user_agent"), "Luna needs a UA override or it cannot play"
+    assert "Windows" in LUNA["user_agent"]
+
+
+def test_only_luna_spoofs_its_user_agent():
+    """Xbox localises its page by what the browser says it is, so lying to
+    every provider to satisfy one is how a fix for one game breaks three."""
+    for key in ("boosteroid", "geforce_now", "xbox_cloud"):
+        assert not launcher.provider_profile(key).get("user_agent")
+
+
+def test_the_override_reaches_the_browser_command():
+    cmd = launcher.build_browser_command(
+        "com.microsoft.Edge", "/profile", "https://luna.amazon.com/game/x",
+        True, LUNA["user_agent"])
+    assert any(part.startswith("--user-agent=") for part in cmd)
+
+
+def test_a_provider_without_an_override_gets_no_flag():
+    cmd = launcher.build_browser_command(
+        "com.microsoft.Edge", "/profile", "https://www.xbox.com/play", True, "")
+    assert not any(part.startswith("--user-agent") for part in cmd)
+
+
+# ------------------------------------------- the launcher identifies itself
+
+def test_the_launcher_sends_a_user_agent_to_the_gateway():
+    """urllib's default is "Python-urllib/3.x", which the reverse proxy in
+    front of the gateway answers 403 to — measured: every other User-Agent
+    reaches the app and gets a normal 401 for a bad token.
+
+    It failed invisibly, which is why it lasted: the launcher falls back to the
+    stored URL and the game still starts, so nothing looked wrong. It only
+    meant no launch was resolved live and none was ever counted.
+    """
+    import inspect
+    source = inspect.getsource(launcher.resolve_launch)
+    assert '"User-Agent"' in source
+    assert "Python-urllib" not in launcher.USER_AGENT
