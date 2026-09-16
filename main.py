@@ -1293,41 +1293,6 @@ class Plugin:
             self._install = dict(IDLE_INSTALL)
         return await self.get_status()
 
-    async def is_shelfcloud_process(self, pid: int) -> Dict[str, Any]:
-        """Did WE launch the process Steam just started?
-
-        Steam does not set unAppID for non-Steam shortcuts — it sends 0 — and
-        every tile this plugin makes is one, so the notification cannot say
-        whether a launch is ours. The process can: our tiles run
-        shelfcloud-launch.py, and Steam reports the pid it started.
-
-        Steam launches through `reaper`, so the script's path appears in that
-        command line too; a substring match covers both.
-
-        Answers False for anything it cannot read, which is the safe direction:
-        the caller only acts on True, so a missed launch does nothing and a
-        wrong one is impossible.
-        """
-        try:
-            pid = int(pid)
-        except (TypeError, ValueError):
-            return {"ok": False, "ours": False}
-        if pid <= 0:
-            return {"ok": False, "ours": False}
-
-        def read() -> bool:
-            try:
-                with open(f"/proc/{pid}/cmdline", "rb") as handle:
-                    # NUL-separated argv; decoded loosely because a game name
-                    # in a path is not guaranteed to be valid UTF-8.
-                    command = handle.read().replace(b"\0", b" ").decode(
-                        "utf-8", "replace")
-            except OSError:
-                return False
-            return "shelfcloud-launch.py" in command
-
-        return {"ok": True, "ours": await asyncio.to_thread(read)}
-
     async def set_setting(self, key: str, value: Any) -> Dict[str, Any]:
         self._settings[key] = value
         await self._save_settings()

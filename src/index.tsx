@@ -42,7 +42,6 @@ import {
   pollLogin,
   recordShortcut,
   setSetting,
-  isShelfcloudProcess,
   setShelf,
   startLogin,
   syncFinished,
@@ -910,19 +909,22 @@ function Content() {
               swapped in the Quick Access Menu. Measured on a Deck: the pad
               being pressed arrived at index 1, never 0.
 
-              This does by itself what that manual swap does. It is off by
-              default because SwapControllerOrder changes Steam's order for
-              EVERY game, not just ours, and most setups do not need it —
-              turning it on for everyone would break the people it does not
-              help. */}
+              Measured on the device: Steam Input makes four virtual pads and
+              puts BOTH controllers on slot 1, so slot 0 exists with nothing
+              behind it and the player waits on an empty slot forever.
+
+              The launcher corrects the order inside the game page only, so no
+              Steam setting changes and no other game is affected. Off by
+              default all the same: most setups do not need it, and a fix
+              applied to everyone is a change to people it cannot help. */}
           <PanelSectionRow>
             <ToggleField
-              label="Swap controller order"
+              label="Fix controller order in cloud games"
               description={
-                "For external controllers. Steam puts the Deck's own controls "
-                + "first, which leaves an external pad unusable in cloud games. "
-                + "Turn this on only if your controller does nothing until you "
-                + "reorder it by hand."
+                "For external controllers. Steam can leave the first gamepad "
+                + "slot empty, and cloud games only read that slot, so the "
+                + "controller does nothing. This corrects the order inside the "
+                + "game page only \u2014 no Steam setting is changed."
               }
               checked={status.swap_controller_order}
               onChange={(value) => {
@@ -1044,45 +1046,7 @@ export default definePlugin(() => {
   };
   addEventListener(SYNC_EVENT, onLibraryChanged);
 
-  // Put the external controller in the slot a web player actually reads.
-  //
-  // Steam seats its own built-in controls first, so an external pad lands in
-  // the second slot. Native games accept input from whichever pad sends it and
-  // never notice; a cloud provider's web player reads the FIRST gamepad, so the
-  // controller does nothing until the order is swapped by hand in the QAM.
-  //
-  // Only when the user has asked for it. SwapControllerOrder changes Steam's
-  // order for EVERY game, so doing it uninvited would break every setup that
-  // was already correct.
-  //
-  // Steam sends unAppID 0 for non-Steam shortcuts and every tile we make is
-  // one, so the notification cannot say whether a launch is ours — the backend
-  // identifies it by the process Steam started instead.
-  // Only the two fields we use, spelled out rather than imported: @decky/ui
-  // does not export this notification's type, and structural typing makes the
-  // dependency unnecessary.
-  type AppStarted = { bRunning: boolean; nInstanceID: number };
 
-  const onAppStarted = async (notification: AppStarted) => {
-    if (!notification.bRunning) return;
-    try {
-      const status = await getStatus();
-      if (!status.swap_controller_order) return;
-
-      const { ours } = await isShelfcloudProcess(notification.nInstanceID);
-      if (!ours) return;
-
-      // The first two slots, which is exactly what the QAM's reorder moves.
-      SteamClient.Input.SwapControllerOrder(0, 1);
-      console.log("[shelfcloud] swapped controller order for this launch");
-    } catch (error) {
-      // A launch must never fail because a convenience did.
-      console.error("[shelfcloud] could not swap controller order", error);
-    }
-  };
-  const appLifetime =
-    SteamClient.GameSessions.RegisterForAppLifetimeNotifications(
-      (notification) => { void onAppStarted(notification); });
 
   return {
     name: "Shelfcloud",
@@ -1101,7 +1065,6 @@ export default definePlugin(() => {
     icon: <LogoMono />,
     onDismount() {
       removeEventListener(SYNC_EVENT, onLibraryChanged);
-      appLifetime.unregister();
     },
   };
 });

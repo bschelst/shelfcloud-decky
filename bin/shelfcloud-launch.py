@@ -33,6 +33,7 @@ import json
 import os
 import ssl
 import subprocess
+import threading
 import sys
 import urllib.parse
 import urllib.request
@@ -868,6 +869,103 @@ def log_browser_gamepads(url: str, provider: str = "") -> None:
     log(f"browser gamepads: {seen}")
 
 
+# Steam leaves gamepad slot 0 empty, and the web player only reads slot 0.
+#
+# Measured on the device. Steam Input creates FOUR virtual pads and puts both
+# connected controllers in the same one:
+#
+#     pad 0 [event18]  pad 1 [event24]  pad 2 [event25]  pad 3 [event26]
+#     Steam Deck Controller   nControllerIndex=15  nXInputIndex=1
+#     Steam Controller        nControllerIndex=5   nXInputIndex=1
+#
+# Both on slot 1, so pad 0 exists with nothing behind it. A provider's web
+# player reads the FIRST gamepad, finds that empty slot and waits forever,
+# which is why the controller does nothing until the order is changed by hand.
+# Native games are unaffected: they take input from whichever pad sends it.
+#
+# SteamClient.Input.SwapControllerOrder does not fix it - tried with the real
+# controller indices, during a live game, and nothing moved.
+#
+# So close the hole where it actually matters: present the pads that really
+# exist, in order, to this page. Slot 0 is then the controller in the user's
+# hands. Nothing outside this browser window is touched - no Steam state, no
+# other game, nothing persisted - so it cannot affect a setup that was already
+# working.
+REORDER_GAMEPADS_JS = """
+(() => {
+  if (window.__shelfcloudPads) return "already installed";
+  const real = navigator.getGamepads.bind(navigator);
+
+  // A Gamepad's `index` is readonly and players do read it, so the object is
+  // proxied rather than just moved down the array.
+  const wrap = (pad, index) => new Proxy(pad, {
+    get(target, prop) {
+      if (prop === "index") return index;
+      const value = target[prop];
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+
+  navigator.getGamepads = function () {
+    const live = [...real()].filter(Boolean);
+    const out = [null, null, null, null];
+    live.forEach((pad, i) => { out[i] = wrap(pad, i); });
+    return out;
+  };
+  window.__shelfcloudPads = true;
+
+  // A player that latched on at gamepadconnected needs telling again.
+  const first = [...real()].filter(Boolean)[0];
+  if (first) {
+    try {
+      window.dispatchEvent(new GamepadEvent("gamepadconnected",
+                                            { gamepad: wrap(first, 0) }));
+    } catch (e) { /* some engines refuse a synthetic GamepadEvent */ }
+  }
+  return "installed";
+})();
+"""
+
+
+def wants_gamepad_reorder() -> bool:
+    """Has the user turned the controller fix on? Off unless they have."""
+    try:
+        with open(SETTINGS_FILE, encoding="utf-8") as handle:
+            return bool(json.load(handle).get("swap_controller_order", False))
+    except (OSError, ValueError):
+        return False
+
+
+def reorder_gamepads(url: str, provider: str = "") -> None:
+    """Put a real controller in the slot the web player reads.
+
+    Injected repeatedly for a short while rather than once: these players are
+    single-page apps that navigate from the game page into the stream, and a
+    new document drops the override. The script is idempotent, so re-running it
+    costs nothing.
+
+    Best effort. A controller that does not work is the situation this is
+    trying to improve; it must never be the reason a game fails to start.
+    """
+    if not wants_gamepad_reorder():
+        return
+
+    profile = provider_profile(provider)
+    marker = profile.get("page_match") or (url.split("/")[2] if "//" in url else url)
+    deadline = time.monotonic() + 45.0
+    while time.monotonic() < deadline:
+        target = cdp.wait_for_page(CDP_PORT, marker, timeout=5.0)
+        if target and target.get("webSocketDebuggerUrl"):
+            try:
+                result = cdp.evaluate(target["webSocketDebuggerUrl"],
+                                      REORDER_GAMEPADS_JS)
+                if result == "installed":
+                    log("gamepad order corrected for this page")
+            except cdp.CDPError:
+                pass          # page navigating; the next pass catches it
+        time.sleep(5)
+
+
 def hold_platform_override(url: str, provider: str = ""):
     """Make the page believe it is on a supported OS, for the whole session.
 
@@ -1158,6 +1256,12 @@ def main() -> int:
         log_browser_gamepads(url, provider)
     except Exception as exc:          # diagnostics never break a launch
         log(f"gamepad diagnostic failed, continuing: {exc}")
+
+    # Daemon thread: it keeps re-injecting while the player navigates into the
+    # stream, and must never hold the launcher open past the game.
+    if wants_gamepad_reorder():
+        threading.Thread(target=reorder_gamepads, args=(url, provider),
+                         name="gamepad-reorder", daemon=True).start()
 
     started = time.monotonic()
     code = browser.wait()

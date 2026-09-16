@@ -384,3 +384,76 @@ def test_it_cannot_wait_forever(monkeypatch):
     clock = _with_pads(monkeypatch, churn)
     launcher.wait_for_gamepad(timeout=3.0)
     assert clock.now <= 4.0, "must give up at the timeout"
+
+
+# ------------------------------------- gamepad slot 0 is empty, so fill it
+
+def test_the_reorder_is_off_unless_the_user_turned_it_on(monkeypatch, tmp_path):
+    settings = tmp_path / "settings.json"
+    settings.write_text("{}")
+    monkeypatch.setattr(launcher, "SETTINGS_FILE", str(settings))
+    assert launcher.wants_gamepad_reorder() is False
+
+    settings.write_text('{"swap_controller_order": true}')
+    assert launcher.wants_gamepad_reorder() is True
+
+
+def test_a_missing_or_broken_settings_file_means_off(monkeypatch, tmp_path):
+    monkeypatch.setattr(launcher, "SETTINGS_FILE", str(tmp_path / "gone.json"))
+    assert launcher.wants_gamepad_reorder() is False
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not json")
+    monkeypatch.setattr(launcher, "SETTINGS_FILE", str(bad))
+    assert launcher.wants_gamepad_reorder() is False
+
+
+def test_the_reorder_does_nothing_when_off(monkeypatch, tmp_path):
+    monkeypatch.setattr(launcher, "SETTINGS_FILE", str(tmp_path / "gone.json"))
+    monkeypatch.setattr(cdp, "wait_for_page",
+                        lambda *a, **k: pytest.fail("must not touch the page"))
+    launcher.reorder_gamepads("https://luna.amazon.com/game/x", "amazon_luna")
+
+
+def test_the_script_is_idempotent_and_reorders_in_a_real_engine():
+    """Injected repeatedly, because these players navigate from the game page
+    into the stream and a new document drops the override."""
+    import json as _json, shutil, subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node not available")
+    script = """
+const pads = [null, {index: 1, id: "pad 1", buttons: []}, null, null];
+global.window = {};
+// Node 22 ships its own read-only `navigator`, so a plain assignment is
+// silently ignored and getGamepads comes back undefined.
+Object.defineProperty(global, "navigator", {
+  value: { getGamepads: () => pads }, configurable: true, writable: true,
+});
+global.GamepadEvent = function () { throw new Error("not supported"); };
+%s
+const first = navigator.getGamepads();
+const again = %s
+console.log(JSON.stringify({
+  movedTo: first.findIndex(Boolean),
+  reportsIndex: first.filter(Boolean)[0].index,
+  id: first.filter(Boolean)[0].id,
+  second: again,
+}));
+""" % (launcher.REORDER_GAMEPADS_JS, launcher.REORDER_GAMEPADS_JS)
+    out = subprocess.run([node, "-e", script], capture_output=True, text=True,
+                         timeout=20)
+    assert out.returncode == 0, out.stderr
+    r = _json.loads(out.stdout.strip())
+    # the only live pad was at slot 1; the page must now find it at slot 0
+    assert r["movedTo"] == 0
+    assert r["reportsIndex"] == 0, "index is readonly, so it must be proxied"
+    assert r["id"] == "pad 1", "it must still be the same controller"
+    assert r["second"] == "already installed", "re-injection must be harmless"
+
+
+def test_nothing_else_reaches_for_steams_controller_api():
+    """SwapControllerOrder was tried with the real controller indices, during a
+    live game, and moved nothing. Keeping a call that does nothing would be a
+    setting that lies."""
+    frontend = open(os.path.join(ROOT, "src", "index.tsx"), encoding="utf-8").read()
+    assert "SwapControllerOrder" not in frontend
