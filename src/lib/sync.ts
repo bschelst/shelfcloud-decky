@@ -133,6 +133,33 @@ interface ArtworkOutcome {
  *  something Steam documents as safe. The downloads are where the time goes,
  *  so there is nothing to gain by racing the writes as well.
  */
+/** Take a tile's artwork with it when the tile goes.
+ *
+ *  Steam keys custom artwork to the app id and never tidies it: removing a
+ *  shortcut leaves four files behind in userdata/<user>/config/grid forever.
+ *  Nothing points at them afterwards, so nothing ever will.
+ *
+ *  Measured on a real Deck before this existed: 18,728 files and 4.3 GB in
+ *  that folder, of which 17,155 files and 4.16 GB belonged to 4,339 app ids
+ *  that no longer existed. Every recreation of the library wrote a fresh set
+ *  and abandoned the last. A directory that size is also enough to break other
+ *  plugins that enumerate it — SteamGridDB was crashing on it.
+ *
+ *  Best effort per slot: a tile that fails to clear is a few kilobytes left
+ *  behind, and it must never stop the removal it belongs to.
+ */
+async function clearArtwork(appId: number): Promise<void> {
+  // Capsule, Hero, Logo, Header — the four this plugin writes. Icon is a file
+  // path set through SetShortcutIcon and is cleaned up by the backend.
+  for (const assetType of [0, 1, 2, 3]) {
+    try {
+      await SteamClient.Apps.ClearCustomArtworkForApp(appId, assetType as never);
+    } catch {
+      /* already gone, or Steam refused this slot; the others still matter */
+    }
+  }
+}
+
 async function applyArtwork(appId: number, game: DesiredGame): Promise<ArtworkOutcome> {
   let applied = 0;
 
@@ -242,6 +269,7 @@ async function adoptStrayShortcuts(
 
     for (const appId of extras) {
       try {
+        await clearArtwork(appId);
         await SteamClient.Apps.RemoveShortcut(appId);
         console.warn(`[shelfcloud] removed a duplicate tile for game ${entry.game_id}`);
       } catch {
@@ -477,7 +505,8 @@ export async function syncLibrary(
     if (desiredIds.has(Number(gameId))) continue;
     try {
       step("Removing", entry.name);
-      SteamClient.Apps.RemoveShortcut(entry.app_id);
+      void clearArtwork(entry.app_id)
+        .then(() => SteamClient.Apps.RemoveShortcut(entry.app_id));
       await callbacks.forget(Number(gameId));
       result.removed++;
     } catch (error) {
