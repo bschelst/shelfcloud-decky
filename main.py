@@ -293,7 +293,7 @@ class Plugin:
 
     async def _main(self):
         self._settings = await asyncio.to_thread(self._read_json, _settings_file())
-        self._synced = await asyncio.to_thread(self._read_json, _state_file())
+        self._synced = await asyncio.to_thread(self._load_state)
         decky.logger.info("Shelfcloud ready (gateway=%s, tracked=%d)",
                           self._gateway(), len(self._synced))
         await self.apply_overrides()
@@ -307,6 +307,65 @@ class Plugin:
         decky.logger.info("Shelfcloud unloaded")
 
     # ---------------------------------------------------------------- config
+
+    @classmethod
+    def _load_state(cls) -> Dict:
+        """Which tiles this plugin has made — recovered from Steam if lost.
+
+        This used to be a plain _read_json, which answers {} for a file that is
+        missing OR unreadable. Reconcile works entirely from this map, so {}
+        does not mean "no tiles", it means "I have never made any" — and every
+        game then reads as desired-but-untracked and gets a BRAND NEW tile.
+
+        The old tiles do not go away. They are untracked, so nothing cleans
+        them up, and the user gets duplicates. Worse, a Steam shortcut's
+        identity IS its app id: playtime, collections, artwork and the
+        per-game controller configuration all hang off it. Recreating a tile
+        silently abandons all of that on an app id nothing points at any more.
+
+        Seen on a real device: a synced.json.bak containing exactly "{}".
+
+        shortcuts.vdf is the authority on what Steam actually has, and every
+        tile this plugin makes carries "--game-id N" in its launch options, so
+        the file says which game each one belongs to. Rebuilding from it is
+        both safer and more correct than trusting our own copy:
+
+          - first run, no tiles          -> {} , which is right
+          - state lost, tiles exist      -> the real app ids, so nothing is
+                                            recreated and nothing is orphaned
+          - tiles the user deleted       -> absent, so they stay deleted
+        """
+        state = cls._read_json(_state_file())
+        if state:
+            return state
+
+        recovered = cls._recover_from_steam()
+        if recovered:
+            decky.logger.warning(
+                "state file missing or unreadable; recovered %d tile(s) from "
+                "shortcuts.vdf rather than recreating them", len(recovered))
+        return recovered
+
+    @staticmethod
+    def _recover_from_steam() -> Dict:
+        """game id -> {app_id}, read back out of Steam's own shortcuts.vdf.
+
+        Only the app id is recovered, because only the app id is irreplaceable
+        — name, exe and launch options are rewritten on every sync anyway.
+        """
+        try:
+            found = shortcuts.shelfcloud_shortcuts()
+        except Exception as exc:                      # never block startup
+            decky.logger.warning("could not read shortcuts.vdf: %s", exc)
+            return {}
+
+        recovered: Dict = {}
+        for entry in found:
+            # setdefault: duplicates() documents that Steam's order is oldest
+            # first, and the oldest tile is the one holding the playtime and
+            # the controller layout.
+            recovered.setdefault(str(entry["game_id"]), {"app_id": entry["app_id"]})
+        return recovered
 
     @staticmethod
     def _read_json(path: str) -> Dict:
