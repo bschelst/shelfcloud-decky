@@ -117,15 +117,37 @@ def test_a_refused_override_does_not_leak_the_socket(fake, monkeypatch):
     assert fake[0].closed is True
 
 
-def test_reload_does_not_enable_the_page_domain(fake):
-    """Nothing reads this socket after setup. Enabling a domain would start an
-    event stream into a buffer no one drains, and a peer that cannot write
-    eventually blocks."""
+def test_the_override_alone_enables_no_domain(fake):
+    """Nothing reads this socket, so a domain enabled needlessly is an event
+    stream into a buffer no one drains."""
     held = cdp.hold_platform("ws://127.0.0.1:9223/x", UA, "Windows")
     cdp.reload_page(held)
+    assert "Page.enable" not in [m["method"] for m in held.sent]
+
+
+def test_a_startup_script_must_enable_the_page_domain(fake):
+    """Not optional, and it fails QUIETLY without it. Measured on the device:
+
+        enable -> script -> reload    script ran
+        script -> reload              script NEVER ran
+
+    and in the failing case the command still answered {"identifier": "1"} and
+    the reload genuinely happened, so every signal said success.
+    """
+    held = cdp.hold_platform("ws://127.0.0.1:9223/x", UA, "Windows")
+    cdp.add_startup_script(held, "window.x = 1;")
     methods = [m["method"] for m in held.sent]
-    assert "Page.reload" in methods
-    assert "Page.enable" not in methods
+    assert methods.index("Page.enable") < \
+           methods.index("Page.addScriptToEvaluateOnNewDocument")
+
+
+def test_the_drain_survives_the_socket_closing(fake):
+    """It ends when the session does; it must not raise on the way out."""
+    held = cdp.hold_platform("ws://127.0.0.1:9223/x", UA, "Windows")
+    thread = cdp.drain_in_background(held)
+    thread.join(timeout=5)
+    assert not thread.is_alive()
+    assert thread.daemon
 
 
 # ------------------------------------------------- who gets the override
@@ -152,7 +174,12 @@ def test_luna_gets_one_and_the_page_is_reloaded(fake, monkeypatch):
 
     assert held is not None and held.closed is False
     methods = [m["method"] for m in held.sent]
-    assert methods == ["Emulation.setUserAgentOverride", "Page.reload"]
+    # Order is the point: the startup script has to be registered BEFORE the
+    # reload, or the document that Luna actually runs in never receives it.
+    assert methods == ["Emulation.setUserAgentOverride",
+                       "Page.enable",
+                       "Page.addScriptToEvaluateOnNewDocument",
+                       "Page.reload"]
 
 
 def test_a_missing_page_is_survivable(monkeypatch):
@@ -185,3 +212,79 @@ def test_the_override_is_applied_even_without_autoplay():
     hold_line = source.index("held = hold_platform_override")
     autoplay_guard = source.index("if autoplay:")
     assert hold_line < autoplay_guard
+
+
+# ------------------------------------- the luna:// app handoff / xdg-open
+
+def test_the_handoff_stub_supplies_the_id_luna_looks_for():
+    """Luna does document.querySelector("#hiddenIframe") and only creates its
+    own when that returns null, so the id is the entire hook."""
+    js = launcher.NEUTRALISE_APP_HANDOFF_JS
+    assert "hiddenIframe" in js
+    assert "contentWindow" in js
+
+
+def test_the_stub_swallows_the_href_assignment():
+    """openUriWithHiddenFrame ends in `frame.contentWindow.location.href = uri`.
+    A setter that does nothing is what turns that into silence."""
+    js = launcher.NEUTRALISE_APP_HANDOFF_JS
+    assert "set href" in js
+
+
+def test_the_stub_waits_for_a_dom_to_attach_to():
+    """A start script runs before the page's own, when the document can be
+    genuinely empty — document.documentElement itself can be null. Luna only
+    looks for #hiddenIframe when Play is pressed, so DOMContentLoaded is early
+    enough by a wide margin."""
+    js = launcher.NEUTRALISE_APP_HANDOFF_JS
+    assert "DOMContentLoaded" in js
+    assert "document.body || document.documentElement" in js
+
+
+def test_the_stub_never_breaks_the_page():
+    assert "try {" in launcher.NEUTRALISE_APP_HANDOFF_JS
+    assert "catch" in launcher.NEUTRALISE_APP_HANDOFF_JS
+
+
+def test_only_luna_gets_the_stub():
+    """Nothing else pokes a custom scheme, and injecting into a provider that
+    does not need it is a way to break one that works."""
+    assert launcher.provider_profile("amazon_luna").get("startup_js")
+    for key in ("boosteroid", "geforce_now", "xbox_cloud"):
+        assert not launcher.provider_profile(key).get("startup_js")
+
+
+def test_the_stub_runs_in_a_real_engine(tmp_path):
+    """Prove the shim actually swallows the assignment, rather than trusting
+    that it reads correctly. Mirrors what openUriWithHiddenFrame does."""
+    import json as _json, shutil, subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node not available")
+    script = """
+const els = {};
+const make = () => ({ id:"", style:{}, _props:{},
+  appendChild(){}, });
+global.document = {
+  createElement: () => { const e = make();
+     e.__defineSetterSafe = true; return e; },
+  getElementById: id => els[id] || null,
+  querySelector: sel => els[sel.replace('#','')] || null,
+  documentElement: { appendChild(el){ els[el.id] = el; } },
+};
+global.Object = Object;
+%s
+// now do exactly what Luna does
+const frame = document.querySelector("#hiddenIframe");
+let threw = false, landed = null;
+try { frame.contentWindow.location.href = "luna://play.amazon.com/x"; }
+catch (e) { threw = true; }
+try { landed = frame.contentWindow.location.href; } catch (e) {}
+console.log(JSON.stringify({ found: !!frame, threw, landed }));
+""" % launcher.NEUTRALISE_APP_HANDOFF_JS
+    out = subprocess.run([node, "-e", script], capture_output=True, text=True, timeout=20)
+    assert out.returncode == 0, out.stderr
+    result = _json.loads(out.stdout.strip())
+    assert result["found"] is True, "Luna would have made its own iframe"
+    assert result["threw"] is False, "an exception is not the mechanism"
+    assert result["landed"] == "", "the scheme must go nowhere"

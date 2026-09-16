@@ -14,6 +14,7 @@ import base64
 import json
 import os
 import socket
+import threading
 import struct
 import time
 import urllib.error
@@ -174,10 +175,11 @@ def hold_platform(ws_url: str, user_agent: str, platform: str = "Windows",
     thing that moves the string, navigator.platform, navigator.userAgentData
     and the Sec-CH-UA-Platform request headers together.
 
-    No CDP domain is enabled here on purpose. Domains push events, nothing
-    reads this socket once it is set up, and an unread socket whose peer keeps
-    writing eventually blocks that peer. With no domain enabled the only
-    traffic is the reply below, which is read before returning.
+    No domain is enabled by THIS call — the override needs none. A caller that
+    goes on to add a startup script does enable Page (it is required, see
+    add_startup_script) and must then call drain_in_background, because an
+    enabled domain pushes events into a socket nobody reads, and a peer that
+    cannot finish writing eventually blocks.
     """
     ws = _WebSocket(ws_url, timeout=timeout)
     try:
@@ -231,3 +233,64 @@ def reload_page(ws: "_WebSocket", timeout: float = 15.0) -> None:
         if json.loads(ws.recv_text()).get("id") == 2:
             return
     raise CDPError("timed out reloading the page")
+
+
+def add_startup_script(ws: "_WebSocket", source: str, timeout: float = 15.0) -> None:
+    """Run JS in every document this page loads, before the page's own scripts.
+
+    Page.enable is NOT optional here, and the failure without it is a quiet
+    one. Measured on the device, against the live page:
+
+        enable -> script -> reload    script ran
+        script -> enable -> reload    script ran
+        script -> reload              script NEVER ran
+
+    In that last case the command still answered {"identifier": "1"} and the
+    reload genuinely happened — a stamp set on the old document was gone
+    afterwards — so every signal said success and nothing was injected.
+
+    Enabling Page starts an event stream, so a caller must follow the reload
+    with drain_in_background.
+
+    Sent on the HELD socket, so it lives exactly as long as the session that
+    set it, and the reload that follows is what gets it into the document the
+    page is actually running.
+    """
+    for ident, method, params in (
+        (3, "Page.enable", {}),
+        (4, "Page.addScriptToEvaluateOnNewDocument", {"source": source}),
+    ):
+        ws.send_text(json.dumps({"id": ident, "method": method, "params": params}))
+        deadline = time.monotonic() + timeout
+        while True:
+            if time.monotonic() > deadline:
+                raise CDPError(f"timed out on {method}")
+            message = json.loads(ws.recv_text())
+            if message.get("id") != ident:
+                continue          # an event, now that Page is enabled
+            if "error" in message:
+                raise CDPError(f"{method} refused: {message['error']}")
+            break
+
+
+def drain_in_background(ws: "_WebSocket") -> "threading.Thread":
+    """Read and discard everything, forever, so an enabled domain cannot wedge.
+
+    Once Page is enabled the browser pushes an event for every frame, request
+    and lifecycle step of a session that may run for hours. Nothing wants to
+    read them, but something has to: an unread socket stops being drained, the
+    peer's writes back up, and the override this session exists to hold dies
+    with it.
+
+    Daemon, so it never keeps the launcher alive past the game.
+    """
+    def pump() -> None:
+        while True:
+            try:
+                ws.recv_text()
+            except Exception:
+                return            # socket closed at end of session; expected
+
+    thread = threading.Thread(target=pump, name="cdp-drain", daemon=True)
+    thread.start()
+    return thread

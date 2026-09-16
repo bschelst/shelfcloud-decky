@@ -503,6 +503,11 @@ PROVIDERS = {
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             "(KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36 Edg/153.0.0.0"
         ),
+        # Reporting Windows has a side effect: Luna then believes a desktop app
+        # might be installed and pokes "luna://" to find out, which Chromium
+        # surfaces as "This site is trying to open xdg-open". See
+        # NEUTRALISE_APP_HANDOFF_JS.
+        "startup_js": "NEUTRALISE_APP_HANDOFF_JS",
         # The launch URL is luna.amazon.com, and Luna REDIRECTS it to the
         # viewer's own country: luna.amazon.de, luna.amazon.co.uk,
         # luna.amazon.com.be. Matching on the host we asked for therefore finds
@@ -770,6 +775,67 @@ def build_browser_command(app_id: str, profile: str, url: str, kiosk: bool = Tru
     ]
 
 
+# Luna asks the desktop app to take over, and on a Deck there is no desktop app.
+#
+# Read off Luna's own bundle. AppLauncher builds "luna://play.amazon<tld>/..."
+# and hands it to launchProtocol, which for Chrome ends in:
+#
+#     function openUriWithHiddenFrame(uri, fail, success) {
+#         const timer = setTimeout(() => { fail(); ... }, 500);
+#         let frame = document.querySelector("#hiddenIframe")
+#                     || _createHiddenIframe(document.body, "about:blank");
+#         ... window "blur" -> success ...
+#         frame.contentWindow.location.href = uri;
+#     }
+#
+# So it pokes the scheme at a hidden iframe and reads 500ms of silence as "app
+# not installed". Chromium turns that poke into the "This site is trying to
+# open xdg-open" prompt, which sits on top of the game until it is dismissed.
+#
+# There is NO browser flag for this — external-protocol handling is deliberately
+# not switchable, and the enterprise policy that can block it (URLBlocklist)
+# would mean writing a system-wide policy file as root on the user's device.
+#
+# So: supply #hiddenIframe ourselves, with a contentWindow whose location.href
+# setter does nothing. Luna's querySelector finds ours, skips making its own,
+# pokes the stub, hears nothing, and takes its own "not installed" branch —
+# which calls .catch(() => this.provision()) and streams in the browser.
+#
+# That is not a trick to defeat a check. It is the honest answer: there is no
+# Luna desktop app on this machine, and the only thing being suppressed is a
+# prompt asking the user to confirm that.
+#
+# An own property shadows the prototype getter, which is why this works at all:
+# Location.href is [Unforgeable], so the real one can never be overridden.
+NEUTRALISE_APP_HANDOFF_JS = """
+(() => {
+  const install = () => {
+    try {
+      if (document.getElementById('hiddenIframe')) return true;
+      const host = document.body || document.documentElement;
+      if (!host) return false;          // document-start: nothing to attach to yet
+      const frame = document.createElement('iframe');
+      frame.id = 'hiddenIframe';
+      frame.style.display = 'none';
+      // An OWN property shadows the prototype getter. This is the only way in:
+      // Location.href is [Unforgeable], so the real one can never be replaced.
+      Object.defineProperty(frame, 'contentWindow', {
+        configurable: true,
+        get() { return { location: { set href(_) {}, get href() { return ''; } } }; },
+      });
+      host.appendChild(frame);
+      return true;
+    } catch (e) { return true; }       // never break the page over this
+  };
+  // This runs before the page's own scripts, so the DOM is usually still empty.
+  // Luna only looks for #hiddenIframe when Play is pressed, so DOMContentLoaded
+  // is early enough by a wide margin.
+  if (!install()) {
+    document.addEventListener('DOMContentLoaded', install, { once: true });
+  }
+})();
+"""
+
 def hold_platform_override(url: str, provider: str = ""):
     """Make the page believe it is on a supported OS, for the whole session.
 
@@ -805,7 +871,14 @@ def hold_platform_override(url: str, provider: str = ""):
 
     held = cdp.hold_platform(target["webSocketDebuggerUrl"], user_agent,
                              profile.get("platform", "Windows"))
+    wants_shim = profile.get("startup_js") == "NEUTRALISE_APP_HANDOFF_JS"
+    if wants_shim:
+        cdp.add_startup_script(held, NEUTRALISE_APP_HANDOFF_JS)
     cdp.reload_page(held)
+    if wants_shim:
+        # add_startup_script had to enable the Page domain, so from here on the
+        # browser is pushing events at this socket. Drain them or it wedges.
+        cdp.drain_in_background(held)
     log(f"{profile['label']}: reporting {profile.get('platform', 'Windows')} "
         "for this session")
     return held
