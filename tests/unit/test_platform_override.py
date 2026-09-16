@@ -288,3 +288,47 @@ console.log(JSON.stringify({ found: !!frame, threw, landed }));
     assert result["found"] is True, "Luna would have made its own iframe"
     assert result["threw"] is False, "an exception is not the mechanism"
     assert result["landed"] == "", "the scheme must go nowhere"
+
+
+# ------------------------------------------------ gamepad diagnostics
+
+def test_pad_names_are_kept_not_just_paths(monkeypatch, tmp_path):
+    """Steam renumbers its virtual pads every session — the same controller was
+    event19 one night and event18 the next — so a path identifies nothing.
+    "pad 0"/"pad 1" is Steam's slot order, and slot order decides player one.
+    """
+    devices = tmp_path / "devices"
+    devices.write_text(
+        'I: Bus=0003\nN: Name="Microsoft X-Box 360 pad 0"\nH: Handlers=event18 js0\n'
+        '\n'
+        'I: Bus=0003\nN: Name="Microsoft X-Box 360 pad 1"\nH: Handlers=event19 js1\n'
+        '\n'
+        'I: Bus=0005\nN: Name="Steam Ctrl (BT) FXA99547006E5"\nH: Handlers=event24\n')
+    real_open = open
+
+    def fake_open(path, *a, **k):
+        if path == "/proc/bus/input/devices":
+            return real_open(devices, *a, **k)
+        return real_open(path, *a, **k)
+
+    monkeypatch.setattr("builtins.open", fake_open)
+    pads = launcher.active_gamepads()
+    assert any("pad 0" in p for p in pads)
+    assert any("pad 1" in p for p in pads)
+    # the raw Bluetooth device is not a Steam Input virtual pad
+    assert not any("Steam Ctrl (BT)" in p for p in pads)
+
+
+def test_the_diagnostic_never_breaks_a_launch(monkeypatch):
+    """A diagnostic that can abort a game is worse than no diagnostic."""
+    monkeypatch.setattr(cdp, "wait_for_page", lambda *a, **k: None)
+    launcher.log_browser_gamepads("https://luna.amazon.com/game/x", "amazon_luna")
+
+
+def test_a_cdp_failure_is_reported_not_raised(monkeypatch):
+    monkeypatch.setattr(cdp, "wait_for_page",
+                        lambda *a, **k: {"webSocketDebuggerUrl": "ws://127.0.0.1:9223/x"})
+    def boom(*a, **k):
+        raise cdp.CDPError("page went away")
+    monkeypatch.setattr(cdp, "evaluate", boom)
+    launcher.log_browser_gamepads("https://luna.amazon.com/game/x", "amazon_luna")

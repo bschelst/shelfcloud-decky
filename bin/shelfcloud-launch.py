@@ -836,6 +836,38 @@ NEUTRALISE_APP_HANDOFF_JS = """
 })();
 """
 
+def log_browser_gamepads(url: str, provider: str = "") -> None:
+    """Record what the PAGE sees, which is the only view that decides anything.
+
+    The launcher can list Steam's virtual pads all day; the provider's web
+    player reads navigator.getGamepads() and generally drives whatever sits at
+    index 0. If index 0 is the Deck's own controls, an external controller does
+    nothing until Steam's order is changed — and Steam does not persist that
+    order for these tiles, so it is changed again every launch.
+
+    Chrome exposes a gamepad to a page only after that pad sends input, so an
+    empty list here is not a fault: it means nothing had been touched yet, and
+    it is worth knowing too.
+
+    Best effort and never fatal: this is a diagnostic, not a feature.
+    """
+    profile = provider_profile(provider)
+    marker = profile.get("page_match") or (url.split("/")[2] if "//" in url else url)
+    target = cdp.wait_for_page(CDP_PORT, marker, timeout=PAGE_TIMEOUT)
+    if not target or not target.get("webSocketDebuggerUrl"):
+        return
+    try:
+        seen = cdp.evaluate(target["webSocketDebuggerUrl"], """
+            JSON.stringify([...navigator.getGamepads()].map(
+                (g, i) => g ? {i, id: g.id, axes: g.axes.length,
+                               buttons: g.buttons.length} : {i, id: null}))
+        """)
+    except cdp.CDPError as exc:
+        log(f"could not read the page's gamepads: {exc}")
+        return
+    log(f"browser gamepads: {seen}")
+
+
 def hold_platform_override(url: str, provider: str = ""):
     """Make the page believe it is on a supported OS, for the whole session.
 
@@ -981,11 +1013,21 @@ def active_gamepads() -> list:
     for block in blocks:
         if "X-Box" not in block and "Xbox" not in block:
             continue
+        # The NAME is the whole point of logging these. Steam renumbers its
+        # virtual pads every session — the same controller was event19 one
+        # night and event18 the next — so a path says nothing about WHICH
+        # controller it is, while "pad 0" / "pad 1" is Steam's slot order, and
+        # slot order is what decides who is player one.
+        name = ""
+        for line in block.splitlines():
+            if line.startswith("N: Name="):
+                name = line.split("=", 1)[1].strip().strip('"')
         for line in block.splitlines():
             if line.startswith("H: Handlers="):
                 for handler in line.split("=", 1)[1].split():
                     if handler.startswith("event"):
-                        pads.append(f"/dev/input/{handler}")
+                        pads.append(f"{name} [/dev/input/{handler}]" if name
+                                    else f"/dev/input/{handler}")
     return pads
 
 
@@ -1093,6 +1135,11 @@ def main() -> int:
             try_autoplay(url, provider)
         except Exception as exc:  # never let automation break the launch
             log(f"autoplay failed, continuing: {exc}")
+
+    try:
+        log_browser_gamepads(url, provider)
+    except Exception as exc:          # diagnostics never break a launch
+        log(f"gamepad diagnostic failed, continuing: {exc}")
 
     started = time.monotonic()
     code = browser.wait()
