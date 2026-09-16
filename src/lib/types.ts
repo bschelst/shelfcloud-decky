@@ -81,6 +81,10 @@ export interface Status {
   /** Offered when `browsers` is empty; already-installed ones are filtered out. */
   installable?: InstallableBrowser[];
   install?: InstallState;
+  /** Set while a sign-in is waiting: the code the return page asks for.
+   *  Kept in the backend because opening Steam's browser closes the
+   *  panel that first displayed it. */
+  pending_login_code?: string;
   sync_minutes: number;
   sync_choices: number[];
   by_provider: Record<string, number>;
@@ -91,6 +95,10 @@ export interface LoginStart {
   ok: boolean;
   session_token?: string;
   login_url?: string;
+  /** Pairing code that must be typed on the page Steam returns to.
+   *  Without it a sign-in cannot be completed — it is what stops
+   *  someone else finishing a session they started for you. */
+  confirm_code?: string;
   error?: string;
 }
 

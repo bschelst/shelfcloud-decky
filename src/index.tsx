@@ -512,8 +512,53 @@ function Content() {
   // credential used to leave every control enabled and every action failing.
   const signedOut = !status.signed_in;
 
+  // The pairing code for a sign-in in progress.
+  //
+  // Shown here, persistently, because the browser that ASKS for it is the same
+  // action that closes this panel — a code displayed once, in the panel, would
+  // be gone by the time it was needed. It comes from the backend's status so
+  // reopening the panel over the browser shows it again.
+  const pairingCode = status.pending_login_code || "";
+
   return (
     <>
+      {pairingCode ? (
+        <PanelSection title="Finish signing in">
+          <PanelSectionRow>
+            <Focusable
+              onFocus={(event: React.FocusEvent<HTMLDivElement>) =>
+                event.target.scrollIntoView({ behavior: "smooth", block: "start" })
+              }
+              style={{ padding: "8px 0" }}
+            >
+              <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 6 }}>
+                Type this code on the Steam sign-in page:
+              </div>
+              <div
+                style={{
+                  fontSize: 28,
+                  fontWeight: 700,
+                  letterSpacing: 6,
+                  textAlign: "center",
+                  padding: "10px 0",
+                  borderRadius: 8,
+                  background: theme.surfaceRaised,
+                  color: theme.accentText,
+                  // Read off this screen and typed on another; a font where
+                  // 0/O and 1/I differ matters more here than elsewhere.
+                  fontFamily: "monospace",
+                }}
+              >
+                {pairingCode}
+              </div>
+              <div style={{ fontSize: 11, opacity: 0.7, marginTop: 6 }}>
+                It proves this Deck started the sign-in. Nothing is linked to
+                your account until it is entered.
+              </div>
+            </Focusable>
+          </PanelSectionRow>
+        </PanelSection>
+      ) : null}
       <PanelSection title="Shelfcloud">
         <PanelSectionRow>
           {/* Focusable, even though there is nothing here to activate.

@@ -273,6 +273,9 @@ class Plugin:
         self._synced: Dict[str, Dict[str, Any]] = {}
         self._poll_task: Optional[asyncio.Task] = None
         self._login_task: Optional[asyncio.Task] = None
+        # The pairing code for a sign-in in progress, shown in the panel
+        # so the person can read it while the browser asks for it.
+        self._pending_login_code: str = ""
         self._last_error: Optional[str] = None
         self._last_sync: Optional[float] = None
         # Whether the gateway last accepted our token. A token can stop working
@@ -387,6 +390,14 @@ class Plugin:
             result = await asyncio.to_thread(
                 self._request, "/auth/session?web=0", "POST", None, False
             )
+            # The pairing code is what stops someone else finishing this
+            # sign-in. It is kept HERE rather than only returned once, because
+            # opening Steam's browser closes the panel — the user has to be
+            # able to peek back at the panel to read the code while the browser
+            # is asking for it, and a value that lived only in the panel's
+            # state would be gone by then.
+            self._pending_login_code = result.get("confirm_code") or ""
+
             # Wait for completion here, not in the panel: opening Steam's
             # browser closes the panel and would take the waiter with it.
             if self._login_task and not self._login_task.done():
@@ -424,6 +435,9 @@ class Plugin:
             if not result or result.get("status") != "ok":
                 continue
 
+            # Paired. The code has served its purpose and should not linger
+            # in the panel for the next person who opens it.
+            self._pending_login_code = ""
             self._settings["api_token"] = result["api_token"]
             self._settings["steam_id64"] = result.get("steam_id64")
             # A fresh credential invalidates any cached "not signed in" answer.
@@ -435,6 +449,7 @@ class Plugin:
             await decky.emit(SYNC_EVENT)
             return
 
+        self._pending_login_code = ""
         decky.logger.info("Sign-in was not completed within the time limit")
 
     async def poll_login(self, session_token: str) -> Dict[str, Any]:
@@ -1079,6 +1094,13 @@ class Plugin:
             "sync_minutes": self._sync_minutes(),
             "sync_choices": SYNC_INTERVAL_CHOICES,
             "last_error": self._last_error,
+            # Only while a sign-in is in flight; the browser that
+            # asks for this closed the panel that first showed it.
+            "pending_login_code": (
+                self._pending_login_code
+                if self._login_task is not None and not self._login_task.done()
+                else ""
+            ),
         }
 
     # ------------------------------------------------- installing a browser
