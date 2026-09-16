@@ -294,3 +294,12 @@ def drain_in_background(ws: "_WebSocket") -> "threading.Thread":
     thread = threading.Thread(target=pump, name="cdp-drain", daemon=True)
     thread.start()
     return thread
+
+
+def open_session(ws_url: str, timeout: float = 15.0) -> "_WebSocket":
+    """An open CDP session with no emulation attached.
+
+    Same lifetime rule as hold_platform: whatever is installed through it lives
+    only as long as this socket, so the caller keeps the object.
+    """
+    return _WebSocket(ws_url, timeout=timeout)

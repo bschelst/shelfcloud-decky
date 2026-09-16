@@ -407,11 +407,49 @@ def test_a_missing_or_broken_settings_file_means_off(monkeypatch, tmp_path):
     assert launcher.wants_gamepad_reorder() is False
 
 
-def test_the_reorder_does_nothing_when_off(monkeypatch, tmp_path):
+def test_a_provider_needing_nothing_opens_no_session(monkeypatch, tmp_path):
+    """With the setting off and no platform override to install, there is
+    nothing to do and no page to wait for."""
     monkeypatch.setattr(launcher, "SETTINGS_FILE", str(tmp_path / "gone.json"))
     monkeypatch.setattr(cdp, "wait_for_page",
                         lambda *a, **k: pytest.fail("must not touch the page"))
-    launcher.reorder_gamepads("https://luna.amazon.com/game/x", "amazon_luna")
+    assert launcher.hold_platform_override(
+        "https://www.xbox.com/play", "xbox_cloud") is None
+
+
+def test_the_setting_alone_is_enough_to_open_a_session(fake, monkeypatch, tmp_path):
+    """Boosteroid and GeForce NOW need no platform override, but they need the
+    gamepad fix just as much as Luna does."""
+    settings = tmp_path / "settings.json"
+    settings.write_text('{"swap_controller_order": true}')
+    monkeypatch.setattr(launcher, "SETTINGS_FILE", str(settings))
+    monkeypatch.setattr(cdp, "wait_for_page",
+                        lambda *a, **k: {"webSocketDebuggerUrl": "ws://127.0.0.1:9223/x"})
+    held = launcher.hold_platform_override(
+        "https://cloud.boosteroid.com/", "boosteroid")
+    assert held is not None
+    methods = [m["method"] for m in held.sent]
+    # no UA override for this provider, but the script must still go in FIRST
+    assert "Emulation.setUserAgentOverride" not in methods
+    assert methods.index("Page.addScriptToEvaluateOnNewDocument") < \
+           methods.index("Page.reload")
+
+
+def test_the_remap_is_a_startup_script_not_a_late_injection(fake, monkeypatch, tmp_path):
+    """The bug this replaces. A player captures navigator.getGamepads when it
+    starts, so replacing it afterwards is ignored — measured on the live page:
+    the override reported itself installed while the page went on calling the
+    reference it had already taken."""
+    settings = tmp_path / "settings.json"
+    settings.write_text('{"swap_controller_order": true}')
+    monkeypatch.setattr(launcher, "SETTINGS_FILE", str(settings))
+    monkeypatch.setattr(cdp, "wait_for_page",
+                        lambda *a, **k: {"webSocketDebuggerUrl": "ws://127.0.0.1:9223/x"})
+    held = launcher.hold_platform_override(
+        "https://luna.amazon.com/game/x", "amazon_luna")
+    installed = next(m for m in held.sent
+                     if m["method"] == "Page.addScriptToEvaluateOnNewDocument")
+    assert "getGamepads" in installed["params"]["source"]
 
 
 def test_the_script_is_idempotent_and_reorders_in_a_real_engine():

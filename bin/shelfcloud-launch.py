@@ -936,36 +936,6 @@ def wants_gamepad_reorder() -> bool:
         return False
 
 
-def reorder_gamepads(url: str, provider: str = "") -> None:
-    """Put a real controller in the slot the web player reads.
-
-    Injected repeatedly for a short while rather than once: these players are
-    single-page apps that navigate from the game page into the stream, and a
-    new document drops the override. The script is idempotent, so re-running it
-    costs nothing.
-
-    Best effort. A controller that does not work is the situation this is
-    trying to improve; it must never be the reason a game fails to start.
-    """
-    if not wants_gamepad_reorder():
-        return
-
-    profile = provider_profile(provider)
-    marker = profile.get("page_match") or (url.split("/")[2] if "//" in url else url)
-    deadline = time.monotonic() + 45.0
-    while time.monotonic() < deadline:
-        target = cdp.wait_for_page(CDP_PORT, marker, timeout=5.0)
-        if target and target.get("webSocketDebuggerUrl"):
-            try:
-                result = cdp.evaluate(target["webSocketDebuggerUrl"],
-                                      REORDER_GAMEPADS_JS)
-                if result == "installed":
-                    log("gamepad order corrected for this page")
-            except cdp.CDPError:
-                pass          # page navigating; the next pass catches it
-        time.sleep(5)
-
-
 def hold_platform_override(url: str, provider: str = ""):
     """Make the page believe it is on a supported OS, for the whole session.
 
@@ -990,7 +960,8 @@ def hold_platform_override(url: str, provider: str = ""):
     """
     profile = provider_profile(provider)
     user_agent = profile.get("user_agent")
-    if not user_agent:
+    reorder = wants_gamepad_reorder()
+    if not user_agent and not reorder:
         return None
 
     marker = profile.get("page_match") or (url.split("/")[2] if "//" in url else url)
@@ -999,16 +970,32 @@ def hold_platform_override(url: str, provider: str = ""):
         log(f"page never appeared for the platform override (looked for {marker!r})")
         return None
 
-    held = cdp.hold_platform(target["webSocketDebuggerUrl"], user_agent,
-                             profile.get("platform", "Windows"))
-    wants_shim = profile.get("startup_js") == "NEUTRALISE_APP_HANDOFF_JS"
-    if wants_shim:
-        cdp.add_startup_script(held, NEUTRALISE_APP_HANDOFF_JS)
+    if user_agent:
+        held = cdp.hold_platform(target["webSocketDebuggerUrl"], user_agent,
+                                 profile.get("platform", "Windows"))
+    else:
+        held = cdp.open_session(target["webSocketDebuggerUrl"])
+
+    startup = []
+    if profile.get("startup_js") == "NEUTRALISE_APP_HANDOFF_JS":
+        startup.append(NEUTRALISE_APP_HANDOFF_JS)
+    if reorder:
+        # BEFORE the page's own scripts, not after. A player captures
+        # navigator.getGamepads when it starts; replacing it afterwards is
+        # simply ignored, which is what happened the first time this was
+        # tried — the override was installed, reported installed, and the page
+        # went on calling the function it had already taken a reference to.
+        startup.append(REORDER_GAMEPADS_JS)
+
+    if startup:
+        cdp.add_startup_script(held, "\n".join(startup))
     cdp.reload_page(held)
-    if wants_shim:
+    if startup:
         # add_startup_script had to enable the Page domain, so from here on the
         # browser is pushing events at this socket. Drain them or it wedges.
         cdp.drain_in_background(held)
+    if reorder:
+        log("gamepad order will be corrected before the page loads")
     log(f"{profile['label']}: reporting {profile.get('platform', 'Windows')} "
         "for this session")
     return held
@@ -1256,12 +1243,6 @@ def main() -> int:
         log_browser_gamepads(url, provider)
     except Exception as exc:          # diagnostics never break a launch
         log(f"gamepad diagnostic failed, continuing: {exc}")
-
-    # Daemon thread: it keeps re-injecting while the player navigates into the
-    # stream, and must never hold the launcher open past the game.
-    if wants_gamepad_reorder():
-        threading.Thread(target=reorder_gamepads, args=(url, provider),
-                         name="gamepad-reorder", daemon=True).start()
 
     started = time.monotonic()
     code = browser.wait()
