@@ -306,6 +306,20 @@ class Plugin:
             self._login_task.cancel()
         decky.logger.info("Shelfcloud unloaded")
 
+    async def _uninstall(self):
+        icon_path = _icon_dir()
+        if os.path.isdir(icon_path):
+            for name in os.listdir(icon_path):
+                try:
+                    os.remove(os.path.join(icon_path, name))
+                except OSError:
+                    pass
+            try:
+                os.rmdir(icon_path)
+            except OSError:
+                pass
+        decky.logger.info("Shelfcloud uninstalled")
+
     # ---------------------------------------------------------------- config
 
     @classmethod
