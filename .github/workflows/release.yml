@@ -43,7 +43,7 @@ jobs:
 
           cp plugin.json package.json main.py LICENSE "${PLUGIN_NAME}/"
           cp dist/index.js "${PLUGIN_NAME}/dist/"
-          cp py_modules/*.py py_modules/*.pem "${PLUGIN_NAME}/py_modules/"
+          cp py_modules/*.py "${PLUGIN_NAME}/py_modules/"
           cp bin/*.py "${PLUGIN_NAME}/bin/"
           chmod +x "${PLUGIN_NAME}"/bin/*.py
 

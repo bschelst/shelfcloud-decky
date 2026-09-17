@@ -108,26 +108,17 @@ ALLOWED_LAUNCH_DOMAINS = (
 
 
 def _ssl_context():
-    """Verified TLS, with the bundled Mozilla roots added.
+    """Verified TLS, using certifi's CA bundle if available.
 
-    Same reasoning as main.py's copy: Decky's embedded Python ships its own
-    libssl and has been seen without the GTS root a Cloudflare-fronted host
-    presents, which fails an otherwise valid chain. load_verify_locations ADDS
-    to the default trust store — it never replaces it, and verification and
-    hostname checking stay on.
+    The launcher runs as a standalone process (not inside Decky's sandbox),
+    so it cannot import Decky's helpers module. But certifi is installed by
+    Decky and reachable on the system path, so we use it directly.
     """
-    ctx = ssl.create_default_context()
-    bundle = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                          "..", "py_modules", "cacert.pem")
-    if os.path.isfile(bundle):
-        ctx.load_verify_locations(bundle)
-    else:
-        # Said out loud, because the silent version of this was expensive: the
-        # installer copied py_modules/*.py and left the .pem behind, so the
-        # bundle existed everywhere except where it was needed.
-        log(f"CA bundle missing at {bundle} — falling back to the system trust "
-            "store. If launches stop resolving, reinstall the plugin.")
-    return ctx
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        return ssl.create_default_context()
 
 
 def is_allowed_launch_url(url) -> bool:
@@ -605,7 +596,9 @@ def stored_fallback(game_id: str) -> str:
 # instead of asking the gateway, there was no way to tell from the outside,
 # because a fallback is indistinguishable from success as far as the user is
 # concerned. The game still starts. Only the gateway's silence gives it away.
-LOG_FILE = os.path.expanduser("~/homebrew/logs/shelfcloud-launch.log")
+_PLUGIN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_HOMEBREW_DIR = os.path.dirname(os.path.dirname(_PLUGIN_DIR))
+LOG_FILE = os.path.join(_HOMEBREW_DIR, "logs", "Shelfcloud", "shelfcloud-launch.log")
 
 # Kept small on purpose. This lives on a Deck's internal storage and nothing
 # rotates it, so it trims itself rather than growing without end.

@@ -21,7 +21,6 @@ import json
 import os
 import random
 import shlex
-import ssl
 import subprocess
 import time
 import urllib.error
@@ -33,37 +32,9 @@ import decky
 import browsers
 import shortcuts
 
+from helpers import get_ssl_context  # provided by Decky Loader (certifi-backed)
 
-def _ssl_context() -> ssl.SSLContext:
-    """An SSL context that trusts the bundled Mozilla CA bundle.
-
-    Decky's embedded Python ships its own libssl and may not include every
-    root certificate the system has. The GTS Root R4 (Google Trust Services)
-    that Cloudflare-proxied sites present is one that has been missing,
-    causing CERTIFICATE_VERIFY_FAILED on an otherwise valid chain.
-
-    The bundled cacert.pem (from curl.se, the same file certifi ships) is
-    loaded on top of whatever the system already trusts.
-    """
-    ctx = ssl.create_default_context()
-    bundle = os.path.join(os.path.dirname(__file__), "py_modules", "cacert.pem")
-    if os.path.isfile(bundle):
-        ctx.load_verify_locations(bundle)
-    else:
-        # Loudly, because the silent version of this cost an evening. The
-        # install script copied py_modules/*.py and left the .pem behind, so
-        # the bundle was in the repo, in the staging directory, and absent from
-        # the plugin — and the only symptom was CERTIFICATE_VERIFY_FAILED on
-        # every request, with the same request from the Deck's own python
-        # working fine.
-        decky.logger.error(
-            "CA bundle missing at %s — TLS will fall back to the loader's own "
-            "trust store, which does not carry the root our gateway presents. "
-            "Reinstall the plugin; the installer must copy all of py_modules, "
-            "not just *.py.", bundle)
-    return ctx
-
-SSL_CTX = _ssl_context()
+SSL_CTX = get_ssl_context()
 
 
 def _shell_join(parts: List[str]) -> str:
@@ -282,7 +253,6 @@ class Plugin:
         # not the same as "we are signed in".
         self._auth_ok: bool = True
         self._auth_checked: float = 0.0
-        self._version_cache: Optional[str] = None
         # Progress of a browser install, read by the panel through get_status
         # so it survives the panel being closed mid-download.
         self._install: Dict[str, Any] = dict(IDLE_INSTALL)
@@ -1134,28 +1104,9 @@ class Plugin:
             pass
         return self._auth_ok
 
-    def _version(self) -> str:
-        """The installed plugin's version, read from package.json.
-
-        Read from disk rather than held as a constant here so there is one
-        source of truth: Decky itself shows the version from package.json, and
-        a second copy in Python would eventually disagree with it — an About
-        box that confidently states the wrong version is worse than none.
-
-        Cached after the first read: the file cannot change under a running
-        plugin, since installing a new one restarts the loader.
-        """
-        if self._version_cache is None:
-            self._version_cache = "unknown"
-            try:
-                manifest = os.path.join(decky.DECKY_PLUGIN_DIR, "package.json")
-                with open(manifest, encoding="utf-8") as handle:
-                    value = json.load(handle).get("version")
-                if isinstance(value, str) and value.strip():
-                    self._version_cache = value.strip()
-            except Exception as exc:
-                decky.logger.warning("Could not read plugin version: %s", exc)
-        return self._version_cache
+    @staticmethod
+    def _version() -> str:
+        return decky.DECKY_PLUGIN_VERSION or "unknown"
 
     async def get_status(self) -> Dict[str, Any]:
         browser = await asyncio.to_thread(browsers.resolve_browser, self._settings.get("browser"))
