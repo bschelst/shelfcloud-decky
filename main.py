@@ -474,8 +474,11 @@ class Plugin:
             # browser closes the panel and would take the waiter with it.
             if self._login_task and not self._login_task.done():
                 self._login_task.cancel()
+            session_token = result.get("session_token")
+            if not session_token:
+                return {"ok": False, "error": "gateway did not return a session token"}
             self._login_task = asyncio.create_task(
-                self._await_login(result["session_token"]))
+                self._await_login(session_token))
             return {"ok": True, **result}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
@@ -510,7 +513,11 @@ class Plugin:
             # Paired. The code has served its purpose and should not linger
             # in the panel for the next person who opens it.
             self._pending_login_code = ""
-            self._settings["api_token"] = result["api_token"]
+            api_token = result.get("api_token")
+            if not api_token:
+                decky.logger.warning("Sign-in response missing api_token")
+                continue
+            self._settings["api_token"] = api_token
             self._settings["steam_id64"] = result.get("steam_id64")
             # A fresh credential invalidates any cached "not signed in" answer.
             self._auth_ok = True
