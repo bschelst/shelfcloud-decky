@@ -1309,6 +1309,9 @@ class Plugin:
             self._install = dict(IDLE_INSTALL)
         return await self.get_status()
 
+    # Keys the frontend may write. Anything else — especially api_token — is
+    # rejected. Shelf selection goes through set_shelf, not here.
+    # If a new dropdown is added to the panel, its key must be listed here.
     ALLOWED_SETTINGS = {"browser", "sync_minutes"}
 
     async def set_setting(self, key: str, value: Any) -> Dict[str, Any]:

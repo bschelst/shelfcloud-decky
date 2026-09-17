@@ -41,6 +41,7 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "py_modules"))
 
+import browsers  # noqa: E402
 import cdp  # noqa: E402
 
 CDP_PORT = 9223
@@ -758,14 +759,7 @@ def build_browser_command(app_id: str, profile: str, url: str, kiosk: bool = Tru
         f"--remote-debugging-port={CDP_PORT}",
         "--window-size=1280,800",
         "--class=shelfcloud",
-        "--no-first-run",
-        "--no-default-browser-check",
-        "--disable-infobars",
-        "--disable-session-crashed-bubble",
-        "--disable-features=TranslateUI",
-        "--password-store=basic",
-        "--disable-background-networking",
-        "--autoplay-policy=no-user-gesture-required",
+        *browsers.BASE_FLAGS,
         # Only where a provider asks for it; see PROVIDERS. Spoofing globally
         # would be wrong — Xbox localises its page by what the browser says it
         # is, and lying to every provider to satisfy one is how a fix for one
