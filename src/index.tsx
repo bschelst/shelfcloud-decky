@@ -9,7 +9,6 @@ import {
   Navigation,
   PanelSection,
   PanelSectionRow,
-  showModal,
   staticClasses,
 } from "@decky/ui";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
@@ -51,7 +50,6 @@ import { changeSummary, syncSummary } from "./lib/summary";
 import { LibrarySummary } from "./components/LibrarySummary";
 import { Logo, LogoMono, NotificationLogo } from "./components/Logo";
 import { Collapsible, IconLabel } from "./components/Collapsible";
-import HelpModal from "./components/HelpModal";
 import { NoBrowser } from "./components/NoBrowser";
 import { finishJob, getJob, setJob, subscribeJob } from "./lib/job";
 import { theme } from "./lib/theme";
@@ -904,13 +902,13 @@ function Content() {
           <PanelSectionRow>
             {/* Reachable signed out: the documentation is how someone works out
                 what to do about being signed out. */}
+            {/* The guide lives on the website, not in this panel.
+                A guide with pictures does not fit in a Quick Access panel, and
+                one served from the gateway can be corrected without shipping a
+                plugin release to every device. */}
             <ButtonItem
               layout="below"
-              onClick={() => showModal(
-                <HelpModal
-                  version={status.version || "unknown"}
-                />,
-              )}
+              onClick={() => openInSteamBrowser(`${GATEWAY_URL}/guide`)}
             >
               <IconLabel icon={<FaQuestionCircle size={14} />}>
                 Help &amp; documentation
