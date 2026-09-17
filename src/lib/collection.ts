@@ -75,7 +75,24 @@ export async function addToProviderCollections(members: CollectionMember[]): Pro
 
       const existing = collectionStore.userCollections.find((c) => c.displayName === name);
       if (existing) {
-        existing.AsDragDropCollection().AddApps(overviews);
+        // Save() rewrites the whole collection and makes Steam re-read its
+        // library, so it is the expensive part of a sync - measured at roughly
+        // half a second. Adding an app that is already filed still costs a
+        // full Save, and a sync that changed NOTHING was paying ~33 of them
+        // (388 games in batches of 12): fifteen to twenty seconds to do
+        // nothing at all.
+        //
+        // allApps is the collection's own membership, so the ones already
+        // there can be dropped and the write skipped entirely when none are
+        // new. A game the user removed from the collection by hand is still
+        // re-filed, because it is genuinely absent - only redundant writes go.
+        const already = new Set(
+          ((existing.allApps ?? []) as Array<{ appid: number }>).map((app) => app.appid));
+        const missing = overviews.filter(
+          (app) => !already.has((app as { appid: number }).appid));
+        if (!missing.length) continue;
+
+        existing.AsDragDropCollection().AddApps(missing);
         await existing.Save();
       } else {
         const created = collectionStore.NewUnsavedCollection(name, null, overviews);
