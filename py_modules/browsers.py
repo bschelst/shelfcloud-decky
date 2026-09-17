@@ -173,32 +173,6 @@ def profile_dir(app_id: str) -> str:
     return os.path.join(base, "browser-profiles", app_id)
 
 
-def build_launch(app_id: str, url: str, width: int = 1280, height: int = 800) -> Dict[str, str]:
-    """Build the Steam shortcut exe + launch options that open one game.
-
-    Returns {"exe": ..., "options": ...} ready for SteamClient.Apps.AddShortcut.
-    """
-    profile = profile_dir(app_id)
-    options = [
-        "run",
-        "--branch=stable",
-        "--arch=x86_64",
-        # The profile lives outside the sandbox's default home, so flatpak has
-        # to be granted access explicitly or the profile silently will not
-        # persist — defeating the point of --user-data-dir.
-        f"--filesystem={profile}",
-        app_id,
-        f"--user-data-dir={profile}",
-        f"--window-size={width},{height}",
-        # Lets window matching target this window rather than another browser's.
-        "--class=shelfcloud",
-        *BASE_FLAGS,
-        "--kiosk",
-        # Positional, deliberately: --app= also hides the toolbar but behaves
-        # differently for the popups and fullscreen requests streams rely on.
-        url,
-    ]
-    return {"exe": FLATPAK_BIN, "options": " ".join(options)}
 
 
 def resolve_browser(preferred: Optional[str]) -> Optional[Dict]:

@@ -25,7 +25,6 @@ import ssl
 import subprocess
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
 from typing import Any, Dict, List, Optional
 
@@ -1303,7 +1302,12 @@ class Plugin:
             self._install = dict(IDLE_INSTALL)
         return await self.get_status()
 
+    ALLOWED_SETTINGS = {"browser", "sync_minutes"}
+
     async def set_setting(self, key: str, value: Any) -> Dict[str, Any]:
+        if key not in self.ALLOWED_SETTINGS:
+            decky.logger.warning("Rejected setting key: %s", key)
+            return await self.get_status()
         self._settings[key] = value
         await self._save_settings()
         return await self.get_status()

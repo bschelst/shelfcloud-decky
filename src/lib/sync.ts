@@ -418,7 +418,8 @@ export async function syncLibrary(
   // Game names vary wildly in length, and a message that wraps to two lines
   // and back makes the whole panel jump as it ticks through hundreds of games.
   // Truncating keeps every progress line the same height.
-  const shorten = (name: string) => (name.length > 22 ? `${name.slice(0, 21)}…` : name);
+  const MAX_NAME_LEN = 22;
+  const shorten = (name: string) => (name.length > MAX_NAME_LEN ? `${name.slice(0, MAX_NAME_LEN - 1)}…` : name);
   const step = (label: string, name: string) => {
     done++;
     callbacks.onProgress?.(`${label} ${shorten(name)} (${done}/${total})`);
@@ -505,8 +506,10 @@ export async function syncLibrary(
     if (desiredIds.has(Number(gameId))) continue;
     try {
       step("Removing", entry.name);
-      void clearArtwork(entry.app_id)
-        .then(() => SteamClient.Apps.RemoveShortcut(entry.app_id));
+      try {
+        await clearArtwork(entry.app_id);
+      } catch { /* best effort — the shortcut must still go */ }
+      SteamClient.Apps.RemoveShortcut(entry.app_id);
       await callbacks.forget(Number(gameId));
       result.removed++;
     } catch (error) {

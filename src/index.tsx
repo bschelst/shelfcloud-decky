@@ -480,19 +480,25 @@ function Content() {
     setJob({ busy: false, message: "Finish signing in in the browser…" });
 
     const deadline = Date.now() + LOGIN_TIMEOUT_MS;
-    loginTimer.current = window.setInterval(async () => {
-      const poll = await pollLogin(session);
-      if (poll.ok && poll.status === "signed_in") {
-        window.clearInterval(loginTimer.current!);
-        finishJob("Signed in!");
-        await refresh();
-        void sync();
-        return;
-      }
-      if (Date.now() > deadline) {
-        window.clearInterval(loginTimer.current!);
-        setJob({ message: "Sign-in is taking a while. Reopen this panel to check." });
-      }
+    loginTimer.current = window.setInterval(() => {
+      void (async () => {
+        try {
+          const poll = await pollLogin(session);
+          if (poll.ok && poll.status === "signed_in") {
+            window.clearInterval(loginTimer.current!);
+            finishJob("Signed in!");
+            await refresh();
+            void sync();
+            return;
+          }
+          if (Date.now() > deadline) {
+            window.clearInterval(loginTimer.current!);
+            setJob({ message: "Sign-in is taking a while. Reopen this panel to check." });
+          }
+        } catch (error) {
+          console.error("[shelfcloud] login poll failed", error);
+        }
+      })();
     }, LOGIN_POLL_MS);
   }, [refresh, sync]);
 
@@ -536,6 +542,10 @@ function Content() {
   // verified answer, not just "no token on disk" — a revoked or expired
   // credential used to leave every control enabled and every action failing.
   const signedOut = !status.signed_in;
+
+  const activeShelf = shelves?.ok && typeof shelves.shelf_id === "number"
+    ? (shelves.shelves ?? []).find((s) => s.id === shelves.shelf_id) ?? null
+    : null;
 
   // The pairing code for a sign-in in progress.
   //
@@ -633,12 +643,8 @@ function Content() {
               // Named only when this device is actually ON a shelf. Shared is
               // spelled null, and there the account-wide total is the right
               // comparison, so the summary keeps saying "of N playable".
-              shelfName={shelves?.ok && typeof shelves.shelf_id === "number"
-                ? (shelves.shelves ?? []).find((s) => s.id === shelves.shelf_id)?.name ?? null
-                : null}
-              shelfGames={shelves?.ok && typeof shelves.shelf_id === "number"
-                ? (shelves.shelves ?? []).find((s) => s.id === shelves.shelf_id)?.games ?? 0
-                : null}
+              shelfName={activeShelf?.name ?? null}
+              shelfGames={activeShelf?.games ?? null}
               available={busy && totalWhenSyncStarted.current !== null
                 ? totalWhenSyncStarted.current
                 : (owned ?? 0) + status.tracked}
@@ -700,7 +706,7 @@ function Content() {
             <div style={{
               fontSize: "0.8em",
               opacity: status.last_error ? 1 : 0.75,
-              color: status.last_error ? "#ff6b6b" : undefined,
+              color: status.last_error ? theme.bad : undefined,
               // Fixed two-line box: progress messages change length constantly,
               // and letting the box grow and shrink makes the panel jump.
               minHeight: "2.4em",
