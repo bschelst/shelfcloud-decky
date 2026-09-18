@@ -1262,19 +1262,21 @@ def main() -> int:
     held = None
     try:
         held = hold_platform_override(url, provider)
-    except Exception as exc:  # never let automation break the launch
+    except Exception as exc:
         log(f"platform override failed, continuing: {exc}")
 
-    if autoplay:
-        try:
-            try_autoplay(url, provider)
-        except Exception as exc:  # never let automation break the launch
-            log(f"autoplay failed, continuing: {exc}")
-
+    # Luna's handoff shim and unsupported-OS dismiss MUST run before autoplay.
+    # Autoplay clicks "Play now", which triggers luna:// immediately.
     try:
         dismiss_luna_unsupported(url, provider)
     except Exception as exc:
         log(f"Luna dismiss failed, continuing: {exc}")
+
+    if autoplay:
+        try:
+            try_autoplay(url, provider)
+        except Exception as exc:
+            log(f"autoplay failed, continuing: {exc}")
 
     try:
         log_browser_gamepads(url, provider)
