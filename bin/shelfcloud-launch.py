@@ -888,6 +888,30 @@ LUNA_DISMISS_UNSUPPORTED_JS = """
 })();
 """
 
+NEUTRALISE_APP_HANDOFF_JS = """
+(() => {
+  const install = () => {
+    try {
+      if (document.getElementById('hiddenIframe')) return true;
+      const host = document.body || document.documentElement;
+      if (!host) return false;
+      const frame = document.createElement('iframe');
+      frame.id = 'hiddenIframe';
+      frame.style.display = 'none';
+      Object.defineProperty(frame, 'contentWindow', {
+        configurable: true,
+        get() { return { location: { set href(_) {}, get href() { return ''; } } }; },
+      });
+      host.appendChild(frame);
+      return true;
+    } catch (e) { return true; }
+  };
+  if (!install()) {
+    document.addEventListener('DOMContentLoaded', install, { once: true });
+  }
+})();
+"""
+
 def dismiss_luna_unsupported(url: str, provider: str = "") -> None:
     """Auto-close Luna's 'Unsupported OS' dialog on Linux.
 
@@ -904,8 +928,13 @@ def dismiss_luna_unsupported(url: str, provider: str = "") -> None:
     if not target or not target.get("webSocketDebuggerUrl"):
         return
 
+    ws_url = target["webSocketDebuggerUrl"]
     try:
-        cdp.evaluate(target["webSocketDebuggerUrl"], LUNA_DISMISS_UNSUPPORTED_JS, timeout=10)
+        ws = cdp.open_session(ws_url, timeout=10)
+        cdp.add_startup_script(ws, NEUTRALISE_APP_HANDOFF_JS)
+        cdp.add_startup_script(ws, LUNA_DISMISS_UNSUPPORTED_JS)
+        cdp.reload_page(ws)
+        cdp.drain_in_background(ws)
         log("dismissing Luna unsupported-OS dialog")
     except Exception as exc:
         log(f"Luna dismiss failed: {exc}")
