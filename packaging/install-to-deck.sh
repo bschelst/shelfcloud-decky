@@ -23,6 +23,9 @@ sudo cp "${STAGING}"/py_modules/*.py "${PLUGIN_DIR}/py_modules/"
 sudo rm -rf "${PLUGIN_DIR}/py_modules/__pycache__"
 sudo cp "${STAGING}"/bin/*.py "${PLUGIN_DIR}/bin/"
 sudo chmod +x "${PLUGIN_DIR}"/bin/*.py
+if [ -d "${STAGING}/extensions" ]; then
+    sudo cp -r "${STAGING}/extensions" "${PLUGIN_DIR}/extensions"
+fi
 sudo chown -R root:root "${PLUGIN_DIR}"
 
 # Settings hold the API token once signed in, so never clobber an existing file.
