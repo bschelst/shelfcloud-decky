@@ -58,7 +58,7 @@ import type { DesiredGame, InstallState, Status, SyncResult } from "./lib/types"
 const SYNC_EVENT = "shelfcloud/library";
 const LOGIN_POLL_MS = 2500;
 const LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
-const GATEWAY_URL = "https://shelfcloud.schelstraete.org";
+const GATEWAY_URL = "https://shelfcloud.cc";
 const GITHUB_URL = "https://github.com/bschelst/shelfcloud-decky";
 
 /** The shelf picker's stand-in for "no shelf", which the gateway spells null.

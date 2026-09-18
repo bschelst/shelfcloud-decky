@@ -65,7 +65,11 @@ CLICK_TIMEOUT = 60.0
 #
 # Must match DEFAULT_GATEWAY in main.py — tests/unit/test_gateway_default.py
 # checks that they agree.
-GATEWAY = "https://shelfcloud.schelstraete.org"
+GATEWAY = "https://shelfcloud.cc"
+
+# Where the gateway used to live. Still serving, and still allowed as a
+# launch target during the changeover; see ALLOWED_LAUNCH_DOMAINS.
+LEGACY_HOST = "shelfcloud.schelstraete.org"
 
 # The only places a game is allowed to launch.
 #
@@ -106,6 +110,15 @@ ALLOWED_LAUNCH_DOMAINS = (
     # asks where every game goes, so trusting it to answer and refusing to open
     # it was the inconsistent half.
     urllib.parse.urlsplit(GATEWAY).hostname or "",
+    # The previous home, kept while devices catch up.
+    #
+    # A tile's address is resolved by the gateway at launch, so the moment the
+    # published Shelfcloud page moves to the new domain, a Deck still running
+    # an older plugin is handed an address its allowlist does not know — and a
+    # Deck on the new plugin would refuse the old one. Allowing both means the
+    # tile works whichever side of the update a device is on. Drop it once
+    # every device has been updated.
+    LEGACY_HOST,
 )
 
 

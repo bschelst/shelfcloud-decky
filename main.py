@@ -59,7 +59,7 @@ def _shell_join(parts: List[str]) -> str:
     return " ".join(shlex.quote(part) for part in parts)
 
 
-DEFAULT_GATEWAY = "https://shelfcloud.schelstraete.org"
+DEFAULT_GATEWAY = "https://shelfcloud.cc"
 
 # No install has been started. Also the shape the frontend reads, so it can
 # rely on the keys existing rather than guarding each one.

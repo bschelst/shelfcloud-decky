@@ -115,13 +115,13 @@ def test_the_old_plaintext_lan_gateway_is_still_refused():
     must not admit that: it is http, and on a LAN address that may now belong
     to somebody else entirely."""
     assert allowed("http://192.168.129.164:8000") is False
-    assert allowed("http://shelfcloud.schelstraete.org/") is False
+    assert allowed("http://shelfcloud.cc/") is False
 
 
 def test_a_lookalike_of_our_own_host_is_refused():
-    for hostile in ("https://shelfcloud.schelstraete.org.evil.com/",
-                    "https://notshelfcloud.schelstraete.org/",
-                    "https://shelfcloud.schelstraete.org@evil.example/"):
+    for hostile in ("https://shelfcloud.cc.evil.com/",
+                    "https://notshelfcloud.cc/",
+                    "https://shelfcloud.cc@evil.example/"):
         assert allowed(hostile) is False, hostile
 
 
