@@ -303,3 +303,32 @@ def open_session(ws_url: str, timeout: float = 15.0) -> "_WebSocket":
     only as long as this socket, so the caller keeps the object.
     """
     return _WebSocket(ws_url, timeout=timeout)
+
+
+def dispatch_click(ws_url: str, x: float, y: float, timeout: float = 15.0) -> None:
+    """Click at page coordinates via CDP Input events.
+
+    Unlike el.click() from Runtime.evaluate, these are treated as real user
+    gestures by Chrome — so requestFullscreen() and other APIs that require
+    "user activation" work when triggered this way.
+    """
+    ws = _WebSocket(ws_url, timeout=timeout)
+    try:
+        for i, event_type in enumerate(("mousePressed", "mouseReleased"), start=1):
+            ws.send_text(json.dumps({
+                "id": i,
+                "method": "Input.dispatchMouseEvent",
+                "params": {
+                    "type": event_type,
+                    "x": x, "y": y,
+                    "button": "left",
+                    "clickCount": 1,
+                },
+            }))
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            message = json.loads(ws.recv_text())
+            if message.get("id") == 2:
+                return
+    finally:
+        ws.close()

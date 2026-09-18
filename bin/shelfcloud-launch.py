@@ -283,8 +283,8 @@ CLICK_PLAY_JS = """
       const label = ((el.getAttribute('aria-label') || '') || firstLine(el))
         .split('\\n')[0].trim().toLowerCase();
       if (!hits(label, 4)) continue;
-      el.click();
-      return 'clicked:' + selector + ' [' + label.slice(0, 30) + ']';
+      const r = el.getBoundingClientRect();
+      return JSON.stringify({clicked: selector + ' [' + label.slice(0, 30) + ']', x: r.x + r.width/2, y: r.y + r.height/2});
     }
   }
 
@@ -328,8 +328,8 @@ CLICK_PLAY_JS = """
         const line = firstLine(el);
         if (line.length > maxLen) continue;
         if (!hits(line, limit)) continue;
-        el.click();
-        return 'clicked:' + line.slice(0, 40);
+        const r = el.getBoundingClientRect();
+        return JSON.stringify({clicked: line.slice(0, 40), x: r.x + r.width/2, y: r.y + r.height/2});
       }
     }
   }
@@ -901,6 +901,85 @@ NEUTRALISE_APP_HANDOFF_JS = """
 })();
 """
 
+WAKE_GAMEPAD_JS = """
+(() => {
+  // Chrome hides gamepads from navigator.getGamepads() until the user presses
+  // a button — a W3C fingerprinting mitigation. Cloud providers check on load
+  // and show "use your phone" when nothing is there.
+  //
+  // Dispatching a synthetic gamepadconnected event does NOT unlock the API
+  // (Chrome ignores it). But dispatching a synthetic keyboard event from CDP
+  // does count as "user activation", which combined with a real gamepad being
+  // connected is enough for Chrome to expose it on the next getGamepads() call.
+  //
+  // This polls until at least one slot is non-null, or gives up after a few
+  // seconds. The actual gamepad hardware must be present (Steam Input's virtual
+  // Xbox pad); this just wakes Chrome up to see it.
+  return new Promise((resolve) => {
+    let tries = 0;
+    const check = () => {
+      const pads = navigator.getGamepads();
+      const found = [...pads].filter(Boolean);
+      if (found.length > 0) {
+        resolve('woke:' + found.length + ' gamepad(s)');
+        return;
+      }
+      if (++tries > 20) {
+        resolve('timeout:no gamepads appeared');
+        return;
+      }
+      setTimeout(check, 250);
+    };
+    check();
+  });
+})()
+"""
+
+
+def wake_gamepads(url: str, provider: str = "") -> None:
+    """Trigger Chrome's gamepad gate by sending a synthetic key press via CDP.
+
+    Chrome only exposes gamepads after a "user gesture" — a real input event.
+    Runtime.evaluate JS does not count, but CDP Input.dispatchKeyEvent does.
+    After the key press, we poll getGamepads() until a pad appears.
+    """
+    profile = provider_profile(provider)
+    marker = profile.get("page_match") or (url.split("/")[2] if "//" in url else url)
+    target = cdp.wait_for_page(CDP_PORT, marker, timeout=10)
+    if not target or not target.get("webSocketDebuggerUrl"):
+        return
+    ws_url = target["webSocketDebuggerUrl"]
+
+    # Send a harmless key press to create "user activation" on the page.
+    try:
+        ws = cdp._WebSocket(ws_url, timeout=10)
+        try:
+            for i, key_type in enumerate(("keyDown", "keyUp"), start=1):
+                ws.send_text(json.dumps({
+                    "id": i,
+                    "method": "Input.dispatchKeyEvent",
+                    "params": {"type": key_type, "key": "", "code": "", "windowsVirtualKeyCode": 0},
+                }))
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                msg = json.loads(ws.recv_text())
+                if msg.get("id") == 2:
+                    break
+        finally:
+            ws.close()
+    except Exception as exc:
+        log(f"key dispatch failed: {exc}")
+
+    # Now poll getGamepads() — Chrome should expose them after the activation.
+    try:
+        result = cdp.evaluate(ws_url, WAKE_GAMEPAD_JS, timeout=10)
+        if result:
+            log(f"gamepad wake: {result}")
+    except cdp.CDPError as exc:
+        log(f"gamepad wake poll failed: {exc}")
+
+
+
 def log_browser_gamepads(url: str, provider: str = "") -> None:
     """Record what the PAGE sees, which is the only view that decides anything.
 
@@ -1031,9 +1110,15 @@ def try_autoplay(url: str, provider: str = "") -> None:
                 return
 
             result = cdp.evaluate(ws_url, click_js)
-            if isinstance(result, str) and result.startswith("clicked"):
-                log(f"{result}")
-                return
+            if isinstance(result, str):
+                try:
+                    hit = json.loads(result)
+                except (json.JSONDecodeError, TypeError):
+                    hit = None
+                if isinstance(hit, dict) and "clicked" in hit:
+                    cdp.dispatch_click(ws_url, hit["x"], hit["y"])
+                    log(f"clicked:{hit['clicked']}")
+                    return
         except cdp.CDPError as exc:
             # Page may still be loading, or navigating between documents.
             log(f"waiting for Play ({exc})")
@@ -1231,6 +1316,11 @@ def main() -> int:
             try_autoplay(url, provider)
         except Exception as exc:  # never let automation break the launch
             log(f"autoplay failed, continuing: {exc}")
+
+    try:
+        wake_gamepads(url, provider)
+    except Exception as exc:
+        log(f"gamepad wake failed, continuing: {exc}")
 
     try:
         log_browser_gamepads(url, provider)
