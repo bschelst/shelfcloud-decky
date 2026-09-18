@@ -4,7 +4,9 @@
 
 | Version | Supported |
 |---------|-----------|
-| 0.1.x   | :white_check_mark: Current |
+| 0.3.x   | :white_check_mark: Current |
+| 0.2.x   | :x: Upgrade recommended |
+| 0.1.x   | :x: Upgrade recommended |
 
 Only the latest release receives security updates. Older versions should be upgraded.
 
@@ -25,64 +27,70 @@ The following components are in scope:
 
 | Component | Description |
 |-----------|-------------|
-| `main.py` | Plugin backend — handles API tokens, network requests, file I/O |
-| `src/`    | Frontend — renders UI inside Steam's client |
-| `bin/shelfcloud-launch.py` | Launcher — opens a browser with a URL and profile |
-| `py_modules/` | Browser detection and CDP interaction |
+| `main.py` | Plugin backend — handles API tokens, network requests, file I/O, subprocess |
+| `src/` | Frontend — renders UI inside Steam's client |
+| `bin/shelfcloud-launch.py` | Launcher — opens a browser with a URL, presses Play via CDP |
+| `py_modules/browsers.py` | Browser detection, flatpak install, sandbox overrides |
+| `py_modules/cdp.py` | Chrome DevTools Protocol client (localhost only) |
+| `py_modules/weburl.py` | URL validation and allowlist |
+| `py_modules/shortcuts.py` | Steam shortcuts.vdf parser for state recovery |
 | `packaging/` | Install scripts that run with `sudo` |
+| `.github/workflows/` | CI/CD pipeline |
 
 ## Security Model
 
 ### What Shelfcloud stores
 
-- **API token** — stored in `~/homebrew/settings/Shelfcloud/settings.json`. Used to authenticate with the gateway. File permissions are managed by the install script.
-- **Synced state** — which games have been added as Steam shortcuts. No credentials, no personal data beyond game IDs and names.
+- **API token** — stored in `~/homebrew/settings/Shelfcloud/settings.json`. Used to authenticate with the gateway.
+- **Synced state** — which games have been added as Steam shortcuts, including their last known launch URL for offline use. No credentials, no personal data beyond game IDs, names, and provider URLs.
 - **Icon files** — artwork images on disk, referenced by Steam. No executable content.
 
 ### What Shelfcloud does NOT store or transmit
 
 - Provider passwords or session cookies (these stay in the browser's own profile)
-- Steam credentials (sign-in is handled by Steam's own OAuth flow)
+- Steam credentials (sign-in is handled by Steam's own OAuth flow, with a pairing code shown on-device)
 - Browsing history or activity beyond which game was launched and when
 
 ### Network communication
 
-- All communication with the gateway uses HTTPS
+- All communication with the gateway uses **HTTPS with verified TLS** (certifi-backed via Decky's built-in SSL context)
 - API tokens are sent in `Authorization: Bearer` headers, never in URLs or query strings
 - Artwork fetches from third-party CDNs carry no authentication headers
 - The plugin never phones home to any service besides the configured gateway
+- The User-Agent includes the device type (e.g. "Steam Deck OLED") so the gateway can name it — no other device identifiers are sent
 
 ### Launch security
 
-- The launcher receives URLs from the gateway, and does **not** trust them. Every
-  URL — whether the gateway returned it just now or it was baked into the Steam
-  shortcut at sync time — is checked **on the device** against an allow-list of
-  provider hosts before a browser opens: `play.geforcenow.com`,
-  `cloud.boosteroid.com`, `www.xbox.com` and `luna.amazon.com`. Anything else is
-  refused and logged, and the game does not launch.
-- **https only.** A launch carries provider session cookies; over http they are
-  readable by anything on the path, which can also rewrite the page.
-- Amazon Luna is pinned to the **full host** `luna.amazon.com`, not to
-  `amazon.com`. The allow-list matches subdomains, so the broader form would
-  admit every host Amazon serves — retail pages, seller-controlled content,
-  arbitrary storage subdomains — into a fullscreen browser with no address bar.
-- URLs containing a backslash, tab, carriage return or newline are refused before
-  parsing. Python and Chromium disagree about where the hostname ends in those,
-  and the browser is the one that opens the page.
-- Credentials in the URL authority (`https://cloud.boosteroid.com@evil.example/`)
-  are refused: they name one host while reading as another.
+- The launcher receives URLs from the gateway, and does **not** trust them. Every URL — whether the gateway returned it just now or it was read from the local offline cache — is checked **on the device** against an allowlist of provider hosts before a browser opens: `play.geforcenow.com`, `cloud.boosteroid.com`, `www.xbox.com` and `luna.amazon.com`. Anything else is refused and logged, and the game does not launch.
+- **https only.** A launch carries provider session cookies; over http they are readable by anything on the path, which can also rewrite the page.
+- Amazon Luna is pinned to the **full host** `luna.amazon.com`, not to `amazon.com`. The allowlist matches subdomains, so the broader form would admit every host Amazon serves — retail pages, seller-controlled content, arbitrary storage subdomains — into a fullscreen browser with no address bar.
+- URLs containing a backslash, tab, carriage return or newline are refused before parsing. Python and Chromium disagree about where the hostname ends in those, and the browser is the one that opens the page.
+- Credentials in the URL authority (`https://cloud.boosteroid.com@evil.example/`) are refused: they name one host while reading as another.
 - Browser profiles are isolated per-browser (Chrome and Edge get separate profiles)
-- Launch commands are shell-quoted to prevent injection via special characters in URLs
+- Launch commands are shell-quoted via `shlex.quote` to prevent injection via special characters in URLs
 - The install script validates browser app IDs against a known allowlist before installing anything
 
-This check exists because the gateway is a server, and servers get compromised.
-A launch URL it returns is opened in a kiosk-mode browser holding live provider
-sessions, with no address bar and no tab strip to show where it went — a
-phishing page in that window is indistinguishable from the real sign-in.
+This check exists because the gateway is a server, and servers get compromised. A launch URL it returns is opened in a kiosk-mode browser holding live provider sessions, with no address bar and no tab strip to show where it went — a phishing page in that window is indistinguishable from the real sign-in.
+
+### Backend hardening
+
+- **Settings allowlist** — `set_setting` only accepts `browser` and `sync_minutes`. Other keys (including `api_token`) are rejected.
+- **Atomic file writes** — settings and state files use write-then-rename, so a crash mid-write cannot corrupt them.
+- **State recovery** — if `synced.json` is lost or corrupted, the plugin recovers tracked shortcuts from Steam's own `shortcuts.vdf` rather than recreating duplicates.
+- **Subprocess isolation** — `LD_LIBRARY_PATH` and `LD_PRELOAD` are stripped from the subprocess environment before running flatpak, preventing Decky's bundled OpenSSL from poisoning system binaries.
+
+### CI pipeline
+
+- The release workflow runs **typecheck, lint, frontend tests, and backend tests** before building. A broken build cannot ship.
+- Third-party GitHub Actions are used (`softprops/action-gh-release@v2`); pinning to commit SHAs is recommended for supply-chain hardening.
+
+### CDP (Chrome DevTools Protocol)
+
+The launcher opens `--remote-debugging-port=9223` on the browser to press Play buttons and spoof the OS for Amazon Luna. This port listens on **127.0.0.1 only** (Chrome's default). Any local process running as `deck` could connect while a game session is active. This is a localhost-only risk that requires local code execution to exploit.
 
 ## Best Practices for Users
 
 - **Keep Decky and the plugin updated** — security fixes ship as new versions
 - **Don't share your settings.json** — it contains your API token
-- **Use the offical install method** — manual installs that skip `install-to-deck.sh` may leave file permissions wrong
-- **Review launch logs** if a game behaves unexpectedly: `~/homebrew/logs/shelfcloud-launch.log`
+- **Use the official install method** — manual installs that skip `install-to-deck.sh` may leave file permissions wrong
+- **Review launch logs** if a game behaves unexpectedly: `~/homebrew/logs/Shelfcloud/shelfcloud-launch.log`

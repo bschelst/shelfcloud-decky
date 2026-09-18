@@ -5,7 +5,7 @@
 <h3 align="center">Cloud games, in your Steam Deck, Steam Machine and Bazzite library.</h3>
 
 <p align="center">
-  <a href="https://github.com/bschelst/shelfcloud-decky/releases"><img src="https://img.shields.io/badge/version-0.2.1_beta-4d9fff?style=flat-square" alt="Version" /></a>
+  <a href="https://github.com/bschelst/shelfcloud-decky/releases"><img src="https://img.shields.io/badge/version-0.3.0_beta-4d9fff?style=flat-square" alt="Version" /></a>
   <a href="https://github.com/bschelst/shelfcloud-decky/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-GPL--2.0-555?style=flat-square" alt="License" /></a>
   <a href="https://shelfcloud.schelstraete.org"><img src="https://img.shields.io/badge/website-shelfcloud-4d9fff?style=flat-square" alt="Website" /></a>
   <a href="https://alphastore.schelstraete.org"><img src="https://img.shields.io/badge/install-AlphaStore-8ec5ff?style=flat-square" alt="AlphaStore" /></a>
@@ -131,7 +131,10 @@ More providers may be added over time. Shelfcloud does not buy subscriptions or 
 - **&#128247; Per-provider chips** — see at a glance how your library breaks down
 - **&#128268; Browser installer** — no browser? The plugin installs Edge or Chrome for you straight from the panel
 - **&#127918; Gamepad permissions** — flatpak overrides for controller access are applied automatically; a manual "Fix gamepad permissions" button is available in Settings if needed
-- **&#128736; Device identity** — each device registers its name so you can tell them apart on the website
+- **&#128736; Device identity** — each device registers its name (Steam Deck, Steam Deck OLED, or the machine's hostname) so you can tell them apart on the website
+- **&#128274; Pairing code sign-in** — a code is shown on the panel before Steam's browser opens, so you can finish sign-in even after the panel closes
+- **&#128737; Launch URL allowlist** — every URL is checked on the device against known provider hosts before a browser opens, even if the gateway is compromised
+- **&#128260; Offline launches** — when the gateway is unreachable, games launch from the last known URL stored locally
 - **&#128218; Built-in help** — a full help & documentation modal accessible from the panel, covering setup, playing, syncing, troubleshooting, and privacy
 
 <br>
