@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Shelfcloud project - https://shelfcloud.schelstraete.org - bart@schelstraete.org
+# Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """Launch one cloud game and press the provider's Play button.
 
 This is what a Shelfcloud Steam shortcut actually runs. It exists because the

@@ -1,4 +1,4 @@
-// Shelfcloud project - https://shelfcloud.schelstraete.org - bart@schelstraete.org
+// Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 //
 // Collapsible panel sections, matching the layout used by steamstatus-decky:
 // a focusable header with the section icon on the left and a chevron on the

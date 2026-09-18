@@ -1,4 +1,4 @@
-# Shelfcloud project - https://shelfcloud.schelstraete.org - bart@schelstraete.org
+# Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """Where a Steam shortcut is allowed to send the browser.
 
 A launch opens a kiosk-mode Chromium — no address bar, no tab strip — using a

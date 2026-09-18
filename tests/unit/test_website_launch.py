@@ -1,4 +1,4 @@
-# Shelfcloud project - https://shelfcloud.schelstraete.org - bart@schelstraete.org
+# Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """Website tiles: where they may go, and how the window differs from a game's.
 
 A game tile is held to a five-host allowlist because it opens a kiosk-mode

@@ -1,4 +1,4 @@
-// Shelfcloud project - https://shelfcloud.schelstraete.org - bart@schelstraete.org
+// Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 
 import { addEventListener, definePlugin, removeEventListener, toaster } from "@decky/api";
 import {

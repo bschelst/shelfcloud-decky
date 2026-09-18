@@ -1,4 +1,4 @@
-// Shelfcloud project - https://shelfcloud.schelstraete.org - bart@schelstraete.org
+// Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 //
 // Saving a collection is the expensive part of a sync.
 //

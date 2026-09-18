@@ -1,4 +1,4 @@
-# Shelfcloud project - https://shelfcloud.schelstraete.org - bart@schelstraete.org
+# Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """Where a website tile is allowed to go.
 
 Two providers carry pages rather than streams — `shelfcloud` for pages the

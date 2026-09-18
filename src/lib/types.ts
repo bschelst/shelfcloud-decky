@@ -1,4 +1,4 @@
-// Shelfcloud project - https://shelfcloud.schelstraete.org - bart@schelstraete.org
+// Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 
 /** Shapes exchanged with the plugin backend (main.py). */
 

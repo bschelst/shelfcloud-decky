@@ -1,4 +1,4 @@
-# Shelfcloud project - https://shelfcloud.schelstraete.org - bart@schelstraete.org
+# Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """Choosing which shelf this device shows.
 
 A shelf is a named library on the gateway; this device points at one. The Deck

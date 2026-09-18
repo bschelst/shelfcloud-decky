@@ -1,4 +1,4 @@
-# Shelfcloud project - https://shelfcloud.schelstraete.org - bart@schelstraete.org
+# Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """Installing a browser from the panel.
 
 SteamOS ships no browser, so a fresh Deck cannot play anything until one is

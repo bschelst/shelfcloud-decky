@@ -1,4 +1,4 @@
-// Shelfcloud project - https://shelfcloud.schelstraete.org - bart@schelstraete.org
+// Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 //
 // The panel's header: one number, one bar, provider chips.
 //

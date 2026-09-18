@@ -1,4 +1,4 @@
-# Shelfcloud project - https://shelfcloud.schelstraete.org - bart@schelstraete.org
+# Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """Read Steam's shortcuts.vdf and find the tiles this plugin made.
 
 The plugin knows which shortcuts it created because it writes them down. When

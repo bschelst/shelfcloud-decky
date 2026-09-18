@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Shelfcloud project - https://shelfcloud.schelstraete.org - bart@schelstraete.org
+# Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """Read Steam's real ELibraryAssetType out of the running client.
 
 Why this exists: sync.ts declares the asset-type values by hand, with a comment

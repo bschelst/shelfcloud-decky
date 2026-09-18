@@ -1,4 +1,4 @@
-# Shelfcloud project - https://shelfcloud.schelstraete.org - bart@schelstraete.org
+# Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """Browser detection and launch-command construction.
 
 Shelfcloud is not tied to one browser, but it is limited to Chromium-based ones:

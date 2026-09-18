@@ -1,4 +1,4 @@
-# Shelfcloud project - https://shelfcloud.schelstraete.org - bart@schelstraete.org
+# Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """Pressing Play on Amazon Luna, pinned against what the live page actually does.
 
 Two bugs found by opening a real Luna game page on a Deck over CDP, both of

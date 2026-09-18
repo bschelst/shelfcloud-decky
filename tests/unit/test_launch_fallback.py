@@ -1,4 +1,4 @@
-# Shelfcloud project - https://shelfcloud.schelstraete.org - bart@schelstraete.org
+# Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """The offline launch URL, now that it is no longer on the command line.
 
 Steam shows launch options verbatim in a game's properties, so a provider deep

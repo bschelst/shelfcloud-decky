@@ -1,4 +1,4 @@
-# Shelfcloud project - https://shelfcloud.schelstraete.org - bart@schelstraete.org
+# Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """The default gateway address, which is written down twice.
 
 main.py has DEFAULT_GATEWAY and index.tsx has GATEWAY_URL. They must agree:

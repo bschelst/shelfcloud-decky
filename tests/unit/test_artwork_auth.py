@@ -1,4 +1,4 @@
-# Shelfcloud project - https://shelfcloud.schelstraete.org - bart@schelstraete.org
+# Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """Artwork fetched through the gateway must carry the token — and only there.
 
 The gateway's /api/artwork endpoint used to answer anonymously. It was the one

@@ -1,4 +1,4 @@
-# Shelfcloud project - https://shelfcloud.schelstraete.org - bart@schelstraete.org
+# Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """Which library entries become a Steam shortcut, now that some are pages.
 
 _to_desired applies two rules, because there are two kinds of tile. A game is

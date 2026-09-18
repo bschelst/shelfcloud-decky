@@ -1,4 +1,4 @@
-# Shelfcloud project - https://shelfcloud.schelstraete.org - bart@schelstraete.org
+# Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """Telling Luna the Deck is a supported OS, and keeping it told.
 
 Luna has TWO gates that read DIFFERENT things, which is why fixing the first

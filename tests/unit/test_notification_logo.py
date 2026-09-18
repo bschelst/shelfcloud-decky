@@ -1,4 +1,4 @@
-# Shelfcloud project - https://shelfcloud.schelstraete.org - bart@schelstraete.org
+# Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """Notifications carry the Shelfcloud mark, and carry it as a component.
 
 Steam's notifications showed no icon at all: toaster.toast() takes an optional

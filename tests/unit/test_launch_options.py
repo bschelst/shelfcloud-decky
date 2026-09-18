@@ -1,4 +1,4 @@
-# Shelfcloud project - https://shelfcloud.schelstraete.org - bart@schelstraete.org
+# Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """A Steam shortcut's launch options must survive `/bin/sh -c`.
 
 This pins down a bug that cost real debugging time and was invisible from the

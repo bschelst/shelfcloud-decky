@@ -1,4 +1,4 @@
-# Shelfcloud project - https://shelfcloud.schelstraete.org - bart@schelstraete.org
+# Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """The About box reports the version Decky provides, or admits it does not know.
 
 _version() now reads decky.DECKY_PLUGIN_VERSION rather than parsing package.json

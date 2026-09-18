@@ -1,4 +1,4 @@
-# Shelfcloud project - https://shelfcloud.schelstraete.org - bart@schelstraete.org
+# Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """Poll jitter — spreading devices out so they do not arrive as one wall.
 
 A fixed interval keeps devices in whatever alignment they started with. A

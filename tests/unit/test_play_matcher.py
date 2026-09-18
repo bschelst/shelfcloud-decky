@@ -1,4 +1,4 @@
-# Shelfcloud project - https://shelfcloud.schelstraete.org - bart@schelstraete.org
+# Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """The Play-button matcher, against real labels from the live providers.
 
 Why this exists: a Belgian Deck opened Brawlhalla on Xbox Cloud and the stream

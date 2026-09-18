@@ -1,4 +1,4 @@
-# Shelfcloud project - https://shelfcloud.schelstraete.org - bart@schelstraete.org
+# Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """Losing our own state file must not throw away the user's Steam tiles.
 
 Reconcile works entirely from the tracked map, so an empty map does not mean

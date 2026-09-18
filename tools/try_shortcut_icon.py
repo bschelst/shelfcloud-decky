@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Shelfcloud project - https://shelfcloud.schelstraete.org - bart@schelstraete.org
+# Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """Try SetShortcutIcon on exactly ONE shortcut, and check nothing else breaks.
 
 Background: the icon was first attempted as library asset type 4 via

@@ -1,4 +1,4 @@
-# Shelfcloud project - https://shelfcloud.schelstraete.org - bart@schelstraete.org
+# Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """Shelfcloud — Decky plugin backend.
 
 The plugin is a sync agent, not a game browser. Games are chosen on the web,

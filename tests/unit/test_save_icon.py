@@ -1,4 +1,4 @@
-# Shelfcloud project - https://shelfcloud.schelstraete.org - bart@schelstraete.org
+# Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """Writing shortcut icons to disk.
 
 Icons are the one piece of artwork that has to become a real file. Steam takes
