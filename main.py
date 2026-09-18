@@ -30,6 +30,7 @@ from typing import Any, Dict, List, Optional
 import decky
 
 import browsers
+import weburl
 import shortcuts
 
 from helpers import get_ssl_context  # provided by Decky Loader (certifi-backed)
@@ -608,13 +609,21 @@ class Plugin:
         providers = [p for p in raw_providers if isinstance(p, dict)] \
             if isinstance(raw_providers, list) else []
         # A route is only usable with somewhere to go and something to call it.
+        #
+        # Two rules, because there are two kinds of tile. A game is https-only:
+        # its URL is written into a Steam shortcut and opened later in a window
+        # holding live provider sessions, and refusing http here keeps a plain
+        # link from ever being stored. A page is checked by weburl instead,
+        # which permits http but refuses anything inside this network — the same
+        # rule the launcher applies when it opens the thing, so an entry cannot
+        # become a shortcut that then refuses to launch.
         providers = [
             p for p in providers
-            # https only: this URL is written into a Steam shortcut and opened
-            # later by the launcher, which checks the scheme and the host again.
-            # Refusing here too keeps a plain-http link from ever being stored.
-            if isinstance(p.get("launch_url"), str) and p["launch_url"].startswith("https://")
-            and isinstance(p.get("provider"), str) and p["provider"]
+            if isinstance(p.get("provider"), str) and p["provider"]
+            and isinstance(p.get("launch_url"), str)
+            and (weburl.is_allowed_website_url(p["launch_url"])
+                 if p["provider"] in weburl.WEBSITE_PROVIDERS
+                 else p["launch_url"].startswith("https://"))
         ]
         if not providers:
             return None

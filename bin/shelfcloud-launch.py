@@ -29,6 +29,7 @@ Exits when the browser exits, so Steam shows the game as running for the whole
 session and the tile's playtime is accurate.
 """
 
+import ipaddress
 import json
 import os
 import ssl
@@ -42,6 +43,7 @@ import time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "py_modules"))
 
 import browsers  # noqa: E402
+import weburl  # noqa: E402
 import cdp  # noqa: E402
 
 CDP_PORT = 9223
@@ -569,7 +571,7 @@ STATE_FILE = os.path.expanduser(
 RESOLVE_TIMEOUT = 8
 
 
-def stored_fallback(game_id: str) -> str:
+def stored_fallback(game_id: str, provider: str = "") -> str:
     """The offline launch URL for this game, or "" if there is not a usable one.
 
     Never raises: this runs on the path where the gateway has ALREADY failed,
@@ -589,7 +591,7 @@ def stored_fallback(game_id: str) -> str:
         url = (entry or {}).get("url")
     except Exception:
         return ""
-    return url if isinstance(url, str) and is_allowed_launch_url(url) else ""
+    return url if isinstance(url, str) and url_is_acceptable(url, provider) else ""
 
 # Steam runs this script and captures none of its output — stdout goes nowhere
 # a person can read. That mattered: when a launch quietly used the stored URL
@@ -630,7 +632,7 @@ def log(message: str) -> None:
         pass
 
 
-def resolve_launch(game_id: str, fallback_url: str) -> tuple:
+def resolve_launch(game_id: str, fallback_url: str, provider: str = "") -> tuple:
     """Ask the gateway where this game launches right now.
 
     The URL used to be frozen into the Steam shortcut at sync time, so a launch
@@ -652,7 +654,7 @@ def resolve_launch(game_id: str, fallback_url: str) -> tuple:
     # below has something to fall back to. A shortcut written before the URL
     # moved off the command line still passes one positionally; that keeps
     # working, and is preferred only when local state has nothing.
-    fallback_url = fallback_url or stored_fallback(game_id)
+    fallback_url = fallback_url or stored_fallback(game_id, provider)
 
     if not game_id:
         log("no --game-id on this shortcut; using the stored link "
@@ -726,14 +728,76 @@ def resolve_launch(game_id: str, fallback_url: str) -> tuple:
     # gateway only ever returns one of the permitted provider hosts; one that
     # returns anything else is either compromised or answering for someone who
     # is, and either way this is the point at which it stops.
-    if not is_allowed_launch_url(url):
-        log(f"gateway returned a URL outside the permitted providers "
+    if not url_is_acceptable(url, provider):
+        log(f"gateway returned a URL this tile may not open "
             f"({str(url)[:120]!r}) — REFUSED, using the stored link")
         return fallback_url, "refused gateway url"
 
     log(f"gateway resolved game {game_id} -> {payload.get('name') or '?'} "
         f"via {payload.get('provider') or '?'} in {elapsed} ms")
     return url, f"gateway ({payload.get('provider')})"
+
+# Where a page tile may go, and which providers get that rule instead of the
+# five-host provider allowlist above. Both live in py_modules/weburl.py, which
+# main.py imports too — the decision to make a shortcut and the decision to
+# open it have to agree, and they only do if there is one copy of the rule.
+WEBSITE_PROVIDERS = weburl.WEBSITE_PROVIDERS
+is_allowed_website_url = weburl.is_allowed_website_url
+
+
+def build_website_command(app_id: str, profile: str, url: str) -> list:
+    """Chromium command line for a page, which is not the one a game gets.
+
+    Three deliberate differences, and each is the reason the allowlist can be
+    relaxed for these tiles at all:
+
+    * A SEPARATE PROFILE. The game profile holds live Microsoft, NVIDIA,
+      Boosteroid and Luna sessions. A page somebody added has no business
+      within reach of those, and a separate --user-data-dir is what keeps it
+      out — cookies, storage and saved passwords all live in that directory.
+
+    * NO REMOTE DEBUGGING PORT. A game window opens one so the launcher can
+      press Play through CDP. That port is unauthenticated and accepts commands
+      from anything that can reach it, including script in the page it is
+      debugging; it is worth it for a fixed set of provider sites and is not
+      worth it for an arbitrary one. Nothing here needs it, so it is absent
+      rather than merely unused.
+
+    * NO KIOSK. Kiosk hides the address bar, and the address bar is how a
+      person can tell where they actually are. That is exactly the check the
+      allowlist performs for game tiles, handed back to the user for pages the
+      catalogue cannot vouch for.
+    """
+    return [
+        "/usr/bin/flatpak", "run",
+        "--branch=stable", "--arch=x86_64",
+        f"--filesystem={profile}",
+        app_id,
+        f"--user-data-dir={profile}",
+        "--window-size=1280,800",
+        "--start-maximized",
+        "--class=shelfcloud-web",
+        *browsers.BASE_FLAGS,
+        url,
+    ]
+
+
+def website_profile(profile: str) -> str:
+    """Where a page's cookies live: beside the game profile, never inside it."""
+    return os.path.join(os.path.dirname(profile.rstrip("/")) or ".",
+                        os.path.basename(profile.rstrip("/")) + "-web")
+
+def url_is_acceptable(url, provider: str) -> bool:
+    """Which of the two gates applies, decided by what kind of tile this is.
+
+    One function so that the three places a URL is checked — the gateway's
+    answer, the link stored on disk, and the last step before a browser opens —
+    cannot end up disagreeing about which rule a page is held to.
+    """
+    if provider in WEBSITE_PROVIDERS:
+        return is_allowed_website_url(url)
+    return is_allowed_launch_url(url)
+
 
 def build_browser_command(app_id: str, profile: str, url: str, kiosk: bool = True,
                           user_agent: str = "") -> list:
@@ -1091,7 +1155,7 @@ def main() -> int:
     log(f"--- launch: game={game_id or '?'} provider={provider or '?'} "
         f"browser={app_id}")
 
-    url, source = resolve_launch(game_id, url)
+    url, source = resolve_launch(game_id, url, provider)
     log(f"launch URL from {source}")
 
     if not url:
@@ -1105,8 +1169,10 @@ def main() -> int:
     # launch is the right outcome: a game that does not start is a complaint,
     # and a fullscreen page pretending to be a provider sign-in is a stolen
     # account.
-    if not is_allowed_launch_url(url):
-        log(f"REFUSED: {url!r} is not a permitted provider URL "
+    is_page = provider in WEBSITE_PROVIDERS
+    if not url_is_acceptable(url, provider):
+        log(f"REFUSED: {url!r} is not somewhere a "
+            f"{'website tile' if is_page else 'game'} may open "
             f"(source: {source}). Not launching.")
         return 3
 
@@ -1120,6 +1186,17 @@ def main() -> int:
               "If the controller does not work in-game, disconnect the extra one.")
     elif not pads:
         log("no virtual gamepad yet; controller may not work")
+
+    if is_page:
+        # Its own profile, its own window, and none of the automation a game
+        # gets: no debugging port to drive, no Play button to press, no
+        # platform override to hold. A page is just a page.
+        profile = website_profile(profile)
+        os.makedirs(profile, exist_ok=True)
+        log(f"opening a website in its own profile: {profile}")
+        code = subprocess.Popen(build_website_command(app_id, profile, url)).wait()
+        log(f"--- website closed (browser exit {code})")
+        return code
 
     browser = subprocess.Popen(build_browser_command(
         app_id, profile, url, kiosk,
