@@ -901,82 +901,60 @@ NEUTRALISE_APP_HANDOFF_JS = """
 })();
 """
 
-WAKE_GAMEPAD_JS = """
+VIRTUAL_GAMEPAD_JS = """
+// Chrome hides gamepads until a physical button press (W3C fingerprinting
+// mitigation). Cloud providers check on load and show "use your phone".
+//
+// This overrides navigator.getGamepads to return a virtual Xbox 360 pad in
+// slot 0 until the real API unlocks. Once Chrome exposes the real pads, the
+// override passes through to them transparently.
 (() => {
-  // Chrome hides gamepads from navigator.getGamepads() until the user presses
-  // a button — a W3C fingerprinting mitigation. Cloud providers check on load
-  // and show "use your phone" when nothing is there.
-  //
-  // Dispatching a synthetic gamepadconnected event does NOT unlock the API
-  // (Chrome ignores it). But dispatching a synthetic keyboard event from CDP
-  // does count as "user activation", which combined with a real gamepad being
-  // connected is enough for Chrome to expose it on the next getGamepads() call.
-  //
-  // This polls until at least one slot is non-null, or gives up after a few
-  // seconds. The actual gamepad hardware must be present (Steam Input's virtual
-  // Xbox pad); this just wakes Chrome up to see it.
-  return new Promise((resolve) => {
-    let tries = 0;
-    const check = () => {
-      const pads = navigator.getGamepads();
-      const found = [...pads].filter(Boolean);
-      if (found.length > 0) {
-        resolve('woke:' + found.length + ' gamepad(s)');
-        return;
-      }
-      if (++tries > 20) {
-        resolve('timeout:no gamepads appeared');
-        return;
-      }
-      setTimeout(check, 250);
-    };
-    check();
-  });
-})()
+  const real = navigator.getGamepads.bind(navigator);
+  const fakeBtn = () => ({pressed: false, touched: false, value: 0});
+  const fakePad = {
+    id: 'Xbox 360 Controller (XInput STANDARD GAMEPAD)',
+    index: 0, connected: true, mapping: 'standard',
+    axes: [0, 0, 0, 0],
+    buttons: Array.from({length: 17}, fakeBtn),
+    timestamp: performance.now(),
+    hapticActuators: [], vibrationActuator: null,
+  };
+
+  navigator.getGamepads = function() {
+    const pads = real();
+    if (pads && [...pads].some(Boolean)) return pads;
+    const out = [fakePad, null, null, null];
+    return out;
+  };
+
+  // Fire gamepadconnected so listeners that wait for the event see it too.
+  window.dispatchEvent(new GamepadEvent('gamepadconnected', {gamepad: fakePad}));
+})();
 """
 
 
 def wake_gamepads(url: str, provider: str = "") -> None:
-    """Trigger Chrome's gamepad gate by sending a synthetic key press via CDP.
+    """Inject a virtual gamepad so cloud providers see a controller immediately.
 
-    Chrome only exposes gamepads after a "user gesture" — a real input event.
-    Runtime.evaluate JS does not count, but CDP Input.dispatchKeyEvent does.
-    After the key press, we poll getGamepads() until a pad appears.
+    For providers that go through hold_platform_override (currently Luna),
+    the gamepad script is already injected there. This handles the rest —
+    Boosteroid, GeForce NOW, Xbox — by evaluating the override directly on
+    the live page.
     """
     profile = provider_profile(provider)
+    if profile.get("user_agent"):
+        return  # already injected by hold_platform_override
+
     marker = profile.get("page_match") or (url.split("/")[2] if "//" in url else url)
     target = cdp.wait_for_page(CDP_PORT, marker, timeout=10)
     if not target or not target.get("webSocketDebuggerUrl"):
         return
-    ws_url = target["webSocketDebuggerUrl"]
 
-    # Send a harmless key press to create "user activation" on the page.
     try:
-        ws = cdp._WebSocket(ws_url, timeout=10)
-        try:
-            for i, key_type in enumerate(("keyDown", "keyUp"), start=1):
-                ws.send_text(json.dumps({
-                    "id": i,
-                    "method": "Input.dispatchKeyEvent",
-                    "params": {"type": key_type, "key": "", "code": "", "windowsVirtualKeyCode": 0},
-                }))
-            deadline = time.monotonic() + 5
-            while time.monotonic() < deadline:
-                msg = json.loads(ws.recv_text())
-                if msg.get("id") == 2:
-                    break
-        finally:
-            ws.close()
+        cdp.evaluate(target["webSocketDebuggerUrl"], VIRTUAL_GAMEPAD_JS, timeout=10)
+        log("injected virtual gamepad for this session")
     except Exception as exc:
-        log(f"key dispatch failed: {exc}")
-
-    # Now poll getGamepads() — Chrome should expose them after the activation.
-    try:
-        result = cdp.evaluate(ws_url, WAKE_GAMEPAD_JS, timeout=10)
-        if result:
-            log(f"gamepad wake: {result}")
-    except cdp.CDPError as exc:
-        log(f"gamepad wake poll failed: {exc}")
+        log(f"gamepad injection failed: {exc}")
 
 
 
@@ -1050,8 +1028,12 @@ def hold_platform_override(url: str, provider: str = ""):
     wants_shim = profile.get("startup_js") == "NEUTRALISE_APP_HANDOFF_JS"
     if wants_shim:
         cdp.add_startup_script(held, NEUTRALISE_APP_HANDOFF_JS)
+    cdp.add_startup_script(held, VIRTUAL_GAMEPAD_JS)
     cdp.reload_page(held)
-    if wants_shim:
+    log("injected virtual gamepad for this session")
+    # add_startup_script enables the Page domain, which pushes events into the
+    # socket. Drain them or the socket wedges.
+    if True:
         # add_startup_script had to enable the Page domain, so from here on the
         # browser is pushing events at this socket. Drain them or it wedges.
         cdp.drain_in_background(held)
