@@ -51,6 +51,10 @@ def through_shell(options: str):
     result = subprocess.run(
         ["sh", "-c", f"{sys.executable} -c {shlex.quote(harness)} {options}"],
         capture_output=True, text=True,
+        # Bounded, and stdin closed. A child that waits for input hangs the
+        # whole suite otherwise, and on a CI runner nobody is there to notice —
+        # it simply sits there until the job's own six-hour limit.
+        timeout=30, stdin=subprocess.DEVNULL,
     )
     try:
         return json.loads(result.stdout.strip().splitlines()[-1])

@@ -51,7 +51,10 @@ jobs:
         run: python3 -m pip install --disable-pip-version-check pytest
 
       - name: Test backend
-        run: python3 -m pytest tests/unit -v
+        # Bounded so a hanging test fails in minutes with its output, instead
+        # of holding the job open until the six-hour default.
+        timeout-minutes: 10
+        run: python3 -m pytest tests/unit -v < /dev/null
 
       - name: Build
         run: pnpm build
