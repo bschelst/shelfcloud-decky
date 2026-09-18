@@ -50,10 +50,21 @@ def entry(provider, url, name="A page", game_id=4242):
     }
 
 
+# A browser, stubbed.
+#
+# _to_desired returns None when no supported browser is installed, and
+# detect_browsers() reads the real flatpak directories — so without this the
+# whole file passes on a machine that happens to have Chrome and fails on a CI
+# runner and in a container, which is exactly what it did. Nothing here is
+# about browser detection; that has its own tests.
+BROWSER = {"app_id": "com.google.Chrome", "label": "Google Chrome"}
+
+
 def desired(game):
     plugin = main.Plugin()
-    plugin._settings = {"api_token": "t", "browser": "chrome"}
-    return plugin._to_desired(game)
+    plugin._settings = {"api_token": "t", "browser": BROWSER["app_id"]}
+    with mock.patch.object(main.browsers, "resolve_browser", lambda _: dict(BROWSER)):
+        return plugin._to_desired(game)
 
 
 # ------------------------------------------------------------------ pages

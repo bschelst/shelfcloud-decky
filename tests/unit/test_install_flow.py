@@ -52,8 +52,26 @@ def run(coro):
 
 
 async def install_and_wait(p, app_id, run_result, present=True):
-    """Start an install with subprocess.run stubbed, and wait for it."""
-    with mock.patch.object(main.subprocess, "run", side_effect=run_result), \
+    """Start an install with subprocess.run stubbed, and wait for it.
+
+    Calls past the end of `run_result` get a success rather than running out.
+    _run_install makes a VARIABLE number of subprocess calls — ensure-flathub,
+    install, and on the success path the flatpak override as well — and a
+    side_effect list that runs out raises StopIteration inside a coroutine,
+    where it does not surface as a failed test: the await simply never
+    resolves and the whole suite hangs with no output.
+
+    It did exactly that, on Python 3.11 and not on 3.14, which is worth
+    knowing because 3.11 is what Decky ships on the Deck. The same file
+    already warns against pinning the number of commands a few tests below;
+    this is that lesson again, with teeth.
+    """
+    remaining = list(run_result)
+
+    def answer(*args, **kwargs):
+        return remaining.pop(0) if remaining else completed(0)
+
+    with mock.patch.object(main.subprocess, "run", side_effect=answer), \
          mock.patch.object(main.Plugin, "_is_present", staticmethod(lambda _: present)):
         started = await p.install_browser(app_id)
         if p._install_task:
