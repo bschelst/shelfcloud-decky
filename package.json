@@ -1,6 +1,6 @@
 {
   "name": "shelfcloud-decky",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Add cloud games to your Steam library and launch straight into them.",
   "type": "module",
   "scripts": {

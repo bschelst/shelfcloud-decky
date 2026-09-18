@@ -25,7 +25,10 @@ vi.mock("../../src/lib/api", () => ({
   saveIcon: vi.fn(),
   strayShortcuts: vi.fn(),
 }));
-vi.mock("../../src/lib/collection", () => ({ addToProviderCollections: vi.fn() }));
+vi.mock("../../src/lib/collection", () => ({
+  addToProviderCollections: vi.fn(),
+  pruneProviderCollections: vi.fn(async () => []),
+}));
 
 const { fetchArtwork, saveIcon, strayShortcuts } = await import("../../src/lib/api");
 

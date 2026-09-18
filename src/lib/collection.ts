@@ -15,6 +15,10 @@ interface SteamCollection {
   id: string;
   allApps?: Array<{ appid: number }>;
   AsDragDropCollection(): { AddApps(apps: unknown[]): void };
+  /** Takes the same overview objects AddApps does. Probed on hardware:
+   *  SetApps stores the array itself and builds a Set from it, so these
+   *  are compared by identity — pass back what allApps already holds. */
+  RemoveApps(apps: unknown[]): void;
   Save(): Promise<unknown>;
 }
 
@@ -104,4 +108,67 @@ export async function addToProviderCollections(members: CollectionMember[]): Pro
     }
   }
   return updated;
+}
+
+/** Does this collection belong to Shelfcloud? */
+function isOurs(displayName: string): boolean {
+  return displayName.endsWith(" (Shelfcloud)");
+}
+
+/**
+ * Take out of each provider collection the games that no longer belong in it.
+ *
+ * addToProviderCollections only ever ADDS, so a tile filed under one provider
+ * stayed there after the provider it launches through changed — Fortnite sat
+ * in "Amazon Luna (Shelfcloud)" and opened GeForce NOW, because the filing
+ * happens at sync and the launch URL is resolved later by the gateway, which
+ * reads the user's preferred service. Nothing ever disagreed; nothing ever
+ * cleaned up either.
+ *
+ * Scoped twice over, because these collections are visible to the user and
+ * emptying the wrong thing is worse than a misfiled tile:
+ *
+ *   - only collections named "… (Shelfcloud)", which the naming comment above
+ *     says outright are ours to add to or empty;
+ *   - only apps Shelfcloud manages. A game the user dropped into one of our
+ *     collections by hand is left exactly where they put it.
+ *
+ * `members` must be the WHOLE sync, not a batch: the question asked of each
+ * collection is "what should be in you", which a slice cannot answer.
+ */
+export async function pruneProviderCollections(
+  members: CollectionMember[],
+  managedAppIds: Set<number>,
+): Promise<string[]> {
+  if (typeof collectionStore === "undefined") return [];
+
+  const wanted = new Map<string, Set<number>>();
+  for (const member of members) {
+    const name = collectionName(member.provider);
+    const set = wanted.get(name) ?? new Set<number>();
+    set.add(member.appId);
+    wanted.set(name, set);
+  }
+
+  const pruned: string[] = [];
+  for (const collection of collectionStore.userCollections) {
+    if (!isOurs(collection.displayName)) continue;
+    try {
+      const belongs = wanted.get(collection.displayName) ?? new Set<number>();
+      // From allApps, so the objects handed back are the ones Steam holds.
+      const stale = (collection.allApps ?? []).filter(
+        (app) => managedAppIds.has(app.appid) && !belongs.has(app.appid));
+      if (!stale.length) continue;
+
+      collection.RemoveApps(stale);
+      await collection.Save();
+      pruned.push(collection.displayName);
+    } catch (error) {
+      // Best effort, like the filing itself: a tile in the wrong collection
+      // still plays, and failing a sync over tidiness helps nobody.
+      console.error("[shelfcloud] could not prune collection",
+                    collection.displayName, error);
+    }
+  }
+  return pruned;
 }

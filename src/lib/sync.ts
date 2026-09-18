@@ -6,7 +6,8 @@
 // backend decides *what* the library should contain; this makes it so.
 
 import { fetchArtwork, saveIcon, strayShortcuts } from "./api";
-import { addToProviderCollections, type CollectionMember } from "./collection";
+import { addToProviderCollections, pruneProviderCollections,
+         type CollectionMember } from "./collection";
 import { providerLabel, type DesiredGame, type SyncResult, type TrackedShortcut } from "./types";
 
 /**
@@ -390,12 +391,22 @@ export async function syncLibrary(
   // per-game would mean one full rewrite per tile.
   const COLLECTION_BATCH = 12;
   let pending: CollectionMember[] = [];
+  // Kept as well as the batches. Filing happens a batch at a time so tiles
+  // appear while the sync runs, but deciding what does NOT belong in a
+  // collection needs the whole answer — a slice cannot tell the difference
+  // between "filed elsewhere" and "not reached yet".
+  const filed: CollectionMember[] = [];
 
   const flushCollections = async () => {
     if (!pending.length) return;
     const batch = pending;
     pending = [];
     await addToProviderCollections(batch);
+  };
+
+  const file = (member: CollectionMember) => {
+    pending.push(member);
+    filed.push(member);
   };
 
   // Count the REAL work up front — adds, updates and removals — not every game
@@ -456,7 +467,7 @@ export async function syncLibrary(
         await callbacks.record(game.game_id, appId, title, game.options,
                                appliedNew.visible ? art : "", game.provider,
                                game.url ?? "");
-        pending.push({ appId, provider: game.provider });
+        file({ appId, provider: game.provider });
         result.added++;
         result.addedNames.push(game.name);
         // File this batch now, so the tiles are visible in their collection
@@ -493,7 +504,7 @@ export async function syncLibrary(
                                  recordedArt, game.provider, game.url ?? "");
           result.updated++;
         }
-        pending.push({ appId: existing.app_id, provider: game.provider });
+        file({ appId: existing.app_id, provider: game.provider });
         if (pending.length >= COLLECTION_BATCH) await flushCollections();
       }
     } catch (error) {
@@ -520,6 +531,16 @@ export async function syncLibrary(
 
   // Whatever did not fill a batch. Best effort — unsorted tiles still play.
   await flushCollections();
+
+  // And take out what no longer belongs.
+  //
+  // Managed means "filed by this sync OR tracked before it" — the second half
+  // matters, because a game dropped from the library is not filed anywhere now
+  // and would otherwise be left sitting in its old collection forever. Apps
+  // outside that set are the user's own doing and are not touched.
+  const managed = new Set<number>(filed.map((m) => m.appId));
+  for (const entry of Object.values(tracked)) managed.add(entry.app_id);
+  await pruneProviderCollections(filed, managed);
 
   return result;
 }

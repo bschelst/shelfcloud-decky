@@ -19,7 +19,10 @@ import { syncLibrary } from "../../src/lib/sync";
 import type { DesiredGame } from "../../src/lib/types";
 
 vi.mock("../../src/lib/api", () => ({ fetchArtwork: vi.fn(async () => ({ ok: false })) }));
-vi.mock("../../src/lib/collection", () => ({ addToProviderCollections: vi.fn(async () => []) }));
+vi.mock("../../src/lib/collection", () => ({
+  addToProviderCollections: vi.fn(async () => []),
+  pruneProviderCollections: vi.fn(async () => []),
+}));
 
 const { addToProviderCollections } = await import("../../src/lib/collection");
 
