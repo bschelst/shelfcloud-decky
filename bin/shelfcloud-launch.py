@@ -507,7 +507,15 @@ PROVIDERS = {
         #
         # Same Edge version the browser really is, so nothing else about the
         # page changes; only the platform is different.
-        "startup_js": "LUNA_DISMISS_UNSUPPORTED",
+        "user_agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36 Edg/153.0.0.0"
+        ),
+        # Reporting Windows has a side effect: Luna then believes a desktop app
+        # might be installed and pokes "luna://" to find out, which Chromium
+        # surfaces as "This site is trying to open xdg-open". See
+        # NEUTRALISE_APP_HANDOFF_JS.
+        "startup_js": "NEUTRALISE_APP_HANDOFF_JS",
         # The launch URL is luna.amazon.com, and Luna REDIRECTS it to the
         # viewer's own country: luna.amazon.de, luna.amazon.co.uk,
         # luna.amazon.com.be. Matching on the host we asked for therefore finds
@@ -860,84 +868,89 @@ def build_browser_command(app_id: str, profile: str, url: str, kiosk: bool = Tru
 #
 # An own property shadows the prototype getter, which is why this works at all:
 # Location.href is [Unforgeable], so the real one can never be overridden.
-LUNA_DISMISS_UNSUPPORTED_JS = """
-// Luna shows an "Unsupported OS" dialog on Linux with a Close button.
-// Clicking Close dismisses it and the stream starts anyway. Auto-click it.
-(() => {
-  const dismiss = () => {
-    // Look for a button or link with "Close" text near the unsupported message
-    for (const el of document.querySelectorAll('button, a, [role=button], span')) {
-      const text = (el.innerText || '').trim().toLowerCase();
-      if (text === 'close' || text === 'sluiten' || text === 'fermer' || text === 'schliessen') {
-        const r = el.getBoundingClientRect();
-        if (r.height > 0 && r.width > 0) {
-          el.click();
-          return;
-        }
-      }
-    }
-    // Also try Escape key
-    document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', code: 'Escape', bubbles: true}));
-  };
-  // Try repeatedly — the dialog may appear after a short delay
-  let tries = 0;
-  const timer = setInterval(() => {
-    dismiss();
-    if (++tries > 20) clearInterval(timer);
-  }, 500);
-})();
-"""
-
 NEUTRALISE_APP_HANDOFF_JS = """
 (() => {
   const install = () => {
     try {
       if (document.getElementById('hiddenIframe')) return true;
       const host = document.body || document.documentElement;
-      if (!host) return false;
+      if (!host) return false;          // document-start: nothing to attach to yet
       const frame = document.createElement('iframe');
       frame.id = 'hiddenIframe';
       frame.style.display = 'none';
+      // An OWN property shadows the prototype getter. This is the only way in:
+      // Location.href is [Unforgeable], so the real one can never be replaced.
       Object.defineProperty(frame, 'contentWindow', {
         configurable: true,
         get() { return { location: { set href(_) {}, get href() { return ''; } } }; },
       });
       host.appendChild(frame);
       return true;
-    } catch (e) { return true; }
+    } catch (e) { return true; }       // never break the page over this
   };
+  // This runs before the page's own scripts, so the DOM is usually still empty.
+  // Luna only looks for #hiddenIframe when Play is pressed, so DOMContentLoaded
+  // is early enough by a wide margin.
   if (!install()) {
     document.addEventListener('DOMContentLoaded', install, { once: true });
   }
 })();
 """
 
-def dismiss_luna_unsupported(url: str, provider: str = "") -> None:
-    """Auto-close Luna's 'Unsupported OS' dialog on Linux.
+VIRTUAL_GAMEPAD_JS = """
+// Chrome hides gamepads until a physical button press (W3C fingerprinting
+// mitigation). Cloud providers check on load and show "use your phone".
+//
+// This overrides navigator.getGamepads to return a virtual Xbox 360 pad in
+// slot 0 until the real API unlocks. Once Chrome exposes the real pads, the
+// override passes through to them transparently.
+(() => {
+  const real = navigator.getGamepads.bind(navigator);
+  const fakeBtn = () => ({pressed: false, touched: false, value: 0});
+  const fakePad = {
+    id: 'Xbox 360 Controller (XInput STANDARD GAMEPAD)',
+    index: 0, connected: true, mapping: 'standard',
+    axes: [0, 0, 0, 0],
+    buttons: Array.from({length: 17}, fakeBtn),
+    timestamp: performance.now(),
+    hapticActuators: [], vibrationActuator: null,
+  };
 
-    Luna shows a dismissable dialog when it detects Linux. Clicking Close
-    lets the stream start anyway, and the gamepad works natively without
-    any platform spoofing.
+  navigator.getGamepads = function() {
+    const pads = real();
+    if (pads && [...pads].some(Boolean)) return pads;
+    const out = [fakePad, null, null, null];
+    return out;
+  };
+
+  // Fire gamepadconnected so listeners that wait for the event see it too.
+  window.dispatchEvent(new GamepadEvent('gamepadconnected', {gamepad: fakePad}));
+})();
+"""
+
+
+def wake_gamepads(url: str, provider: str = "") -> None:
+    """Inject a virtual gamepad so cloud providers see a controller immediately.
+
+    For providers that go through hold_platform_override (currently Luna),
+    the gamepad script is already injected there. This handles the rest —
+    Boosteroid, GeForce NOW, Xbox — by evaluating the override directly on
+    the live page.
     """
     profile = provider_profile(provider)
-    if profile.get("startup_js") != "LUNA_DISMISS_UNSUPPORTED":
-        return
+    if profile.get("user_agent"):
+        return  # already injected by hold_platform_override
 
     marker = profile.get("page_match") or (url.split("/")[2] if "//" in url else url)
     target = cdp.wait_for_page(CDP_PORT, marker, timeout=10)
     if not target or not target.get("webSocketDebuggerUrl"):
         return
 
-    ws_url = target["webSocketDebuggerUrl"]
     try:
-        ws = cdp.open_session(ws_url, timeout=10)
-        cdp.add_startup_script(ws, NEUTRALISE_APP_HANDOFF_JS)
-        cdp.add_startup_script(ws, LUNA_DISMISS_UNSUPPORTED_JS)
-        cdp.reload_page(ws)
-        cdp.drain_in_background(ws)
-        log("dismissing Luna unsupported-OS dialog")
+        cdp.evaluate(target["webSocketDebuggerUrl"], VIRTUAL_GAMEPAD_JS, timeout=10)
+        log("injected virtual gamepad for this session")
     except Exception as exc:
-        log(f"Luna dismiss failed: {exc}")
+        log(f"gamepad injection failed: {exc}")
 
 
 
@@ -1008,7 +1021,18 @@ def hold_platform_override(url: str, provider: str = ""):
 
     held = cdp.hold_platform(target["webSocketDebuggerUrl"], user_agent,
                              profile.get("platform", "Windows"))
+    wants_shim = profile.get("startup_js") == "NEUTRALISE_APP_HANDOFF_JS"
+    if wants_shim:
+        cdp.add_startup_script(held, NEUTRALISE_APP_HANDOFF_JS)
+    cdp.add_startup_script(held, VIRTUAL_GAMEPAD_JS)
     cdp.reload_page(held)
+    log("injected virtual gamepad for this session")
+    # add_startup_script enables the Page domain, which pushes events into the
+    # socket. Drain them or the socket wedges.
+    if True:
+        # add_startup_script had to enable the Page domain, so from here on the
+        # browser is pushing events at this socket. Drain them or it wedges.
+        cdp.drain_in_background(held)
     log(f"{profile['label']}: reporting {profile.get('platform', 'Windows')} "
         "for this session")
     return held
@@ -1262,21 +1286,19 @@ def main() -> int:
     held = None
     try:
         held = hold_platform_override(url, provider)
-    except Exception as exc:
+    except Exception as exc:  # never let automation break the launch
         log(f"platform override failed, continuing: {exc}")
-
-    # Luna's handoff shim and unsupported-OS dismiss MUST run before autoplay.
-    # Autoplay clicks "Play now", which triggers luna:// immediately.
-    try:
-        dismiss_luna_unsupported(url, provider)
-    except Exception as exc:
-        log(f"Luna dismiss failed, continuing: {exc}")
 
     if autoplay:
         try:
             try_autoplay(url, provider)
-        except Exception as exc:
+        except Exception as exc:  # never let automation break the launch
             log(f"autoplay failed, continuing: {exc}")
+
+    try:
+        wake_gamepads(url, provider)
+    except Exception as exc:
+        log(f"gamepad wake failed, continuing: {exc}")
 
     try:
         log_browser_gamepads(url, provider)
