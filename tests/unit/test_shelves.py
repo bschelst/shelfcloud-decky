@@ -24,7 +24,12 @@ decky.DECKY_PLUGIN_DIR = "/plugins/Shelfcloud"
 decky.DECKY_PLUGIN_SETTINGS_DIR = "/settings/Shelfcloud"
 decky.logger = mock.MagicMock()
 decky.emit = mock.AsyncMock()
+decky.DECKY_PLUGIN_VERSION = "0.0.0-test"
 sys.modules.setdefault("decky", decky)
+
+helpers = types.ModuleType("helpers")
+helpers.get_ssl_context = lambda: None
+sys.modules.setdefault("helpers", helpers)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)

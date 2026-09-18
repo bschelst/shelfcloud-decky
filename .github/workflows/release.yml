@@ -29,6 +29,18 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Type check
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Test frontend
+        run: pnpm test
+
+      - name: Test backend
+        run: python3 -m pytest tests/unit -v
+
       - name: Build
         run: pnpm build
 
