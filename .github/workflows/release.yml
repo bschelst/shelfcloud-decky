@@ -73,7 +73,6 @@ jobs:
           cp py_modules/*.py "${PLUGIN_NAME}/py_modules/"
           cp bin/*.py "${PLUGIN_NAME}/bin/"
           chmod +x "${PLUGIN_NAME}"/bin/*.py
-          cp -r extensions "${PLUGIN_NAME}/extensions"
 
           zip -r "shelfcloud-decky-${TAG}.zip" "${PLUGIN_NAME}"
           cp "shelfcloud-decky-${TAG}.zip" "shelfcloud-decky.zip"
