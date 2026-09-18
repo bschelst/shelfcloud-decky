@@ -72,21 +72,6 @@ The following components are in scope:
 
 This check exists because the gateway is a server, and servers get compromised. A launch URL it returns is opened in a kiosk-mode browser holding live provider sessions, with no address bar and no tab strip to show where it went — a phishing page in that window is indistinguishable from the real sign-in.
 
-### Backend hardening
-
-- **Settings allowlist** — `set_setting` only accepts `browser` and `sync_minutes`. Other keys (including `api_token`) are rejected.
-- **Atomic file writes** — settings and state files use write-then-rename, so a crash mid-write cannot corrupt them.
-- **State recovery** — if `synced.json` is lost or corrupted, the plugin recovers tracked shortcuts from Steam's own `shortcuts.vdf` rather than recreating duplicates.
-- **Subprocess isolation** — `LD_LIBRARY_PATH` and `LD_PRELOAD` are stripped from the subprocess environment before running flatpak, preventing Decky's bundled OpenSSL from poisoning system binaries.
-
-### CI pipeline
-
-- The release workflow runs **typecheck, lint, frontend tests, and backend tests** before building. A broken build cannot ship.
-- Third-party GitHub Actions are used (`softprops/action-gh-release@v2`); pinning to commit SHAs is recommended for supply-chain hardening.
-
-### CDP (Chrome DevTools Protocol)
-
-The launcher opens `--remote-debugging-port=9223` on the browser to press Play buttons and spoof the OS for Amazon Luna. This port listens on **127.0.0.1 only** (Chrome's default). Any local process running as `deck` could connect while a game session is active. This is a localhost-only risk that requires local code execution to exploit.
 
 ## Best Practices for Users
 

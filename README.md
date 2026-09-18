@@ -103,6 +103,9 @@ Your provider credentials stay in the browser profile — Shelfcloud never sees 
 | &#127918; **GeForce NOW** | &#9989; Fully supported |
 | &#127775; **Xbox Cloud Gaming** | &#9989; Fully supported |
 | &#128038; **Amazon Luna** | &#9989; Fully supported |
+| &#128279; **Custom URL** | &#9989; Add your own |
+
+You can also add a **custom provider** by pasting any URL on the Shelfcloud website. This creates a tile that opens that URL in the browser — useful for services Shelfcloud doesn't cover yet, or for your own game server.
 
 Boosteroid and GeForce NOW stream games you already own. Xbox Cloud Gaming and
 Amazon Luna are the other kind — the subscription *is* the catalog, so owning a
