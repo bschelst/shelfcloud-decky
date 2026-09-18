@@ -150,14 +150,17 @@ def ensure_flathub_command() -> List[str]:
 
 FLATPAK_OVERRIDES = [
     "--filesystem=/run/udev:ro",
+    "--device=all",
 ]
 
 
 def override_command(app_id: str) -> List[str]:
     """Grant a browser the sandbox permissions cloud gaming needs.
 
-    Flatpak sandboxes deny /run/udev by default. Without it the browser
-    cannot enumerate input devices, so gamepads are invisible to the stream
+    --filesystem=/run/udev:ro lets the browser enumerate devices via udev.
+    --device=all grants read access to /dev/input/*, which is where the
+    actual gamepad data lives. Without it navigator.getGamepads() returns
+    four null slots and cloud providers fall back to "use your phone".
     — the cloud sees a keyboard-only session and offers no controller input.
 
     Applied as a --user override so it survives browser updates and does not
