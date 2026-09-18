@@ -47,6 +47,10 @@ BASE_FLAGS = [
     "--disable-background-networking",
     # Cloud streams must be able to start without the user clicking the page.
     "--autoplay-policy=no-user-gesture-required",
+    # Hardware video decode via VA-API. Without it the CPU decodes the stream,
+    # which costs frames and battery. SteamOS exposes the GPU drivers to
+    # flatpak, so this works in Game Mode on Deck and Steam Machine hardware.
+    "--enable-features=VaapiVideoDecodeLinuxGL",
 ]
 
 
