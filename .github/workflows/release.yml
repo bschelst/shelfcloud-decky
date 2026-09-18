@@ -38,6 +38,18 @@ jobs:
       - name: Test frontend
         run: pnpm test
 
+      # The runner's python has no pytest, and this step was added without one.
+      # v0.2.0 and v0.2.1 predate the step, so v0.3.0 was the first tag to meet
+      # it — and it failed on "No module named pytest" rather than on anything
+      # in the plugin.
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install backend test dependencies
+        run: python3 -m pip install --disable-pip-version-check pytest
+
       - name: Test backend
         run: python3 -m pytest tests/unit -v
 
@@ -78,5 +90,10 @@ jobs:
             shelfcloud-decky.zip
           generate_release_notes: false
           body_path: release_body.md
+          # Say so explicitly. GitHub calls whichever release was CREATED last
+          # "Latest", not the highest version — v0.1.0, v0.2.0 and v0.2.1 were
+          # published within three seconds of each other and v0.1.0 went last,
+          # so the download everyone gets has been the oldest build.
+          make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
