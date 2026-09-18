@@ -820,20 +820,16 @@ def build_browser_command(app_id: str, profile: str, url: str, kiosk: bool = Tru
     NVIDIA login can bounce through pages that need a visible tab strip and a
     way back, and a kiosk window offers neither.
     """
-    ext_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                           "extensions", "gamepad-shim")
     return [
         "/usr/bin/flatpak", "run",
         "--branch=stable", "--arch=x86_64",
         f"--filesystem={profile}",
-        f"--filesystem={ext_dir}:ro",
         app_id,
         f"--user-data-dir={profile}",
         f"--remote-debugging-port={CDP_PORT}",
         "--window-size=1280,800",
         "--class=shelfcloud",
         *browsers.BASE_FLAGS,
-        f"--load-extension={ext_dir}",
         *([f"--user-agent={user_agent}"] if user_agent else []),
         *(["--kiosk"] if kiosk else []),
         url,
