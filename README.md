@@ -5,7 +5,7 @@
 <h3 align="center">Cloud games, in your Steam Deck, Steam Machine and Bazzite library.</h3>
 
 <p align="center">
-  <a href="https://github.com/bschelst/shelfcloud-decky/releases"><img src="https://img.shields.io/badge/version-0.3.0_beta-4d9fff?style=flat-square" alt="Version" /></a>
+  <a href="https://github.com/bschelst/shelfcloud-decky/releases"><img src="https://img.shields.io/badge/version-0.3.2_beta-4d9fff?style=flat-square" alt="Version" /></a>
   <a href="https://github.com/bschelst/shelfcloud-decky/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-GPL--2.0-555?style=flat-square" alt="License" /></a>
   <a href="https://shelfcloud.cc"><img src="https://img.shields.io/badge/website-shelfcloud-4d9fff?style=flat-square" alt="Website" /></a>
   <a href="https://alphastore.schelstraete.org"><img src="https://img.shields.io/badge/install-AlphaStore-8ec5ff?style=flat-square" alt="AlphaStore" /></a>
