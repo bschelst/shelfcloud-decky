@@ -3,8 +3,6 @@
 import { addEventListener, definePlugin, removeEventListener, toaster } from "@decky/api";
 import {
   ButtonItem,
-  Dropdown,
-  Field,
   Focusable,
   Navigation,
   PanelSection,
@@ -12,18 +10,7 @@ import {
   staticClasses,
 } from "@decky/ui";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import {
-  FaCog,
-  FaGithub,
-  FaGlobe,
-  FaInfoCircle,
-  FaLink,
-  FaQuestionCircle,
-  FaGamepad,
-  FaSignOutAlt,
-  FaSteam,
-  FaTrashAlt,
-} from "react-icons/fa";
+import { FaSteam } from "react-icons/fa";
 
 import {
   forgetShortcut,
@@ -49,8 +36,11 @@ import { syncLibrary } from "./lib/sync";
 import { changeSummary, syncSummary } from "./lib/summary";
 import { LibrarySummary } from "./components/LibrarySummary";
 import { Logo, LogoMono, NotificationLogo } from "./components/Logo";
-import { Collapsible, IconLabel } from "./components/Collapsible";
+import { IconLabel } from "./components/Collapsible";
 import { NoBrowser } from "./components/NoBrowser";
+import { SettingsSection } from "./components/SettingsSection";
+import { LinksSection } from "./components/LinksSection";
+import { AboutSection } from "./components/AboutSection";
 import { finishJob, getJob, setJob, subscribeJob } from "./lib/job";
 import { theme } from "./lib/theme";
 import type { DesiredGame, InstallState, Status, SyncResult } from "./lib/types";
@@ -60,16 +50,6 @@ const LOGIN_POLL_MS = 2500;
 const LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
 const GATEWAY_URL = "https://shelfcloud.cc";
 const GITHUB_URL = "https://github.com/bschelst/shelfcloud-decky";
-
-/** The shelf picker's stand-in for "no shelf", which the gateway spells null.
- *
- * A Dropdown option needs a key and null is not one. Negative because shelf
- * ids come from a Postgres identity column and start at 1: 0 would merely be
- * unlikely to collide, -1 cannot. A collision would be quiet and wrong — the
- * shelf holding that id would read as "Shared games" and, when chosen, move
- * the device to shared instead of to it.
- */
-const SHARED = -1;
 
 /** How often to re-read the library count while a sync is running.
  *
@@ -735,256 +715,44 @@ function Content() {
         )}
       </PanelSection>
 
-      {/* Settings, Links and About as collapsed sections, so the panel opens
-          on the things you actually came for and everything else is one press
-          away rather than a scroll away.
-
-          About sits last deliberately: version and server are what you look up
-          when something is wrong, not what you reach for daily, so they belong
-          furthest from the controls. */}
       <PanelSection>
-        <Collapsible title="Settings" icon={<FaCog size={14} />}>
-          <PanelSectionRow>
-            <Focusable style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-              <div style={{ fontSize: "0.75em", opacity: 0.7 }}>Browser</div>
-              <Dropdown
-                selectedOption={status.browser?.app_id}
-                rgOptions={status.browsers.map((b) => ({ data: b.app_id, label: b.label }))}
-                onChange={(option) => { void setSetting("browser", option.data).then(setStatus); }}
-              />
-            </Focusable>
-          </PanelSectionRow>
-
-          <PanelSectionRow>
-            <Focusable style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-              <div style={{ fontSize: "0.75em", opacity: 0.7 }}>Sync every</div>
-              <Dropdown
-                disabled={signedOut}
-                selectedOption={status.sync_minutes}
-                rgOptions={status.sync_choices.map((m) => ({
-                  data: m,
-                  label: m === 60 ? "hour" : `${m} min`,
-                }))}
-                onChange={(option) => { void setSetting("sync_minutes", option.data).then(setStatus); }}
-              />
-            </Focusable>
-          </PanelSectionRow>
-
-          {/* Which machine the gateway thinks this is.
-              Shown because the website lists devices by name and lets them be
-              renamed, and without seeing the name here there is no way to tell
-              which row in that list is the Deck in your hands. Read-only: this
-              is the one screen with no keyboard worth typing on. */}
-          {/* Only offered once a shelf exists. With none there is nothing to
-              choose between, and a one-option picker is a control that does
-              nothing but invite a press. */}
-          {shelves?.ok && (shelves.shelves?.length ?? 0) > 0 && (
-            <PanelSectionRow>
-              <Focusable style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                {/* The device goes in the LABEL rather than on a line of its
-                    own. This section is a column of label-above, control-below
-                    pairs, and a read-only value has no control to sit under —
-                    so as its own row it read as stray text wedged between two
-                    dropdowns. Here it is the context the control needs anyway:
-                    which machine this setting is about. */}
-                <div style={{ fontSize: "0.75em", opacity: 0.7 }}>
-                  {shelves.device_name ? `Shelf for ${shelves.device_name}` : "Use shelf"}
-                </div>
-                <Dropdown
-                  disabled={signedOut || busy}
-                  // A Dropdown option needs a non-null key, but "no shelf" is
-                  // spelled null. SHARED is the stand-in, and it is -1 rather
-                  // than 0 because a shelf id comes from a Postgres identity
-                  // column: 0 is merely unlikely, a negative id is impossible.
-                  // With 0, a shelf that ever had that id would both display
-                  // as "Shared games" and, when picked, switch the device to
-                  // shared — the opposite of what was chosen.
-                  selectedOption={shelves.shelf_id ?? SHARED}
-                  rgOptions={[
-                    { data: SHARED, label: "Shared games" },
-                    ...(shelves.shelves ?? []).map((shelf) => ({
-                      data: shelf.id,
-                      label: `${shelf.name} (${shelf.games})`,
-                    })),
-                  ]}
-                  onChange={(option) => {
-                    const next = option.data === SHARED ? null : Number(option.data);
-                    void setShelf(next).then((result) => {
-                      if (!result.ok) {
-                        toaster.toast({ title: "Shelfcloud", body: result.error || "Could not change shelf",
-                                        logo: <NotificationLogo /> });
-                        return;
-                      }
-                      // The library this device should hold just changed, so
-                      // reconcile now. Waiting for the next poll would leave
-                      // the old tiles in place and read as the setting not
-                      // having taken.
-                      //
-                      // Only doSync() here, with no getShelves() beside it:
-                      // finishing a sync bumps `completed`, and the effect
-                      // keyed on it re-reads the shelves. Doing both launched
-                      // two overlapping reads whose order nothing enforced, so
-                      // the older answer could land last and put the picker
-                      // back to the shelf just switched away from.
-                      void doSync();
-                    }).catch((error) => {
-                      // Without this the promise rejects unhandled and the
-                      // control simply does nothing when pressed — no toast,
-                      // no reverted selection, nothing to act on. The backend
-                      // returns errors rather than raising, so this is the
-                      // last resort: the RPC bridge itself failing.
-                      toaster.toast({ title: "Shelfcloud", body: String(error),
-                                      logo: <NotificationLogo /> });
-                    });
-                  }}
-                />
-              </Focusable>
-            </PanelSectionRow>
-          )}
-
-          <PanelSectionRow>
-            <ButtonItem
-              layout="below"
-              onClick={() => {
-                void applyOverrides().then((r) => {
-                  toaster.toast({
-                    title: "Shelfcloud",
-                    body: r.ok
-                      ? `Gamepad permissions applied to ${r.browser}.`
-                      : (r.error || "No browser selected."),
-                    logo: <NotificationLogo />,
-                  });
-                });
-              }}
-            >
-              <IconLabel icon={<FaGamepad size={12} />}>Fix gamepad permissions</IconLabel>
-            </ButtonItem>
-          </PanelSectionRow>
-
-          {/* A rule and real space before the destructive action.
-              Measured on the live panel: this row sat 10px below the "Sync
-              every" dropdown where every other button has 20px, because a
-              dropdown row is a Focusable wrapping a label and a control rather
-              than a plain button, and it contributes different spacing. At
-              10px the focus highlight — which is drawn outside the button —
-              touched the dropdown above it, so arming this control looked
-              cramped and clipped.
-
-              A divider rather than just a bigger margin: this is the one
-              control on the panel that destroys something, and it should read
-              as separate from the settings it sits under. */}
-          <div style={{
-            height: 1,
-            background: theme.border,
-            margin: "16px 16px 4px",
-          }} />
-
-          <PanelSectionRow>
-            <ButtonItem layout="below" disabled={busy || signedOut} onClick={() => void removeAll()}>
-              {/* ButtonItem has no destructive variant, so the label carries the
-                  warning colour. Colour and weight are the only things that
-                  differ from any other label — same flex row, no vertical
-                  padding, inherited line-height.
-
-                  The armed text is kept short and nowrap because it must fit on
-                  one line. Measured on the live panel: the button gives 189px
-                  to the label, and "Confirm — remove all tiles" needs 200px
-                  bold. It wrapped, which grew the row from 40px to 60px, so
-                  arming the button made the whole panel shift under the user's
-                  thumb. "Confirm — remove all" is 164px bold and fits.
-
-                  nowrap is the guarantee rather than the fix: it keeps the row
-                  at 40px even if a future label — or a translation — runs long.
-                  Two earlier attempts here added padding and line-height to
-                  "give the text room", which only made the row taller still;
-                  nothing was ever being clipped. */}
-              <IconLabel
-                icon={<FaTrashAlt size={12} color={theme.bad} />}
-              >
-                <span style={{
-                  color: theme.bad,
-                  fontWeight: confirmClear ? 700 : 500,
-                  whiteSpace: "nowrap",
-                }}>
-                  {confirmClear ? "Confirm — remove all" : "Remove all games"}
-                </span>
-              </IconLabel>
-            </ButtonItem>
-          </PanelSectionRow>
-
-          <PanelSectionRow>
-            <ButtonItem layout="below" disabled={signedOut} onClick={() => void signOut()}>
-              <IconLabel icon={<FaSignOutAlt size={12} />}>
-                <span style={{
-                  color: confirmSignOut ? theme.bad : undefined,
-                  fontWeight: confirmSignOut ? 700 : 500,
-                }}>
-                  {confirmSignOut ? "Confirm — sign out" : "Sign out"}
-                </span>
-              </IconLabel>
-            </ButtonItem>
-          </PanelSectionRow>
-        </Collapsible>
-
-        <Collapsible title="Links" icon={<FaLink size={14} />}>
-          <PanelSectionRow>
-            {/* Reachable signed out: the documentation is how someone works out
-                what to do about being signed out. */}
-            {/* The guide lives on the website, not in this panel.
-                A guide with pictures does not fit in a Quick Access panel, and
-                one served from the gateway can be corrected without shipping a
-                plugin release to every device. */}
-            <ButtonItem
-              layout="below"
-              onClick={() => openInSteamBrowser(`${GATEWAY_URL}/guide`)}
-            >
-              <IconLabel icon={<FaQuestionCircle size={14} />}>
-                Help &amp; documentation
-              </IconLabel>
-            </ButtonItem>
-          </PanelSectionRow>
-
-          <PanelSectionRow>
-            <ButtonItem layout="below" onClick={() => openInSteamBrowser(GATEWAY_URL)}>
-              <IconLabel icon={<FaGlobe size={14} />}>Shelfcloud website</IconLabel>
-            </ButtonItem>
-          </PanelSectionRow>
-
-          <PanelSectionRow>
-            <ButtonItem layout="below" onClick={() => openInSteamBrowser(GITHUB_URL)}>
-              <IconLabel icon={<FaGithub size={14} />}>GitHub repository</IconLabel>
-            </ButtonItem>
-          </PanelSectionRow>
-        </Collapsible>
-
-        <Collapsible title="About" icon={<FaInfoCircle size={14} />}>
-          <PanelSectionRow>
-            <Field label="Version" bottomSeparator="none">
-              {status.version || "unknown"}
-            </Field>
-          </PanelSectionRow>
-          <PanelSectionRow>
-            <Field label="Games synced" bottomSeparator="none">{status.tracked}</Field>
-          </PanelSectionRow>
-          <PanelSectionRow>
-            <Field label="Signed in" bottomSeparator="none">
-              <span style={{ color: signedOut ? theme.bad : theme.good }}>
-                {signedOut ? "No" : "Yes"}
-              </span>
-            </Field>
-          </PanelSectionRow>
-          {/* The name the website lists this machine under, so the row you
-              rename there can be matched to the Deck in your hands. A fact
-              rather than a setting, so it belongs here with the others —
-              Field is the row Decky draws them with, already used above. */}
-          {shelves?.ok && shelves.device_name && (
-            <PanelSectionRow>
-              <Field label="This device" bottomSeparator="none">
-                {shelves.device_name}
-              </Field>
-            </PanelSectionRow>
-          )}
-        </Collapsible>
+        <SettingsSection
+          status={status}
+          setStatus={setStatus}
+          signedOut={signedOut}
+          busy={busy}
+          shelves={shelves}
+          confirmClear={confirmClear}
+          confirmSignOut={confirmSignOut}
+          onRemoveAll={() => void removeAll()}
+          onSignOut={() => void signOut()}
+          onApplyOverrides={() => {
+            void applyOverrides().then((r) => {
+              toaster.toast({
+                title: "Shelfcloud",
+                body: r.ok
+                  ? `Gamepad permissions applied to ${r.browser}.`
+                  : (r.error || "No browser selected."),
+                logo: <NotificationLogo />,
+              });
+            });
+          }}
+          onSetSetting={setSetting}
+          onSetShelf={setShelf}
+          onShelfChanged={() => void doSync()}
+          toaster={toaster}
+        />
+        <LinksSection
+          gatewayUrl={GATEWAY_URL}
+          githubUrl={GITHUB_URL}
+          openInBrowser={openInSteamBrowser}
+        />
+        <AboutSection
+          version={status.version || "unknown"}
+          tracked={status.tracked}
+          signedOut={signedOut}
+          deviceName={shelves?.ok ? shelves.device_name : null}
+        />
       </PanelSection>
 
       {/* Decky's tab bar butts straight against the end of the panel. A focused

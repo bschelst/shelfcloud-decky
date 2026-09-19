@@ -31,6 +31,7 @@ import pytest
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 INDEX = os.path.join(ROOT, "src", "index.tsx")
 LOGO = os.path.join(ROOT, "src", "components", "Logo.tsx")
+COMPONENTS_DIR = os.path.join(ROOT, "src", "components")
 
 
 def read(path):
@@ -52,13 +53,29 @@ def code(path):
 
 # --------------------------------------------------------- every toast has one
 
+def _tsx_files():
+    """All .tsx files that may contain toast calls."""
+    yield INDEX
+    for name in sorted(os.listdir(COMPONENTS_DIR)):
+        if name.endswith(".tsx"):
+            yield os.path.join(COMPONENTS_DIR, name)
+
+
 def toast_blocks():
-    """Each toaster.toast(...) call, as the source text around it."""
-    source = read(INDEX)
-    for match in re.finditer(r"toaster\.toast\(", source):
-        chunk = source[match.start():match.start() + 500]
-        end = chunk.find("});")
-        yield source[:match.start()].count("\n") + 1, chunk[:end if end > 0 else 240]
+    """Each toaster.toast(...) call across the frontend source.
+
+    Scans index.tsx and all component files so a toast in any of them
+    is covered by the logo check.
+    """
+    for path in _tsx_files():
+        source = code(path)
+        for match in re.finditer(r"toaster\.toast\(", source):
+            # Grab enough context to include the logo prop, which may be
+            # several lines past the opening paren.
+            chunk = source[match.start():match.start() + 800]
+            # Find the matching close — first }); after the open.
+            end = chunk.find("});")
+            yield path, source[:match.start()].count("\n") + 1, chunk[:end + 3 if end > 0 else 240]
 
 
 def test_there_are_toasts_to_check():
@@ -69,11 +86,10 @@ def test_there_are_toasts_to_check():
 def test_every_notification_carries_the_mark():
     """A toast without a logo is the bug this fixes — Steam draws a blank slot."""
     missing = [
-        line for line, block in toast_blocks()
-        # newGamesToast builds its own object; its returns are checked below.
+        f"{path}:{line}" for path, line, block in toast_blocks()
         if "NotificationLogo" not in block and "newGamesToast" not in block
     ]
-    assert not missing, f"toaster.toast without a logo at line(s): {missing}"
+    assert not missing, f"toaster.toast without a logo at: {missing}"
 
 
 def test_the_new_games_notification_carries_it_on_every_branch():
@@ -99,10 +115,9 @@ def test_the_mark_is_a_component_not_a_file():
 
 
 def test_no_toast_points_at_a_file():
-    source = read(INDEX)
-    for line, block in toast_blocks():
-        assert "<img" not in block, f"toast at line {line} uses an <img>"
-        assert "url(" not in block, f"toast at line {line} points at a URL"
+    for path, line, block in toast_blocks():
+        assert "<img" not in block, f"toast at {path}:{line} uses an <img>"
+        assert "url(" not in block, f"toast at {path}:{line} points at a URL"
 
 
 # ------------------------------------------------------------------- sizing
