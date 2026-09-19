@@ -761,6 +761,36 @@ def wait_for_gamepad(timeout: float = 6.0, settle: float = 1.0) -> list:
         time.sleep(0.3)
     return pads
 
+def _clear_session_restore(profile: str) -> None:
+    """Remove Chrome's session restore files so a killed browser doesn't ask to
+    recover tabs on the next launch. The Deck kills the browser by closing the
+    game, which is always an unclean exit — without this, every launch shows
+    "Restore pages?" with the previous session's tabs."""
+    default_dir = os.path.join(profile, "Default")
+    # Remove the Session and Tabs files
+    sessions_dir = os.path.join(default_dir, "Sessions")
+    if os.path.isdir(sessions_dir):
+        for name in os.listdir(sessions_dir):
+            try:
+                os.remove(os.path.join(sessions_dir, name))
+            except OSError:
+                pass
+    # Mark the exit as clean in Preferences so Chrome doesn't show the bubble
+    prefs_path = os.path.join(default_dir, "Preferences")
+    if os.path.isfile(prefs_path):
+        try:
+            with open(prefs_path, encoding="utf-8") as f:
+                prefs = json.load(f)
+            profile_data = prefs.get("profile", {})
+            if profile_data.get("exit_type") != "Normal":
+                profile_data["exit_type"] = "Normal"
+                prefs["profile"] = profile_data
+                with open(prefs_path, "w", encoding="utf-8") as f:
+                    json.dump(prefs, f)
+        except (json.JSONDecodeError, OSError):
+            pass
+
+
 def main() -> int:
     argv = sys.argv[1:]
     autoplay = "--no-autoplay" not in argv
@@ -818,6 +848,7 @@ def main() -> int:
             f"(source: {source}). Not launching.")
         return 3
 
+    _clear_session_restore(profile)
     pads = wait_for_gamepad()
     if len(pads) > 1:
         # Known issue: with several controllers connected the browser can bind
