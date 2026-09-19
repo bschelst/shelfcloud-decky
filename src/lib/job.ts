@@ -50,13 +50,22 @@ export function getJob(): Job {
 }
 
 /** Mark a job finished, and let any open panel re-read its counts. */
+let clearTimer: ReturnType<typeof setTimeout> | null = null;
+
 export function finishJob(message?: string): void {
+  if (clearTimer) clearTimeout(clearTimer);
   setJob({
     busy: false,
     progress: null,
     completed: job.completed + 1,
     ...(message === undefined ? {} : { message }),
   });
+  if (message) {
+    clearTimer = setTimeout(() => {
+      setJob({ message: "" });
+      clearTimer = null;
+    }, 8000);
+  }
 }
 
 /** Reset to idle. Tests only — the plugin never goes back to a clean slate. */

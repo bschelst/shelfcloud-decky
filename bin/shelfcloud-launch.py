@@ -930,27 +930,10 @@ VIRTUAL_GAMEPAD_JS = """
 
 
 def wake_gamepads(url: str, provider: str = "") -> None:
-    """Inject a virtual gamepad so cloud providers see a controller immediately.
-
-    For providers that go through hold_platform_override (currently Luna),
-    the gamepad script is already injected there. This handles the rest —
-    Boosteroid, GeForce NOW, Xbox — by evaluating the override directly on
-    the live page.
-    """
-    profile = provider_profile(provider)
-    if profile.get("user_agent"):
-        return  # already injected by hold_platform_override
-
-    marker = profile.get("page_match") or (url.split("/")[2] if "//" in url else url)
-    target = cdp.wait_for_page(CDP_PORT, marker, timeout=10)
-    if not target or not target.get("webSocketDebuggerUrl"):
-        return
-
-    try:
-        cdp.evaluate(target["webSocketDebuggerUrl"], VIRTUAL_GAMEPAD_JS, timeout=10)
-        log("injected virtual gamepad for this session")
-    except Exception as exc:
-        log(f"gamepad injection failed: {exc}")
+    """No-op. The virtual gamepad override broke real gamepad detection on
+    Boosteroid and GeForce NOW by masking the native getGamepads() result.
+    Luna's injection lives in hold_platform_override and is unaffected."""
+    pass
 
 
 

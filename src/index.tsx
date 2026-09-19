@@ -899,10 +899,10 @@ function Content() {
                   "give the text room", which only made the row taller still;
                   nothing was ever being clipped. */}
               <IconLabel
-                icon={<FaTrashAlt size={12} color={confirmClear ? "#ff4444" : theme.bad} />}
+                icon={<FaTrashAlt size={12} color={theme.bad} />}
               >
                 <span style={{
-                  color: confirmClear ? "#ff4444" : theme.bad,
+                  color: theme.bad,
                   fontWeight: confirmClear ? 700 : 500,
                   whiteSpace: "nowrap",
                 }}>
@@ -916,7 +916,7 @@ function Content() {
             <ButtonItem layout="below" disabled={signedOut} onClick={() => void signOut()}>
               <IconLabel icon={<FaSignOutAlt size={12} />}>
                 <span style={{
-                  color: confirmSignOut ? "#ff4444" : undefined,
+                  color: confirmSignOut ? theme.bad : undefined,
                   fontWeight: confirmSignOut ? 700 : 500,
                 }}>
                   {confirmSignOut ? "Confirm — sign out" : "Sign out"}

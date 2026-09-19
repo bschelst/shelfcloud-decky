@@ -6,6 +6,6 @@
   "publish": {
     "tags": ["cloud-gaming", "library", "boosteroid", "geforce-now", "xbox-cloud"],
     "description": "Browse games playable on cloud gaming services and add them to your Steam library. Launching one takes you straight into that game on the provider.",
-    "image": "https://raw.githubusercontent.com/bschelst/shelfcloud-decky/main/assets/shelfcloud-mark.png"
+    "image": "https://shelfcloud.cc/static/logo-mark.png"
   }
 }

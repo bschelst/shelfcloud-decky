@@ -174,12 +174,17 @@ def test_luna_gets_one_and_the_page_is_reloaded(fake, monkeypatch):
 
     assert held is not None and held.closed is False
     methods = [m["method"] for m in held.sent]
-    # Order is the point: the startup script has to be registered BEFORE the
-    # reload, or the document that Luna actually runs in never receives it.
-    assert methods == ["Emulation.setUserAgentOverride",
-                       "Page.enable",
-                       "Page.addScriptToEvaluateOnNewDocument",
-                       "Page.reload"]
+    # Order is the point: the startup scripts have to be registered BEFORE
+    # the reload, or the document that Luna actually runs in never receives
+    # them. The exact count of scripts can vary (handoff shim, gamepad fix).
+    assert methods[0] == "Emulation.setUserAgentOverride"
+    assert "Page.enable" in methods
+    assert "Page.addScriptToEvaluateOnNewDocument" in methods
+    assert methods[-1] == "Page.reload"
+    reload_idx = methods.index("Page.reload")
+    for i, m in enumerate(methods):
+        if m == "Page.addScriptToEvaluateOnNewDocument":
+            assert i < reload_idx, "startup script registered after reload"
 
 
 def test_a_missing_page_is_survivable(monkeypatch):
