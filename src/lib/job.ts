@@ -34,6 +34,13 @@ const listeners = new Set<() => void>();
  * stale text forever.
  */
 export function setJob(patch: Partial<Job>): void {
+  // A run that is STARTING must start un-cancelled, wherever it was started
+  // from. Cancellation belongs to one run, and it used to be cleared only by
+  // runJob — which doSync and doAddOwned do not go through. So one press of
+  // Cancel left the flag set for the life of the session and every later sync
+  // stopped at its first tile: the panel reported success, and the library
+  // stayed at however many tiles existed when Cancel was pressed.
+  if (patch.busy === true && !job.busy) cancelling = false;
   job = { ...job, ...patch };
   listeners.forEach((listener) => listener());
 }

@@ -114,6 +114,30 @@ describe("cancelling", () => {
     await runJob(async () => { cancelJob(); return "Stopped"; });
     expect(getJob().busy).toBe(false);
   });
+
+  it("does not leak into a run started WITHOUT runJob", () => {
+    // The shape that shipped. doSync and doAddOwned set busy themselves rather
+    // than going through runJob, so the flag was never cleared for them: one
+    // press of Cancel stopped every later sync at its first tile, for the life
+    // of the session, while the panel reported success each time. Observed as
+    // a library stuck at 15 tiles against 387 games, syncing "fine".
+    setJob({ busy: true });
+    cancelJob();
+    expect(cancelRequested()).toBe(true);
+    setJob({ busy: false });
+
+    setJob({ busy: true });               // the next sync, started the old way
+    expect(cancelRequested()).toBe(false);
+  });
+
+  it("does not re-arm on a message sent mid-run", () => {
+    // Only the transition into busy clears it. A progress line arriving after
+    // Cancel must not undo the cancel.
+    setJob({ busy: true });
+    cancelJob();
+    setJob({ message: "Adding Fortnite (12/124)" });
+    expect(cancelRequested()).toBe(true);
+  });
 });
 
 describe("the panel keeps seeing a run it did not start", () => {
