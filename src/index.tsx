@@ -604,18 +604,22 @@ function Content() {
             </Focusable>
           </PanelSectionRow>
 
-          {pendingLogin && (
-            <PanelSectionRow>
-              <ButtonItem
-                layout="below"
-                onClick={() => openSteamSignIn(pendingLogin.url, pendingLogin.session)}
-              >
-                <IconLabel icon={<FaSteam size={12} />}>
-                  Open Steam sign-in
-                </IconLabel>
-              </ButtonItem>
-            </PanelSectionRow>
-          )}
+          <PanelSectionRow>
+            <ButtonItem
+              layout="below"
+              onClick={() => {
+                if (pendingLogin) {
+                  openSteamSignIn(pendingLogin.url, pendingLogin.session);
+                } else {
+                  openInSteamBrowser(GATEWAY_URL);
+                }
+              }}
+            >
+              <IconLabel icon={<FaSteam size={12} />}>
+                {pendingLogin ? "Open Steam sign-in" : "Reopen sign-in page"}
+              </IconLabel>
+            </ButtonItem>
+          </PanelSectionRow>
           <PanelSectionRow>
             <div style={{ fontSize: 11, opacity: 0.7 }}>
               Reopen this panel any time to see the code again.
