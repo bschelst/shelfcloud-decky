@@ -20,7 +20,6 @@ import base64
 import json
 import os
 import random
-import shlex
 import subprocess
 import time
 import urllib.error
@@ -32,31 +31,16 @@ import decky
 import browsers
 import weburl
 import shortcuts
+from poll import (  # re-exported so tests that import main.X keep working
+    SYNC_INTERVAL_CHOICES, DEFAULT_SYNC_MINUTES, MIN_SYNC_SECONDS,
+    SYNC_JITTER, STARTUP_SETTLE_SECONDS, STARTUP_SPREAD_MAX_SECONDS,
+    next_poll_delay,
+)
+from plugin_helpers import shell_join as _shell_join, hardware_label as _hardware_label
 
 from helpers import get_ssl_context  # provided by Decky Loader (certifi-backed)
 
 SSL_CTX = get_ssl_context()
-
-
-def _shell_join(parts: List[str]) -> str:
-    """Build a Steam shortcut's launch options as one shell-safe string.
-
-    Steam runs a shortcut through `/bin/sh -c "<exe> <options>"`, so every
-    argument has to survive a round trip through the shell. Plain `" ".join`
-    does not, and the way it fails is genuinely nasty:
-
-    a GeForce NOW URL ends `?game-id=<uuid>&lang=en_US`, and that unquoted `&`
-    is a shell operator. `sh` backgrounds everything before it and treats the
-    rest as a second command. The launcher then receives a URL truncated at the
-    ampersand and — the part that actually hurt — no `--game-id` and no
-    `--provider` at all, because those land in the discarded half. The game
-    still starts from the truncated URL, so nothing looks wrong from the Deck;
-    it just silently stops asking the gateway, which means no launch is ever
-    resolved live and none is ever counted.
-
-    Quoting is therefore not tidiness here. Do not simplify this back.
-    """
-    return " ".join(shlex.quote(part) for part in parts)
 
 
 DEFAULT_GATEWAY = "https://shelfcloud.cc"
@@ -70,38 +54,6 @@ IDLE_INSTALL = {
 REQUEST_TIMEOUT = 20
 SYNC_EVENT = "shelfcloud/library"
 
-def _hardware_label() -> str:
-    """What kind of machine this is, for naming the device on the gateway.
-
-    The gateway names a new device from its User-Agent, and a browser's UA says
-    enough to guess with. This plugin's does not — every install would register
-    as "Shelfcloud plugin", which is no better than the "Unnamed device" it
-    replaces once someone owns a Deck and a Steam Machine.
-
-    The DMI product name is what distinguishes them. Valve ships two codenames
-    and neither means anything to a person, so they are translated; anything
-    else is reported as-is, which covers a Steam Machine or a desktop running
-    Bazzite without needing to know their names in advance.
-    """
-    known = {"Jupiter": "Steam Deck", "Galileo": "Steam Deck OLED"}
-    try:
-        with open("/sys/class/dmi/id/product_name", encoding="utf-8") as handle:
-            product = handle.read().strip()
-    except Exception:
-        product = ""
-    if product in known:
-        return known[product]
-    # Placeholders real boards ship with, which name nothing.
-    if product and product.lower() not in ("to be filled by o.e.m.", "system product name",
-                                           "default string", "none"):
-        # ';' and ')' would break out of the User-Agent comment this goes into.
-        return product.replace(";", " ").replace(")", " ")[:48]
-    try:
-        return os.uname().nodename[:48] or "Shelfcloud plugin"
-    except Exception:
-        return "Shelfcloud plugin"
-
-
 # Artwork is fetched here rather than in the browser; see fetch_artwork.
 #
 # The hardware goes in the comment field so the gateway can name this device
@@ -109,50 +61,6 @@ def _hardware_label() -> str:
 ARTWORK_USER_AGENT = (
     f"Shelfcloud/0.1 ({_hardware_label()}; +https://github.com/bschelst/shelfcloud)")
 ARTWORK_MAX_BYTES = 8 * 1024 * 1024
-
-# How often to check the gateway for library changes, in minutes.
-SYNC_INTERVAL_CHOICES = [1, 5, 10, 30, 60]
-DEFAULT_SYNC_MINUTES = 5
-# Re-read between ticks rather than caching, so a changed setting takes effect
-# on the next tick instead of requiring a plugin reload.
-MIN_SYNC_SECONDS = 30
-
-# Spread each device's poll around the interval instead of landing exactly on
-# it. With a fixed interval, devices that start together stay together forever:
-# a plugin update rolled out to a fleet starts every copy within seconds of the
-# others, and they then knock on the gateway in lockstep for as long as they run.
-#
-# It matters most for the thing that makes every client act at once anyway — a
-# bumped artwork revision re-applies art on every tile on every device. The
-# gateway's artwork cache absorbs the repeat work, but only if the requests do
-# not arrive as one wall.
-SYNC_JITTER = 0.15
-
-# Steam needs a moment before shortcuts can be added safely; adding them while
-# the library is still loading is asking for trouble.
-STARTUP_SETTLE_SECONDS = 20
-
-# Ceiling on the extra random delay before the FIRST poll. A fleet updating
-# together disperses across this window immediately rather than over several
-# intervals — but capped, so a user on a 6-hour interval does not wait hours
-# for their first sync.
-STARTUP_SPREAD_MAX_SECONDS = 60
-
-
-def next_poll_delay(base_seconds: float, rng=None) -> float:
-    """Seconds to wait before the next poll, jittered around `base_seconds`.
-
-    Pure and separate from the loop so it can be tested: a jitter bug is
-    invisible in a single-device test — one client polling on a slightly wrong
-    schedule looks exactly like one polling correctly — and only shows up as a
-    thundering herd once there are many.
-    """
-    if rng is None:
-        rng = random
-    spread = base_seconds * SYNC_JITTER
-    # Never below the floor: jitter must not become a way to poll faster than
-    # the rate limit allows.
-    return max(MIN_SYNC_SECONDS, base_seconds + rng.uniform(-spread, spread))
 
 # How often to re-confirm the token with the gateway. Short enough that a
 # revoked session is noticed quickly, long enough not to be chatty.
