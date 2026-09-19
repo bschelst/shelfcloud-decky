@@ -479,6 +479,13 @@ class Plugin:
             "header": url("header_url"),
             "hero": url("hero_url", "banner_url"),
             "logo": url("logo_url"),
+            # Not a library slot. Steam takes an icon as a file PATH, so this
+            # one is downloaded and written to disk rather than handed over as
+            # bytes — see applyArtwork. It is separate from the logo because
+            # the logo is drawn INSTEAD OF the title on a game's page: a tile
+            # that carries one shows a picture where its name should be, which
+            # is why website tiles have no logo and do have this.
+            "icon": url("icon_url"),
         }
 
     def _artwork_proxy(self, game: Dict) -> Dict[str, str]:
@@ -496,7 +503,7 @@ class Plugin:
             return {}
         base = self._gateway().rstrip("/")
         return {slot: f"{base}/api/artwork/{game_id}/{slot}"
-                for slot in ("capsule", "header", "hero", "logo")}
+                for slot in ("capsule", "header", "hero", "logo", "icon")}
 
     def _to_desired(self, game: Dict) -> Optional[Dict]:
         """Turn a library entry into everything the frontend needs to make a tile.

@@ -8,6 +8,10 @@ export interface Artwork {
   header?: string | null;    // 460x215 — the wide banner of the SELECTED game
   hero?: string | null;      // 1920x620 background on the game page
   logo?: string | null;      // transparent logo overlaid on the hero
+  // Not a library slot: Steam stores an icon as a path in shortcuts.vdf and
+  // draws it in collections and list views. Square, and deliberately not the
+  // logo — a logo replaces the title, an icon replaces nothing.
+  icon?: string | null;
 }
 
 /** A game the library should contain, with its launch command already built. */

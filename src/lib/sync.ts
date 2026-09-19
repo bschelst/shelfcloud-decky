@@ -59,7 +59,7 @@ async function fetchArtworkBase64(url: string): Promise<{ data: string; kind: "p
   }
 }
 
-type ArtSlot = "capsule" | "header" | "hero" | "logo";
+type ArtSlot = "capsule" | "header" | "hero" | "logo" | "icon";
 
 /** The slot shown on the tile itself, and the ones behind it.
  *
@@ -189,6 +189,10 @@ async function applyArtwork(appId: number, game: DesiredGame): Promise<ArtworkOu
   // than after it. Without this line they would be parallel with each other
   // but still strictly after the capsule finished.
   const background = Promise.all(BACKGROUND_SLOTS.map(([slot]) => fetchSlot(game, slot)));
+  // Started here so it downloads with the others, but deliberately NOT in
+  // BACKGROUND_SLOTS: everything in that list is handed to Steam as a library
+  // asset, and an icon is not one. It is a file path, applied further down.
+  const iconFetch = fetchSlot(game, "icon");
 
   const capsule = await fetchSlot(game, visibleSlot);
   const capsuleWentOn = await applySlot(capsule, visibleType);
@@ -241,10 +245,21 @@ async function applyArtwork(appId: number, game: DesiredGame): Promise<ArtworkOu
   // first. Verified on hardware: the path lands in shortcuts.vdf and all four
   // artwork files survive untouched.
   //
-  // The logo is used because it is closest to an icon — small, transparent,
-  // centred — and it is already downloaded. Capsule is the fallback.
+  // A dedicated icon first, then the logo, then the capsule.
+  //
+  // It used to take the logo and nothing else, because the logo is closest to
+  // an icon — small, transparent, centred — and was already downloaded. That
+  // tied two unrelated things together: the only way to give a tile an icon
+  // was to give it a logo, and Steam draws a logo INSTEAD OF the title. Every
+  // website tile ended up showing the same mark where its name should be.
+  //
+  // The gateway now serves a square `icon` for those tiles and no logo at all,
+  // so the two can finally differ. The fallbacks stay for everything else: a
+  // real game has a publisher logo and no icon, and should keep using it.
   const logoIndex = BACKGROUND_SLOTS.findIndex(([slot]) => slot === "logo");
-  const iconImage = (logoIndex >= 0 ? images[logoIndex] : undefined) ?? capsule;
+  const iconImage = (await iconFetch)
+    ?? (logoIndex >= 0 ? images[logoIndex] : undefined)
+    ?? capsule;
   if (iconImage) {
     try {
       const saved = await saveIcon(game.game_id, iconImage.data, iconImage.kind);
@@ -357,8 +372,12 @@ export interface SyncCallbacks {
  *         fingerprint still matches the art they were meant to get and nothing
  *         would ever look at them again. Bumping is the only way to reach a
  *         tile that is already wrongly marked done.
+ * 5 -> 6: the icon became its own slot instead of being taken from the logo.
+ *         Website tiles lost their logo so their name would show, which also
+ *         took their icon with it — those tiles are already on a shelf and
+ *         would never be revisited without this.
  */
-const ART_REVISION = "5";
+const ART_REVISION = "6";
 
 /**
  * A fingerprint of the artwork a tile currently carries.
@@ -370,7 +389,8 @@ const ART_REVISION = "5";
  */
 export function artworkFingerprint(game: DesiredGame): string {
   const a = game.artwork ?? {};
-  return [ART_REVISION, a.capsule ?? "", a.header ?? "", a.hero ?? "", a.logo ?? ""].join("|");
+  return [ART_REVISION, a.capsule ?? "", a.header ?? "", a.hero ?? "",
+          a.logo ?? "", a.icon ?? ""].join("|");
 }
 
 /**

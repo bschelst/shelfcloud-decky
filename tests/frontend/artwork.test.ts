@@ -221,7 +221,7 @@ describe("the icon", () => {
     expect(apps.SetShortcutIcon).toHaveBeenCalledWith(4242, "/icons/1.png");
   });
 
-  it("sends the logo, not a fifth download", async () => {
+  it("falls back to the logo, without a fifth download", async () => {
     const seen: string[] = [];
     vi.mocked(fetchArtwork).mockImplementation(async (url: string) => {
       seen.push(url);
@@ -377,5 +377,69 @@ describe("a slot the gateway no longer offers", () => {
 
     expect(clearedSlots).toEqual([]);
     expect(appliedOrder).not.toContain(HERO);
+  });
+});
+
+describe("the icon has its own slot", () => {
+  // It used to be taken from the logo, which tied two unrelated things
+  // together: the only way to give a tile an icon was to give it a logo, and
+  // Steam draws a logo INSTEAD OF the title. Every website tile showed the
+  // same mark where its name should be. The gateway now serves a square icon
+  // and no logo for those, so the two can differ.
+  const withIcon = {
+    ...GAME,
+    artwork: { ...GAME.artwork!, logo: null, icon: "https://cdn.test/icon.png" },
+  };
+
+  it("prefers the icon over the logo", async () => {
+    vi.mocked(fetchArtwork).mockImplementation(async (url: string) => ({
+      ok: true, base64: url.includes("icon") ? "aWNvbg==" : "b3RoZXI=", kind: "png",
+    }));
+
+    await syncLibrary([withIcon], {}, callbacks());
+
+    expect(vi.mocked(saveIcon).mock.calls[0][1]).toBe("aWNvbg==");
+  });
+
+  it("never writes the icon as a library asset", async () => {
+    // The whole reason this slot is kept out of BACKGROUND_SLOTS. Writing it
+    // as asset type 4 is what damaged tiles under revision 2.
+    await syncLibrary([withIcon], {}, callbacks());
+
+    expect(appliedOrder).not.toContain(ICON);
+    expect([...appliedOrder].sort()).toEqual([CAPSULE, HERO, HEADER].sort());
+  });
+
+  it("still leaves a tile with no logo showing its name", async () => {
+    // The tile gets an icon and the logo slot stays empty — which is the
+    // point: an empty logo is how Steam knows to draw the title.
+    await syncLibrary([withIcon], {}, callbacks());
+
+    expect(clearedSlots).toEqual([LOGO]);
+    expect(vi.mocked(saveIcon)).toHaveBeenCalled();
+  });
+
+  it("falls back to the capsule when there is neither", async () => {
+    const bare = { ...GAME, artwork: { capsule: GAME.artwork!.capsule } };
+    vi.mocked(fetchArtwork).mockImplementation(async () => ({
+      ok: true, base64: "Y2Fwc3VsZQ==", kind: "jpg",
+    }));
+
+    await syncLibrary([bare], {}, callbacks());
+
+    expect(vi.mocked(saveIcon).mock.calls[0][1]).toBe("Y2Fwc3VsZQ==");
+  });
+});
+
+describe("the artwork fingerprint", () => {
+  it("changes when only the icon changes", async () => {
+    // Otherwise a tile that already exists keeps its stored fingerprint, is
+    // never revisited, and never receives the icon at all.
+    const { artworkFingerprint } = await import("../../src/lib/sync");
+    const before = artworkFingerprint(GAME);
+    const after = artworkFingerprint({
+      ...GAME, artwork: { ...GAME.artwork!, icon: "https://cdn.test/icon.png" },
+    });
+    expect(after).not.toBe(before);
   });
 });
