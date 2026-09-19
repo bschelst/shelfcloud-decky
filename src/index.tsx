@@ -338,6 +338,7 @@ function Content() {
   const [shelves, setShelves] = useState<Awaited<ReturnType<typeof getShelves>> | null>(null);
   // Two-press confirm: this deletes every tile the plugin made.
   const [confirmClear, setConfirmClear] = useState(false);
+  const [confirmSignOut, setConfirmSignOut] = useState(false);
   const loginTimer = useRef<number | null>(null);
   // A sign-in that has been STARTED but not yet handed to the browser.
   //
@@ -438,6 +439,7 @@ function Content() {
   // It lives in definePlugin() instead, which stays alive for the session.
 
   const signIn = useCallback(async () => {
+    setPendingLogin(null);
     setJob({ busy: true, message: "Opening Steam sign-in…" });
     const start = await startLogin();
     if (!start.ok || !start.login_url || !start.session_token) {
@@ -514,10 +516,16 @@ function Content() {
   }, [confirmClear]);
 
   const signOut = useCallback(async () => {
+    if (!confirmSignOut) {
+      setConfirmSignOut(true);
+      setJob({ message: "Press again to sign out." });
+      return;
+    }
+    setConfirmSignOut(false);
     await logout();
     setJob({ message: "Signed out. Your existing tiles were left alone." });
     void refresh();
-  }, [refresh]);
+  }, [confirmSignOut, refresh]);
 
   if (!status) {
     return <PanelSection title="Shelfcloud"><PanelSectionRow>Loading…</PanelSectionRow></PanelSection>;
@@ -899,7 +907,14 @@ function Content() {
 
           <PanelSectionRow>
             <ButtonItem layout="below" disabled={signedOut} onClick={() => void signOut()}>
-              <IconLabel icon={<FaSignOutAlt size={12} />}>Sign out</IconLabel>
+              <IconLabel icon={<FaSignOutAlt size={12} />}>
+                <span style={{
+                  color: confirmSignOut ? "#ff4444" : undefined,
+                  fontWeight: confirmSignOut ? 700 : 500,
+                }}>
+                  {confirmSignOut ? "Confirm — sign out" : "Sign out"}
+                </span>
+              </IconLabel>
             </ButtonItem>
           </PanelSectionRow>
         </Collapsible>
