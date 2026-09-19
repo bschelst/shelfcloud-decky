@@ -25,7 +25,11 @@
 
 Cloud gaming services like Boosteroid, GeForce NOW, Xbox Cloud and Amazon Luna don't show up in your Steam library — you have to open a browser, find the game, and launch it from there every time.
 
-**Shelfcloud fixes that.** Pick your games on the Shelfcloud website, and they appear as normal Steam tiles with proper artwork. Launching one opens the cloud provider and goes straight into the game. No extra steps.
+**Shelfcloud fixes that.** Pick your games on the [Shelfcloud website](https://shelfcloud.cc), and they appear as normal Steam tiles with proper artwork. Launching one opens the cloud provider and goes straight into the game. No extra steps.
+
+<p align="center">
+  <a href="https://shelfcloud.cc"><img src="https://img.shields.io/badge/&#127760;_Browse_the_catalog-shelfcloud.cc-4d9fff?style=for-the-badge" alt="Browse the catalog" /></a>
+</p>
 
 <br>
 
