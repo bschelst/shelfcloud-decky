@@ -152,7 +152,7 @@ Cloud gaming providers offer standalone desktop clients, but those don't support
 <details>
 <summary><strong>Can I use this on desktop Steam?</strong></summary>
 
-The plugin is built for Decky Loader, which runs on the Steam Deck, Steam Machine, and Bazzite. Desktop Steam doesn't support Decky plugins. You could adapt the sync logic, but that's not an offical use case today.
+Yes — Decky Loader runs on any Linux machine with Steam in Big Picture mode, including desktops and laptops running SteamOS or Bazzite. If you can install Decky, the plugin works the same way it does on a Steam Deck.
 </details>
 
 <details>
