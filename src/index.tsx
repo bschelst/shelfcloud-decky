@@ -705,14 +705,14 @@ function Content() {
         </div>
 
         <PanelSectionRow>
-          <ButtonItem layout="below" disabled={busy || signedOut} onClick={() => void sync()}>
-            {busy ? "Syncing…" : "Sync now"}
+          <ButtonItem layout="below" disabled={busy || signedOut} onClick={() => void addOwned()}>
+            {owned ? `Add all my games (${owned})` : "Add all my games"}
           </ButtonItem>
         </PanelSectionRow>
 
         <PanelSectionRow>
-          <ButtonItem layout="below" disabled={busy || signedOut} onClick={() => void addOwned()}>
-            {owned ? `Add all my games (${owned})` : "Add all my games"}
+          <ButtonItem layout="below" disabled={busy || signedOut} onClick={() => void sync()}>
+            {busy ? "Syncing…" : "Sync now"}
           </ButtonItem>
         </PanelSectionRow>
 
