@@ -614,7 +614,8 @@ function Content() {
                 if (pendingLogin) {
                   openSteamSignIn(pendingLogin.url, pendingLogin.session);
                 } else {
-                  openInSteamBrowser(GATEWAY_URL);
+                  const url = (status as unknown as Record<string, unknown>).pending_login_url as string || GATEWAY_URL;
+                  openInSteamBrowser(url);
                 }
               }}
             >

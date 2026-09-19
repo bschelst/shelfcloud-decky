@@ -247,6 +247,7 @@ class Plugin:
         # The pairing code for a sign-in in progress, shown in the panel
         # so the person can read it while the browser asks for it.
         self._pending_login_code: str = ""
+        self._pending_login_url: str = ""
         self._last_error: Optional[str] = None
         self._last_sync: Optional[float] = None
         # Whether the gateway last accepted our token. A token can stop working
@@ -430,6 +431,7 @@ class Plugin:
         """Begin sign-in. The frontend opens login_url via steam://openurl,
         because Game Mode has no browser of its own."""
         self._pending_login_code = ""
+        self._pending_login_url = ""
         if self._login_task and not self._login_task.done():
             self._login_task.cancel()
         try:
@@ -443,6 +445,7 @@ class Plugin:
             # is asking for it, and a value that lived only in the panel's
             # state would be gone by then.
             self._pending_login_code = result.get("confirm_code") or ""
+            self._pending_login_url = result.get("login_url") or ""
 
             session_token = result.get("session_token")
             if not session_token:
@@ -1136,6 +1139,11 @@ class Plugin:
             # asks for this closed the panel that first showed it.
             "pending_login_code": (
                 self._pending_login_code
+                if self._login_task is not None and not self._login_task.done()
+                else ""
+            ),
+            "pending_login_url": (
+                self._pending_login_url
                 if self._login_task is not None and not self._login_task.done()
                 else ""
             ),
