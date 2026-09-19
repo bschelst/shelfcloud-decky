@@ -150,7 +150,6 @@ def ensure_flathub_command() -> List[str]:
 
 FLATPAK_OVERRIDES = [
     "--filesystem=/run/udev:ro",
-    "--device=all",
 ]
 
 
