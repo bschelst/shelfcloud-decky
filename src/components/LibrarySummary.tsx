@@ -87,7 +87,7 @@ export function LibrarySummary({
             // so 3 on Bart with 3 shared is 6 — and "6 on Bart" states
             // something false about a shelf the user knows holds three.
             ? `${onShelfCount} on ${shelfName} + ${sharedCount} shared`
-            : available > synced ? `of ${available} playable` : "games in your library"}
+            : available > synced ? `of ${available} games` : "games in your library"}
         </div>
       </div>
 
