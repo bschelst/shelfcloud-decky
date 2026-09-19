@@ -1038,6 +1038,39 @@ def hold_platform_override(url: str, provider: str = ""):
     return held
 
 
+FULLSCREEN_CHECK_JS = """
+(() => {
+    var buttons = document.querySelectorAll("button, [role=button]");
+    for (var i = 0; i < buttons.length; i++) {
+        var text = (buttons[i].innerText || "").toLowerCase();
+        if (text.indexOf("full screen") >= 0 || text.indexOf("fullscreen") >= 0) {
+            var rect = buttons[i].getBoundingClientRect();
+            if (rect.height > 0 && rect.width > 0) {
+                return JSON.stringify({x: rect.x + rect.width/2, y: rect.y + rect.height/2, text: buttons[i].innerText.slice(0,40)});
+            }
+        }
+    }
+    return "none";
+})()
+"""
+
+
+def _click_fullscreen_if_needed(ws_url, timeout=15):
+    """Wait for a fullscreen prompt and click it. Best effort."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            r = cdp.evaluate(ws_url, FULLSCREEN_CHECK_JS, timeout=5)
+            if r and r != "none":
+                hit = json.loads(r)
+                cdp.dispatch_click(ws_url, hit["x"], hit["y"])
+                log(f"clicked:{hit['text']}")
+                return
+        except Exception:
+            pass
+        time.sleep(1.5)
+
+
 def try_autoplay(url: str, provider: str = "") -> None:
     """Press Play once the game page is up. Best effort — never fatal.
 
@@ -1096,6 +1129,7 @@ def try_autoplay(url: str, provider: str = "") -> None:
                 if isinstance(hit, dict) and "clicked" in hit:
                     cdp.dispatch_click(ws_url, hit["x"], hit["y"])
                     log(f"clicked:{hit['clicked']}")
+                    _click_fullscreen_if_needed(ws_url)
                     return
         except cdp.CDPError as exc:
             # Page may still be loading, or navigating between documents.
