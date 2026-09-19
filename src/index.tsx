@@ -473,7 +473,6 @@ function Content() {
   }, [refresh, sync]);
 
   const openSteamSignIn = useCallback((url: string, session: string) => {
-    setPendingLogin(null);
     openInSteamBrowser(url);
 
     // The backend waits for the sign-in to complete and stores the token, so
@@ -605,11 +604,8 @@ function Content() {
             </Focusable>
           </PanelSectionRow>
 
-          {pendingLogin ? (
+          {pendingLogin && (
             <PanelSectionRow>
-              {/* The browser is opened HERE, not when sign-in was pressed.
-                  Opening it closes this panel, so doing it immediately meant
-                  the code was never on screen at all. */}
               <ButtonItem
                 layout="below"
                 onClick={() => openSteamSignIn(pendingLogin.url, pendingLogin.session)}
@@ -619,14 +615,12 @@ function Content() {
                 </IconLabel>
               </ButtonItem>
             </PanelSectionRow>
-          ) : (
-            <PanelSectionRow>
-              <div style={{ fontSize: 11, opacity: 0.7 }}>
-                Waiting for the browser. Reopen this panel any time to see the
-                code again.
-              </div>
-            </PanelSectionRow>
           )}
+          <PanelSectionRow>
+            <div style={{ fontSize: 11, opacity: 0.7 }}>
+              Reopen this panel any time to see the code again.
+            </div>
+          </PanelSectionRow>
         </PanelSection>
       ) : null}
       <PanelSection title="Shelfcloud">
