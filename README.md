@@ -125,6 +125,7 @@ More providers may be added over time. Shelfcloud does not buy subscriptions or 
 ## &#128293; Features
 
 - **&#127912; Full artwork** — capsule, header, hero, logo, and icon for every game
+- **&#127918; Per-game customisation** — every game is a real Steam shortcut, so you can set a custom icon, change the artwork, and assign a controller layout per game — just like any other title in your library
 - **&#128260; Background sync** — games appear on their own after you pick them
 - **&#128274; Steam sign-in** — no extra accounts; sign in with your existing Steam identity
 - **&#127918; One-click launch** — tile opens the browser and starts the game automatically
@@ -134,6 +135,7 @@ More providers may be added over time. Shelfcloud does not buy subscriptions or 
 - **&#128247; Per-provider chips** — see at a glance how your library breaks down
 - **&#128268; Browser installer** — no browser? The plugin installs Edge or Chrome for you straight from the panel
 - **&#127918; Gamepad permissions** — flatpak overrides for controller access are applied automatically; a manual "Fix gamepad permissions" button is available in Settings if needed
+- **&#128249; Hardware video decode** — VA-API is enabled automatically for smoother streaming and better battery life
 - **&#128736; Device identity** — each device registers its name (Steam Deck, Steam Deck OLED, or the machine's hostname) so you can tell them apart on the website
 - **&#128274; Pairing code sign-in** — a code is shown on the panel before Steam's browser opens, so you can finish sign-in even after the panel closes
 - **&#128737; Launch URL allowlist** — every URL is checked on the device against known provider hosts before a browser opens, even if the gateway is compromised
@@ -181,9 +183,15 @@ Flatpak browsers are sandboxed and don't have access to input devices by default
 </details>
 
 <details>
+<summary><strong>Can I customise individual games?</strong></summary>
+
+Yes. Every cloud game Shelfcloud adds is a normal Steam shortcut, so you can do everything Steam allows for non-Steam games: set a custom icon, replace the artwork (capsule, hero, header, logo), assign a per-game controller layout, rename the tile, or add launch options. Your changes are kept across syncs — Shelfcloud only updates artwork when it finds something better, and never overwrites a layout you set.
+</details>
+
+<details>
 <summary><strong>How do I report a bug?</strong></summary>
 
-Open an issue on <a href="https://github.com/bschelst/shelfcloud-decky/issues">GitHub</a>. Include your plugin version (shown in the About section of the panel) and any relevant lines from <code>~/homebrew/logs/shelfcloud-launch.log</code>.
+Open an issue on <a href="https://github.com/bschelst/shelfcloud-decky/issues">GitHub</a>. Include your plugin version (shown in the About section of the panel) and any relevant lines from <code>~/homebrew/logs/Shelfcloud/shelfcloud-launch.log</code>.
 </details>
 
 <br>
