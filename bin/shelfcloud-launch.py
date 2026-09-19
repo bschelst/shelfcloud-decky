@@ -861,11 +861,9 @@ def main() -> int:
         log("no virtual gamepad yet; controller may not work")
 
     if is_page:
-        # Its own profile, its own window, and none of the automation a game
-        # gets: no debugging port to drive, no Play button to press, no
-        # platform override to hold. A page is just a page.
         profile = website_profile(profile)
         os.makedirs(profile, exist_ok=True)
+        _clear_session_restore(profile)
         log(f"opening a website in its own profile: {profile}")
         code = subprocess.Popen(build_website_command(app_id, profile, url)).wait()
         log(f"--- website closed (browser exit {code})")
