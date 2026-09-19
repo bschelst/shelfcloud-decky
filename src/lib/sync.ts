@@ -273,7 +273,10 @@ async function applyArtwork(appId: number, game: DesiredGame): Promise<ArtworkOu
     ?? capsule;
   if (iconImage) {
     try {
-      const saved = await saveIcon(game.game_id, iconImage.data, iconImage.kind);
+      // appId as well as game_id: the file is named after the SHORTCUT now,
+      // because it lands in Steam's own grid folder where `<id>.png` is
+      // already Steam's library art for the app with that id.
+      const saved = await saveIcon(game.game_id, iconImage.data, iconImage.kind, appId);
       if (saved?.ok && saved.path) {
         SteamClient.Apps.SetShortcutIcon(appId, saved.path);
         applied += 1;

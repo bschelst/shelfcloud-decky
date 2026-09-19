@@ -21,6 +21,8 @@ import sys
 import types
 from unittest import mock
 
+import pytest
+
 decky = types.ModuleType("decky")
 decky.DECKY_PLUGIN_DIR = "/plugins/Shelfcloud"
 decky.DECKY_PLUGIN_SETTINGS_DIR = "/settings/Shelfcloud"
@@ -40,6 +42,19 @@ sys.path.insert(0, os.path.join(ROOT, "py_modules"))
 import main  # noqa: E402
 
 PNG = base64.b64encode(b"\x89PNG\r\n\x1a\n-pretend-this-is-an-image").decode()
+
+
+@pytest.fixture(autouse=True)
+def _no_real_steam(monkeypatch):
+    """Keep these tests off the developer's own Steam install.
+
+    `_icon_dir()` now prefers Steam's grid folder and finds it by looking for
+    a real shortcuts.vdf on the machine running the tests. Without this, every
+    test below would write an icon into whatever Steam install happens to be
+    present. WHICH folder is chosen is covered on its own, with a fake
+    userdata tree, in test_icon_location.py.
+    """
+    monkeypatch.setattr(main.shortcuts, "shortcuts_files", lambda *a, **k: [])
 
 
 def plugin(tmp_path):

@@ -81,6 +81,44 @@ def _state_file() -> str:
     return os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "synced.json")
 
 
+def _settings_icon_dir() -> str:
+    """The fallback home for icons, inside the plugin's settings directory."""
+    path = os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "icons")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def _steam_grid_dir() -> Optional[str]:
+    """Steam's own grid folder for the account that is signed in, if found.
+
+    Picked by the newest shortcuts.vdf: a Deck can hold several accounts and
+    the one being written to is the one in use.
+    """
+    files = shortcuts.shortcuts_files()
+    if not files:
+        return None
+    try:
+        newest = max(files, key=os.path.getmtime)
+        grid = os.path.join(os.path.dirname(newest), "grid")
+        os.makedirs(grid, exist_ok=True)
+        return grid
+    except OSError:
+        return None
+
+
+def _icon_name(game_id: int, app_id: Optional[int], kind: str) -> str:
+    """The filename for one tile's icon.
+
+    `<app_id>_icon.<kind>` whenever the shortcut's app id is known, which is
+    the shape every other tool on a Deck writes into Steam's grid folder. The
+    game-id form is the legacy name and only survives so icons written by an
+    older version can still be found and removed.
+    """
+    if app_id:
+        return f"{int(app_id)}_icon.{kind}"
+    return f"{int(game_id)}.{kind}"
+
+
 def _icon_dir() -> str:
     """Where shortcut icons live on disk.
 
@@ -90,12 +128,21 @@ def _icon_dir() -> str:
     icon. Delete the file and the icon breaks — so this must be somewhere
     durable, NOT the plugin directory, which install-to-deck.sh overwrites.
 
-    DECKY_PLUGIN_SETTINGS_DIR is the one place the installer is careful to
-    preserve (it holds the API token), which makes it the right home.
+    Steam's own grid folder first. The settings directory is durable and was
+    the original choice for exactly that reason, but a durable file Steam will
+    not draw is no better than no file: an icon written there landed correctly
+    in shortcuts.vdf, as a valid PNG the `deck` user could read, and still
+    rendered as a broken image. Every other working shortcut on the same
+    device — sixteen of them — keeps its icon inside
+    `userdata/<id>/config/grid`, and ours was the only one that did not.
+    Steam's UI is a browser process, and a path outside its own tree is the
+    difference that is actually there.
+
+    DECKY_PLUGIN_SETTINGS_DIR stays as the fallback for the case where Steam's
+    directory cannot be found at all, which is better than refusing to write
+    an icon.
     """
-    path = os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "icons")
-    os.makedirs(path, exist_ok=True)
-    return path
+    return _steam_grid_dir() or _settings_icon_dir()
 
 
 def as_id(value: Any) -> Optional[int]:
@@ -186,18 +233,46 @@ class Plugin:
         decky.logger.info("Shelfcloud unloaded")
 
     async def _uninstall(self):
-        icon_path = _icon_dir()
-        if os.path.isdir(icon_path):
-            for name in os.listdir(icon_path):
+        # Our own icons, BY NAME. This used to empty the whole directory, which
+        # was safe only while that directory belonged to this plugin alone.
+        # It is now Steam's grid folder, which holds the library artwork of
+        # every game on the machine — emptying it on uninstall would delete
+        # all of it.
+        for tracked in self._synced.values():
+            self._remove_icon_files(tracked.get("game_id"), tracked.get("app_id"))
+
+        # The old home, which really was ours alone, so it can still go wholly.
+        legacy = _settings_icon_dir()
+        if os.path.isdir(legacy):
+            for name in os.listdir(legacy):
                 try:
-                    os.remove(os.path.join(icon_path, name))
+                    os.remove(os.path.join(legacy, name))
                 except OSError:
                     pass
             try:
-                os.rmdir(icon_path)
+                os.rmdir(legacy)
             except OSError:
                 pass
         decky.logger.info("Shelfcloud uninstalled")
+
+    @staticmethod
+    def _remove_icon_files(game_id: Any, app_id: Any) -> None:
+        """Delete one tile's icon wherever a version of this plugin put it.
+
+        Both directories and both naming schemes, because an icon written by
+        an earlier version is still on disk under the old name and would
+        otherwise be left behind forever.
+        """
+        for directory in {_settings_icon_dir(), _icon_dir()}:
+            for suffix in ("png", "jpg"):
+                for name in filter(None, (
+                    _icon_name(game_id, app_id, suffix) if app_id else None,
+                    f"{game_id}.{suffix}" if game_id is not None else None,
+                )):
+                    try:
+                        os.remove(os.path.join(directory, name))
+                    except (OSError, ValueError, TypeError):
+                        pass
 
     # ---------------------------------------------------------------- config
 
@@ -930,25 +1005,30 @@ class Plugin:
         }
 
     async def forget_shortcut(self, game_id: int) -> Dict:
-        self._synced.pop(str(game_id), None)
+        tracked = self._synced.pop(str(game_id), None) or {}
         # The tile is gone, so its icon file is dead weight. Left alone these
         # accumulate forever: one per game ever added, never read again.
-        for suffix in ("png", "jpg"):
-            try:
-                os.remove(os.path.join(_icon_dir(), f"{int(game_id)}.{suffix}"))
-            except (OSError, ValueError):
-                pass
+        self._remove_icon_files(game_id, tracked.get("app_id"))
         await self._save_state()
         return {"ok": True}
 
-    async def save_icon(self, game_id: int, data: str, kind: str) -> Dict:
+    async def save_icon(self, game_id: int, data: str, kind: str,
+                        app_id: Optional[int] = None) -> Dict:
         """Write an image to disk and return the path, for SetShortcutIcon.
 
         Steam takes the four library slots as bytes but takes an icon as a
         filesystem path, so this is the one piece of artwork that has to exist
-        as a file. The frontend already holds the bytes — it fetched the logo
-        for the logo slot — so they are passed through rather than downloaded
-        a second time.
+        as a file. The frontend already holds the bytes — it fetched them for
+        the icon slot — so they are passed through rather than downloaded a
+        second time.
+
+        Named after the SHORTCUT's app id, not the game id, and that matters
+        now the file lands in Steam's own grid folder. Steam names its library
+        art `<appid>.png` in that same directory, and our game ids start at 1 —
+        so `23101.png` is both our game 23101 and the header art of whatever
+        Steam app happens to have id 23101. Writing one would silently destroy
+        the other. A shortcut app id is a large generated number and carries
+        the `_icon` suffix every other tool uses, so it collides with nothing.
         """
         try:
             game_id = int(game_id)
@@ -963,7 +1043,7 @@ class Plugin:
         if not raw or len(raw) > ARTWORK_MAX_BYTES:
             return {"ok": False, "error": "image missing or too large"}
 
-        path = os.path.join(_icon_dir(), f"{game_id}.{kind}")
+        path = os.path.join(_icon_dir(), _icon_name(game_id, app_id, kind))
         try:
             # Written whole then moved, so Steam can never read a file that is
             # half-written — it reads this path whenever it draws the icon,

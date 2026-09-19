@@ -40,7 +40,8 @@ export const fetchArtwork =
  *  filesystem PATH — it reads that file every time it draws the icon. So this
  *  one slot has to become a real file, which only the Python side can do. */
 export const saveIcon =
-  callable<[game_id: number, data: string, kind: string], { ok: boolean; path?: string; error?: string }>("save_icon");
+  callable<[game_id: number, data: string, kind: string, app_id: number],
+           { ok: boolean; path?: string; error?: string }>("save_icon");
 /** The account's shelves, and which one this device is pointed at.
  *
  *  Asked of the gateway each time rather than cached: the shelf can be changed
