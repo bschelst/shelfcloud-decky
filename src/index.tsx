@@ -440,6 +440,7 @@ function Content() {
 
   const signIn = useCallback(async () => {
     setPendingLogin(null);
+    setStatus((prev) => prev ? { ...prev, pending_login_code: "" } : prev);
     setJob({ busy: true, message: "Opening Steam sign-in…" });
     const start = await startLogin();
     if (!start.ok || !start.login_url || !start.session_token) {

@@ -429,6 +429,9 @@ class Plugin:
     async def start_login(self) -> Dict[str, Any]:
         """Begin sign-in. The frontend opens login_url via steam://openurl,
         because Game Mode has no browser of its own."""
+        self._pending_login_code = ""
+        if self._login_task and not self._login_task.done():
+            self._login_task.cancel()
         try:
             result = await asyncio.to_thread(
                 self._request, "/auth/session?web=0", "POST", None, False
@@ -441,10 +444,6 @@ class Plugin:
             # state would be gone by then.
             self._pending_login_code = result.get("confirm_code") or ""
 
-            # Wait for completion here, not in the panel: opening Steam's
-            # browser closes the panel and would take the waiter with it.
-            if self._login_task and not self._login_task.done():
-                self._login_task.cancel()
             session_token = result.get("session_token")
             if not session_token:
                 return {"ok": False, "error": "gateway did not return a session token"}
