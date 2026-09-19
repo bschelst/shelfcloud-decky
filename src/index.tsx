@@ -309,8 +309,19 @@ async function doRemoveAll(): Promise<void> {
       finishJob(result.error || "Could not clear your library");
       return;
     }
-    setJob({ message: `Removed ${result.removed} games. Cleaning up tiles…` });
-    await doSync(true);
+    setJob({ message: `Removed ${result.removed} games. Removing all tiles…` });
+    // Remove every tracked tile without consulting the gateway. The gateway
+    // is already empty, but reading it (doSync) would re-add the website
+    // tile via adopt_pushed_websites before we can remove it. An empty
+    // desired list means "remove everything tracked".
+    const library = await getDesiredLibrary();
+    const tracked = (library.ok && library.tracked && typeof library.tracked === "object")
+      ? library.tracked : {};
+    const syncResult = await syncLibrary([], tracked, {
+      record: recordShortcut,
+      forget: forgetShortcut,
+    });
+    await syncFinished(syncResult.added, syncResult.removed, syncResult.updated);
   } catch (error) {
     finishJob(String(error));
   }
