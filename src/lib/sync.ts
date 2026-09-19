@@ -8,7 +8,7 @@
 import { fetchArtwork, saveIcon, strayShortcuts } from "./api";
 import { addToProviderCollections, pruneProviderCollections,
          type CollectionMember } from "./collection";
-import { providerLabel, type DesiredGame, type SyncResult, type TrackedShortcut } from "./types";
+import { providerLabel, WEBSITE_PROVIDERS, type DesiredGame, type SyncResult, type TrackedShortcut } from "./types";
 
 /**
  * Tile name, suffixed with the provider.
@@ -18,6 +18,12 @@ import { providerLabel, type DesiredGame, type SyncResult, type TrackedShortcut 
  * streams and which is installed locally.
  */
 export function shortcutTitle(game: DesiredGame): string {
+  // A web page carries no suffix. The suffix exists to separate a streamed
+  // copy of a game from an installed one under the same name, and a page has
+  // no installed counterpart to be confused with — so all it added was noise
+  // in the one place there is least room for it: "Shelfcloud Website
+  // (shelfcloud)" is most of a Steam tile's title spent saying nothing.
+  if (WEBSITE_PROVIDERS.has(game.provider)) return game.name;
   return `${game.name} (${providerLabel(game.provider)})`;
 }
 

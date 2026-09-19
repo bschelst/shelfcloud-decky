@@ -7,7 +7,7 @@
 // nothing about where anything actually runs. "Boosteroid" and "GeForce NOW"
 // are meaningful groupings; "Shelfcloud" is just a pile.
 
-import { providerLabel } from "./types";
+import { providerLabel, WEBSITE_PROVIDERS } from "./types";
 
 /** Steam's collection store, which @decky/ui does not type. */
 interface SteamCollection {
@@ -48,7 +48,12 @@ export interface CollectionMember {
  * obvious which collections Shelfcloud manages and may add to or empty.
  */
 export function collectionName(provider: string): string {
-  return `${providerLabel(provider)} (Shelfcloud)`;
+  // Both website providers share one collection. A published page and a page
+  // the user added are the same kind of thing to the person looking at their
+  // library — a link — and splitting them produced two collections, one of
+  // which was called "custom" because the label was missing entirely.
+  const label = WEBSITE_PROVIDERS.has(provider) ? "Websites" : providerLabel(provider);
+  return `${label} (Shelfcloud)`;
 }
 
 /**

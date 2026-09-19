@@ -146,9 +146,24 @@ const PROVIDER_LABELS: Record<string, string> = {
   playstation: "PlayStation",
   shadow: "Shadow",
   airgpu: "AirGPU",
+  // The two website providers, which are not cloud services at all: a page
+  // published by Shelfcloud, and a page the user added themselves. Missing
+  // here, they fell through to the raw key exactly as the note above warns —
+  // a tile reading "Shelfcloud Website (shelfcloud)" and, worse, a Steam
+  // collection literally called "custom (Shelfcloud)".
+  shelfcloud: "Shelfcloud",
+  custom: "Website",
   // Tiles recorded before providers were tracked. Fixed by the next sync.
   unknown: "Other",
 };
+
+/** Providers that are a web page rather than a cloud service.
+ *
+ * They are named apart because both places that render a provider want to
+ * treat them differently: a page's title needs no provider suffix, and both
+ * belong in one collection rather than two.
+ */
+export const WEBSITE_PROVIDERS = new Set(["shelfcloud", "custom"]);
 
 /** Every provider this build can name, for tests that check nothing is missed. */
 export const KNOWN_PROVIDERS = Object.keys(PROVIDER_LABELS);
