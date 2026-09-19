@@ -138,9 +138,6 @@ More providers may be added over time. Shelfcloud does not buy subscriptions or 
 - **&#128249; Hardware video decode** — VA-API is enabled automatically for smoother streaming and better battery life
 - **&#128736; Device identity** — each device registers its name (Steam Deck, Steam Deck OLED, or the machine's hostname) so you can tell them apart on the website
 - **&#128274; Pairing code sign-in** — a code is shown on the panel before Steam's browser opens, so you can finish sign-in even after the panel closes
-- **&#128737; Launch URL allowlist** — every URL is checked on the device against known provider hosts before a browser opens, even if the gateway is compromised
-- **&#128260; Offline launches** — when the gateway is unreachable, games launch from the last known URL stored locally
-- **&#128218; Built-in help** — a full help & documentation modal accessible from the panel, covering setup, playing, syncing, troubleshooting, and privacy
 
 <br>
 
