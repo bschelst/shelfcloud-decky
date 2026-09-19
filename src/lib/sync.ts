@@ -149,15 +149,19 @@ interface ArtworkOutcome {
  *  Best effort per slot: a tile that fails to clear is a few kilobytes left
  *  behind, and it must never stop the removal it belongs to.
  */
+async function clearSlot(appId: number, assetType: number): Promise<void> {
+  try {
+    await SteamClient.Apps.ClearCustomArtworkForApp(appId, assetType as never);
+  } catch {
+    /* already gone, or Steam refused this slot; the others still matter */
+  }
+}
+
 async function clearArtwork(appId: number): Promise<void> {
   // Capsule, Hero, Logo, Header — the four this plugin writes. Icon is a file
   // path set through SetShortcutIcon and is cleaned up by the backend.
   for (const assetType of [0, 1, 2, 3]) {
-    try {
-      await SteamClient.Apps.ClearCustomArtworkForApp(appId, assetType as never);
-    } catch {
-      /* already gone, or Steam refused this slot; the others still matter */
-    }
+    await clearSlot(appId, assetType);
   }
 }
 
@@ -199,7 +203,27 @@ async function applyArtwork(appId: number, game: DesiredGame): Promise<ArtworkOu
 
   const images = await background;
   for (let i = 0; i < BACKGROUND_SLOTS.length; i++) {
-    await applySlot(images[i], BACKGROUND_SLOTS[i][1]);
+    const [slot, assetType] = BACKGROUND_SLOTS[i];
+    if (images[i]) {
+      await applySlot(images[i], assetType);
+      continue;
+    }
+    // Nothing to apply. There are two ways to get here and they want opposite
+    // things, so the reason matters rather than just the empty result:
+    //
+    //   the download failed  — the slot HAS art and we could not get it this
+    //                          time. Leave what Steam already has; clearing on
+    //                          a flaky network would wipe good artwork.
+    //   nothing is offered   — the gateway says this slot is empty, so Steam's
+    //                          copy is stale and has to go.
+    //
+    // The second case is why this exists. Website tiles used to carry our
+    // cloud as their logo, and Steam draws the logo INSTEAD OF the title —
+    // so every added page showed the same mark where its name should be. The
+    // gateway stopped serving it, but a slot that is merely skipped keeps
+    // whatever was written last time, and those tiles would have kept the
+    // cloud for as long as they existed.
+    if (!game.artwork?.[slot]) await clearSlot(appId, assetType);
   }
 
   // The icon — a different mechanism from everything above.

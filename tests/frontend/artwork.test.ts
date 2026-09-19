@@ -52,11 +52,14 @@ const GAME: DesiredGame = {
 
 /** Slots applied, in the order Steam was told about them. */
 let appliedOrder: number[] = [];
+/** Slots Steam was told to forget. */
+let clearedSlots: number[] = [];
 /** Peak number of downloads in flight at once. */
 let peakInFlight = 0;
 
 function installSteamClient() {
   appliedOrder = [];
+  clearedSlots = [];
   (globalThis as Record<string, unknown>).SteamClient = {
     Apps: {
       AddShortcut: vi.fn(async () => 4242),
@@ -68,6 +71,9 @@ function installSteamClient() {
       SetShortcutIcon: vi.fn(),
       SetCustomArtworkForApp: vi.fn(async (_app: number, _d: string, _k: string, type: number) => {
         appliedOrder.push(type);
+      }),
+      ClearCustomArtworkForApp: vi.fn(async (_app: number, type: number) => {
+        clearedSlots.push(type);
       }),
     },
   };
@@ -339,5 +345,37 @@ describe("when artwork counts as finished", () => {
     await syncLibrary([game], tracked, cb);
 
     expect(appliedOrder).toContain(CAPSULE);
+  });
+});
+
+describe("a slot the gateway no longer offers", () => {
+  // Website tiles used to carry the Shelfcloud cloud as their logo, and Steam
+  // draws the logo INSTEAD OF the title — so every page somebody added showed
+  // the same mark where its name should be. The gateway stopped serving it,
+  // but a slot that is merely skipped keeps whatever was written last time.
+  const noLogo = {
+    ...GAME,
+    artwork: { capsule: GAME.artwork!.capsule, header: GAME.artwork!.header, hero: GAME.artwork!.hero },
+  };
+
+  it("is cleared from Steam rather than left as it was", async () => {
+    await syncLibrary([noLogo], {}, callbacks());
+
+    expect(clearedSlots).toEqual([LOGO]);
+    // And the slots that ARE offered still go on.
+    expect([...appliedOrder].sort()).toEqual([CAPSULE, HERO, HEADER].sort());
+  });
+
+  it("does not clear a slot whose download merely failed", async () => {
+    // The opposite case, and the reason the check is on what the entry offers
+    // rather than on whether an image came back: clearing here would wipe good
+    // artwork every time the network hiccuped.
+    vi.mocked(fetchArtwork).mockImplementation(async (url: string) =>
+      url.includes("hero") ? { ok: false } : { ok: true, base64: "aGk=", kind: "jpg" });
+
+    await syncLibrary([GAME], {}, callbacks());
+
+    expect(clearedSlots).toEqual([]);
+    expect(appliedOrder).not.toContain(HERO);
   });
 });
