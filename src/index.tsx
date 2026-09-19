@@ -567,7 +567,7 @@ function Content() {
   // Either a sign-in we just started (code in hand, browser not yet opened) or
   // one already in flight (code recovered from the backend, because this panel
   // was closed by the browser and has since been reopened over it).
-  const pairingCode = pendingLogin?.code || status.pending_login_code || "";
+  const pairingCode = status.signed_in ? "" : (pendingLogin?.code || status.pending_login_code || "");
 
   return (
     <>
