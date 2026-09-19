@@ -189,6 +189,56 @@ describe("resilience", () => {
     expect(appliedOrder[0]).toBe(CAPSULE);
   });
 
+  it("uses the gateway for a slot that has no direct URL at all", async () => {
+    // The website-tile case, and the one the test above does NOT cover: that
+    // one gives every slot a direct URL and makes the fetch fail. Here the
+    // direct URL is absent, which is what the gateway serves art off its own
+    // disk for — a catalogue row with a null capsule whose
+    // /api/artwork/<id>/capsule still answers with a picture.
+    //
+    // fetchSlot used to return early on a missing direct URL and never look at
+    // the proxy, so exactly the tiles that only have a fallback got nothing.
+    const seen: string[] = [];
+    vi.mocked(fetchArtwork).mockImplementation(async (url: string) => {
+      seen.push(url);
+      return { ok: true, base64: "aGk=", kind: "png" };
+    });
+
+    await syncLibrary([{
+      ...GAME,
+      artwork: { capsule: null, header: null, hero: null, logo: null },
+      artwork_proxy: {
+        capsule: "http://gateway/art/1/capsule",
+        header: "http://gateway/art/1/header",
+        hero: "http://gateway/art/1/hero",
+        logo: "http://gateway/art/1/logo",
+      },
+    }], {}, callbacks());
+
+    expect(seen.every((u) => u.startsWith("http://gateway/"))).toBe(true);
+    expect(appliedOrder).toHaveLength(4);
+    expect(appliedOrder[0]).toBe(CAPSULE);
+  });
+
+  it("a slot with neither a URL nor a proxy is simply left empty", async () => {
+    // Website tiles have no logo on purpose: an empty logo slot is how Steam
+    // knows to draw the tile's name instead of a picture. That must stay a
+    // quiet no-op rather than becoming a failed download.
+    vi.mocked(fetchArtwork).mockImplementation(async () => ({
+      ok: true, base64: "aGk=", kind: "png",
+    }));
+
+    const result = await syncLibrary([{
+      ...GAME,
+      artwork: { ...GAME.artwork, logo: null },
+      artwork_proxy: undefined,
+    }], {}, callbacks());
+
+    expect(appliedOrder).not.toContain(LOGO);
+    expect(result.added).toBe(1);
+    expect(result.failed).toBe(0);
+  });
+
   it("a game with no artwork still syncs", async () => {
     const result = await syncLibrary([{ ...GAME, artwork: undefined }], {}, callbacks());
     expect(appliedOrder).toHaveLength(0);

@@ -86,10 +86,21 @@ const BACKGROUND_SLOTS: Array<[ArtSlot, number]> = [
  */
 async function fetchSlot(game: DesiredGame, slot: ArtSlot) {
   const direct = game.artwork?.[slot];
-  if (!direct) return undefined;
-  const image = await fetchArtworkBase64(direct);
-  if (image) return image;
   const viaGateway = game.artwork_proxy?.[slot];
+
+  // No direct URL is NOT the same as no artwork. The gateway serves some slots
+  // from its own disk rather than from a catalogue address — website tiles are
+  // the whole of that case — so the row can carry a null capsule while
+  // /api/artwork/<id>/capsule answers with a picture. Returning early here
+  // skipped the fallback for exactly the tiles that only have a fallback.
+  //
+  // A slot with neither is a slot with no artwork, which is normal: website
+  // tiles deliberately have no logo, so that one answers 404 and stays empty,
+  // which is how Steam knows to draw the name.
+  if (direct) {
+    const image = await fetchArtworkBase64(direct);
+    if (image) return image;
+  }
   return viaGateway ? fetchArtworkBase64(viaGateway) : undefined;
 }
 
@@ -376,8 +387,13 @@ export interface SyncCallbacks {
  *         Website tiles lost their logo so their name would show, which also
  *         took their icon with it — those tiles are already on a shelf and
  *         would never be revisited without this.
+ * 6 -> 7: a repair again, not a new slot. fetchSlot returned early when a slot
+ *         had no direct URL and so never tried the gateway, which is the only
+ *         source for art the gateway serves off its own disk. Any tile that
+ *         was recorded under revision 6 with a slot silently skipped is marked
+ *         done and would never be looked at again.
  */
-const ART_REVISION = "6";
+const ART_REVISION = "7";
 
 /**
  * A fingerprint of the artwork a tile currently carries.
