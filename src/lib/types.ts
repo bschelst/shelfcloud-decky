@@ -121,6 +121,10 @@ export interface SyncResult {
   /** Names of the games newly added, so a notification can say which rather
    *  than just how many. */
   addedNames: string[];
+  /** True when the run stopped because it was asked to, rather than because it
+   *  ran out of games. The counts above still describe what it did reach: a
+   *  cancelled run is a shorter run, not a failed one. */
+  cancelled?: boolean;
 }
 
 /** How each provider is written for a person to read.

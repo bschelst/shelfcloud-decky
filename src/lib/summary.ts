@@ -25,6 +25,12 @@ export function syncSummary(
   skipped = 0,
 ): string {
   const skippedNote = skipped ? ` (${skipped} skipped)` : "";
+  // A cancelled run must say so. Its counts are true for what it reached, so
+  // without this line "385 games — 40 added" reads as the whole library having
+  // been considered and only 40 of it needing anything.
+  if (result.cancelled) {
+    return `Stopped — ${changeSummary(result)}${skippedNote}`;
+  }
   return `${total} games — ${changeSummary(result)}${skippedNote}`;
 }
 

@@ -41,7 +41,7 @@ import { NoBrowser } from "./components/NoBrowser";
 import { SettingsSection } from "./components/SettingsSection";
 import { LinksSection } from "./components/LinksSection";
 import { AboutSection } from "./components/AboutSection";
-import { finishJob, getJob, setJob, subscribeJob } from "./lib/job";
+import { cancelJob, cancelRequested, finishJob, getJob, runJob, setJob, subscribeJob } from "./lib/job";
 import { theme } from "./lib/theme";
 import type { DesiredGame, InstallState, Status, SyncResult } from "./lib/types";
 
@@ -214,6 +214,7 @@ async function performSync(onProgress?: (message: string) => void): Promise<Sync
     record: recordShortcut,
     forget: forgetShortcut,
     onProgress,
+    shouldStop: cancelRequested,
   });
   await syncFinished(result.added, result.removed, result.updated);
   // Two places drop entries before we get here: the backend, which reports its
@@ -300,15 +301,17 @@ async function doAddOwned(): Promise<void> {
   }
 }
 
-/** Empty the library and let a sync delete every tile we created. */
+/** Empty the library and let a sync delete every tile we created.
+ *
+ * Wrapped in runJob so every exit leaves the panel idle. It used to set `busy`
+ * itself and clear it on three of its four exits — the missing one being the
+ * path where everything worked, which left every button greyed out with
+ * nothing running.
+ */
 async function doRemoveAll(): Promise<void> {
-  setJob({ busy: true, progress: null });
-  try {
+  await runJob(async () => {
     const result = await clearLibrary();
-    if (!result.ok) {
-      finishJob(result.error || "Could not clear your library");
-      return;
-    }
+    if (!result.ok) return result.error || "Could not clear your library";
     setJob({ message: `Removed ${result.removed} games. Removing all tiles…` });
     // Remove every tracked tile without consulting the gateway. The gateway
     // is already empty, but reading it (doSync) would re-add the website
@@ -322,9 +325,10 @@ async function doRemoveAll(): Promise<void> {
       forget: forgetShortcut,
     });
     await syncFinished(syncResult.added, syncResult.removed, syncResult.updated);
-  } catch (error) {
-    finishJob(String(error));
-  }
+    return syncResult.removed === 1
+      ? "Removed 1 tile."
+      : `Removed ${syncResult.removed} tiles.`;
+  });
 }
 
 function Content() {
@@ -336,6 +340,11 @@ function Content() {
   const [shelves, setShelves] = useState<Awaited<ReturnType<typeof getShelves>> | null>(null);
   // Two-press confirm: this deletes every tile the plugin made.
   const [confirmClear, setConfirmClear] = useState(false);
+  // Cancel has been pressed for the run in flight. Local to the panel rather
+  // than in the job store because it is only about THIS button's label: the
+  // run stops between tiles, so there is a gap between asking and stopping,
+  // and a button that still says "Cancel" invites a second press.
+  const [stopping, setStopping] = useState(false);
   const [confirmSignOut, setConfirmSignOut] = useState(false);
   const loginTimer = useRef<number | null>(null);
   // A sign-in that has been STARTED but not yet handed to the browser.
@@ -364,6 +373,11 @@ function Content() {
   // On mount, and again whenever a job finishes while the panel is open, so
   // the counts follow work that completed with the panel closed.
   useEffect(() => { void refresh(); }, [refresh, completed]);
+
+  // Put the Cancel button back to its normal label once the run it belongs to
+  // has actually stopped, so the next one does not open already saying
+  // "Stopping…".
+  useEffect(() => { if (!busy) setStopping(false); }, [busy]);
 
   // Alongside the status, and re-read after a sync: a sync is when the library
   // changes, which is exactly when a shelf's game count is out of date.
@@ -701,10 +715,26 @@ function Content() {
           </ButtonItem>
         </PanelSectionRow>
 
+        {/* While something is running this row becomes the way OUT of it.
+            "Add all my games" walks a whole Steam library — thousands of tiles
+            and many minutes on a large account — and until now the only ways
+            to stop were to let it finish or to kill Steam. The button is only
+            replaced while busy, so there is never a Cancel with nothing to
+            cancel. */}
         <PanelSectionRow>
-          <ButtonItem layout="below" disabled={busy || signedOut} onClick={() => void sync()}>
-            {busy ? "Syncing…" : "Sync now"}
-          </ButtonItem>
+          {busy ? (
+            <ButtonItem
+              layout="below"
+              disabled={stopping}
+              onClick={() => { setStopping(true); cancelJob(); }}
+            >
+              {stopping ? "Stopping…" : "Cancel"}
+            </ButtonItem>
+          ) : (
+            <ButtonItem layout="below" disabled={signedOut} onClick={() => void sync()}>
+              Sync now
+            </ButtonItem>
+          )}
         </PanelSectionRow>
 
         {(status.last_error || (message && !busy)) && (

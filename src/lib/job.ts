@@ -71,5 +71,52 @@ export function finishJob(message?: string): void {
 /** Reset to idle. Tests only — the plugin never goes back to a clean slate. */
 export function resetJob(): void {
   job = IDLE;
+  cancelling = false;
   listeners.clear();
+}
+
+
+// ----------------------------------------------------------------- cancelling
+
+// "Add all my games" walks a whole Steam library, which on a large account is
+// thousands of tiles and many minutes. There was no way to stop it: the only
+// exits were letting it finish or killing Steam, and closing the panel does
+// not help because the run deliberately survives that.
+let cancelling = false;
+
+/** Ask the running job to stop at its next clean point. */
+export function cancelJob(): void {
+  if (!job.busy) return;
+  cancelling = true;
+  setJob({ message: "Stopping…" });
+}
+
+/** Whether a stop has been asked for. Read by the loops that can honour it. */
+export function cancelRequested(): boolean {
+  return cancelling;
+}
+
+/** Run a long operation, and guarantee the UI is left idle afterwards.
+ *
+ * Every button in the panel is disabled while `busy`, so a path that returns
+ * without clearing it strands the whole UI for the life of the session with
+ * nothing actually running. That is not hypothetical: "Remove all games" had
+ * four exits and only three of them finished the job, so emptying the library
+ * — the one that works — left sync greyed out until the plugin was reloaded.
+ *
+ * One entry and one exit, so a `return` added inside the body later cannot
+ * reintroduce it.
+ */
+export async function runJob(body: () => Promise<string | void>): Promise<void> {
+  cancelling = false;
+  setJob({ busy: true, progress: null });
+  let closing: string | void;
+  try {
+    closing = await body();
+  } catch (error) {
+    closing = String(error);
+  } finally {
+    cancelling = false;
+  }
+  finishJob(closing === undefined ? undefined : closing || undefined);
 }

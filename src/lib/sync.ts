@@ -362,6 +362,13 @@ export interface SyncCallbacks {
   ) => Promise<unknown>;
   forget: (gameId: number) => Promise<unknown>;
   onProgress?: (message: string) => void;
+  /** Asked before each tile. True stops the run where it stands.
+   *
+   *  Checked BETWEEN tiles, never inside one: a tile is a shortcut, its
+   *  artwork and its collection entry, and stopping half way through would
+   *  leave a nameless entry with no art that nothing tracks. Whole tiles only,
+   *  so whatever was done stays correct and the rest is simply not started. */
+  shouldStop?: () => boolean;
 }
 
 /**
@@ -500,6 +507,10 @@ export async function syncLibrary(
   };
 
   for (const game of desired) {
+    if (callbacks.shouldStop?.()) {
+      result.cancelled = true;
+      break;
+    }
     const existing = tracked[String(game.game_id)];
     const title = shortcutTitle(game);
     const art = artworkFingerprint(game);

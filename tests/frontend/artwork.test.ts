@@ -239,6 +239,33 @@ describe("resilience", () => {
     expect(result.failed).toBe(0);
   });
 
+  it("stops between tiles when asked, leaving the ones it made intact", async () => {
+    // "Add all my games" walks a whole library and there was no way out of it.
+    // Checked BETWEEN tiles on purpose: a tile is a shortcut plus artwork plus
+    // a collection entry, and stopping mid-tile would leave a nameless entry
+    // with no art that nothing tracks.
+    const games = [GAME, { ...GAME, game_id: 2 }, { ...GAME, game_id: 3 }];
+    let seen = 0;
+    const result = await syncLibrary(games, {}, {
+      ...callbacks(),
+      shouldStop: () => seen++ >= 2,     // allow two, stop before the third
+    });
+
+    expect(result.cancelled).toBe(true);
+    expect(result.added).toBe(2);
+    expect(result.failed).toBe(0);
+  });
+
+  it("runs to the end when nothing asks it to stop", async () => {
+    const games = [GAME, { ...GAME, game_id: 2 }];
+    const result = await syncLibrary(games, {}, {
+      ...callbacks(),
+      shouldStop: () => false,
+    });
+    expect(result.cancelled).toBeFalsy();
+    expect(result.added).toBe(2);
+  });
+
   it("a game with no artwork still syncs", async () => {
     const result = await syncLibrary([{ ...GAME, artwork: undefined }], {}, callbacks());
     expect(appliedOrder).toHaveLength(0);
