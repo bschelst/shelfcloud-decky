@@ -138,10 +138,13 @@ type SteamUrlApi = { ExecuteSteamURL(url: string): void };
 
 function openInSteamBrowser(url: string): void {
   try {
+    // NavigateToExternalWeb ensures the browser window exists; ExecuteSteamURL
+    // navigates it. Without the first call, the first open lands on a blank
+    // data:text/html placeholder because the browser window is not ready yet.
+    Navigation.NavigateToExternalWeb(url);
     (SteamClient.URL as unknown as SteamUrlApi).ExecuteSteamURL(`steam://openurl/${url}`);
   } catch (error) {
     console.error("[shelfcloud] could not open browser", error);
-    Navigation.NavigateToExternalWeb(url);   // last resort
   }
 }
 
