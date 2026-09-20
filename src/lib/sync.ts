@@ -252,7 +252,6 @@ function applyControllerLayout(appId: number, templateUrl: string): Promise<void
     };
 
     const reg = input.RegisterForControllerConfigInfoMessages(
-      appId,
       (messages: any[]) => {
         if (settled || !Array.isArray(messages)) return;
         const tpl = messages.find(
