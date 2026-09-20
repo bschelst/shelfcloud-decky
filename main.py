@@ -23,6 +23,7 @@ import random
 import subprocess
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any, Dict, List, Optional
 
@@ -1168,6 +1169,22 @@ class Plugin:
             return {"ok": False, "error": str(exc)}
         return {"ok": True, "path": path}
 
+    def _download_custom_layout(self, name: str) -> Optional[str]:
+        """Fetch a custom VDF from the gateway."""
+        gateway = self._gateway()
+        url = f"{gateway}/api/controller-layout/{urllib.parse.quote(name)}"
+        token = self._settings.get("api_token", "")
+        req = urllib.request.Request(url, headers={
+            "Authorization": f"Bearer {token}",
+            "User-Agent": ARTWORK_USER_AGENT,
+        })
+        try:
+            with urllib.request.urlopen(req, context=SSL_CTX, timeout=REQUEST_TIMEOUT) as resp:
+                return resp.read().decode("utf-8", errors="replace")
+        except Exception as exc:
+            decky.logger.warning("custom layout download failed: %s", exc)
+            return None
+
     async def install_controller_layout(self, shortcut_name: str,
                                         template_url: str) -> Dict:
         """Copy a Steam Input template into the per-game config directory.
@@ -1175,24 +1192,33 @@ class Plugin:
         Non-Steam shortcuts use the SHORTCUT NAME as the directory, not the
         app ID. Verified on hardware: the existing configs on this Deck sit
         under names like "xbox cloud gaming" and "tiktok", not numeric IDs.
+
+        Accepts two URL schemes:
+          template://  — a built-in Steam template from controller_base/templates/
+          custom://    — a VDF hosted on the gateway, downloaded to the device
         """
         if not isinstance(shortcut_name, str) or not shortcut_name.strip():
             return {"ok": False, "error": "bad shortcut_name"}
-        if not isinstance(template_url, str) or not template_url.startswith("template://"):
-            return {"ok": False, "error": "not a template:// URL"}
+        if not isinstance(template_url, str):
+            return {"ok": False, "error": "bad template_url"}
 
-        filename = template_url.removeprefix("template://")
         steam_root = os.path.expanduser("~/.steam/steam")
-        source = os.path.join(steam_root, "controller_base", "templates", filename)
-        if not os.path.isfile(source):
-            return {"ok": False, "error": f"template not found: {filename}"}
 
-        with open(source, "r", encoding="utf-8", errors="replace") as f:
-            vdf_text = f.read()
+        if template_url.startswith("custom://"):
+            vdf_text = await asyncio.to_thread(self._download_custom_layout,
+                                               template_url.removeprefix("custom://"))
+            if vdf_text is None:
+                return {"ok": False, "error": "could not download custom layout"}
+        elif template_url.startswith("template://"):
+            filename = template_url.removeprefix("template://")
+            source = os.path.join(steam_root, "controller_base", "templates", filename)
+            if not os.path.isfile(source):
+                return {"ok": False, "error": f"template not found: {filename}"}
+            with open(source, "r", encoding="utf-8", errors="replace") as f:
+                vdf_text = f.read()
+        else:
+            return {"ok": False, "error": "unsupported URL scheme"}
 
-        # A raw template is not a selected config. Steam needs url and
-        # export_type to treat the file as the active layout for this game.
-        # Without them the file sits there and Steam ignores it.
         if '"url"' not in vdf_text:
             vdf_text = vdf_text.replace(
                 '"controller_mappings"\n{',
