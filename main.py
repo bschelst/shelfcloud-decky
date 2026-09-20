@@ -1189,7 +1189,20 @@ class Plugin:
         if not os.path.isfile(source):
             return {"ok": False, "error": f"template not found: {filename}"}
 
-        import shutil
+        with open(source, "r", encoding="utf-8", errors="replace") as f:
+            vdf_text = f.read()
+
+        # A raw template is not a selected config. Steam needs url and
+        # export_type to treat the file as the active layout for this game.
+        # Without them the file sits there and Steam ignores it.
+        if '"url"' not in vdf_text:
+            vdf_text = vdf_text.replace(
+                '"controller_mappings"\n{',
+                '"controller_mappings"\n{\n'
+                f'\t"url"\t\t"{template_url}"\n'
+                '\t"export_type"\t\t"template"',
+                1)
+
         installed = 0
         configs_root = os.path.join(
             steam_root, "steamapps", "common", "Steam Controller Configs")
@@ -1201,7 +1214,8 @@ class Plugin:
             os.makedirs(dest_dir, exist_ok=True)
             dest = os.path.join(dest_dir, "controller_neptune.vdf")
             try:
-                shutil.copy2(source, dest)
+                with open(dest, "w", encoding="utf-8") as f:
+                    f.write(vdf_text)
                 installed += 1
                 decky.logger.info("controller layout: wrote %s", dest)
             except OSError as exc:
