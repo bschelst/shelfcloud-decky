@@ -668,8 +668,13 @@ export async function syncLibrary(
         SteamClient.Apps.SetShortcutLaunchOptions(appId, game.options);
 
         if (game.controller_layout) {
-          try { await installControllerLayout(title, game.controller_layout); }
-          catch { /* not fatal */ }
+          try {
+            await installControllerLayout(title, game.controller_layout);
+            const set = (SteamClient as any).Input?.SetSelectedConfigForApp;
+            if (typeof set === "function") {
+              set.call((SteamClient as any).Input, appId, 0, game.controller_layout, false, 1);
+            }
+          } catch { /* not fatal */ }
         }
 
         // Record the fingerprint only once the VISIBLE slot went on. It used to
