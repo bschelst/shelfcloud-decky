@@ -54,6 +54,15 @@ IDLE_INSTALL = {
 REQUEST_TIMEOUT = 20
 SYNC_EVENT = "shelfcloud/library"
 
+_LAYOUT_GAMEPAD = "template://controller_neptune_gamepad_fps.vdf"
+_LAYOUT_WEB_BROWSER = "template://controller_neptune_webbrowser.vdf"
+
+
+def _provider_default_layout(provider_key: str) -> Optional[str]:
+    if provider_key in weburl.WEBSITE_PROVIDERS:
+        return _LAYOUT_WEB_BROWSER
+    return _LAYOUT_GAMEPAD
+
 # Artwork is fetched here rather than in the browser; see fetch_artwork.
 #
 # The hardware goes in the comment field so the gateway can name this device
@@ -686,7 +695,8 @@ class Plugin:
             "options": options,
             "artwork": self._artwork(game),
             "artwork_proxy": self._artwork_proxy(game),
-            "controller_layout": provider.get("controller_layout"),
+            "controller_layout": provider.get("controller_layout")
+                or _provider_default_layout(provider["provider"]),
         }
 
     async def get_website_launch(self) -> Optional[Dict[str, str]]:
