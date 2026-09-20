@@ -5,7 +5,7 @@
 // This lives on the frontend because only here does SteamClient exist. The
 // backend decides *what* the library should contain; this makes it so.
 
-import { fetchArtwork, saveIcon, strayShortcuts } from "./api";
+import { fetchArtwork, installControllerLayout, saveIcon, strayShortcuts } from "./api";
 import { addToProviderCollections, pruneProviderCollections,
          removeRetiredCollections, type CollectionMember } from "./collection";
 import { renderPageCapsule } from "./pagecapsule";
@@ -220,58 +220,6 @@ async function clearArtwork(appId: number): Promise<void> {
   for (const assetType of [0, 1, 2, 3]) {
     await clearSlot(appId, assetType);
   }
-}
-
-const CONTROLLER_CONFIG_TIMEOUT_MS = 4000;
-
-/**
- * Apply a Steam Input template by querying the live config stream.
- *
- * Follows the pattern unifideck verified against Steam's UI bundle:
- * register for the config stream, query available templates, find the
- * one whose URL matches, and persist it with SetSelectedConfigForApp.
- * No VDF file copy — Steam resolves built-in templates on its own.
- */
-function applyControllerLayout(appId: number, templateUrl: string): Promise<void> {
-  return new Promise<void>((resolve) => {
-    const input = (SteamClient as any).Input;
-    if (!input?.RegisterForControllerConfigInfoMessages
-     || !input?.QueryControllerConfigsForApp
-     || !input?.SetSelectedConfigForApp) {
-      resolve();
-      return;
-    }
-    const filename = templateUrl.replace("template://", "");
-    let settled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-
-    const finish = (reg?: { unregister(): void }) => {
-      if (timer !== undefined) clearTimeout(timer);
-      try { reg?.unregister(); } catch { /* ignore */ }
-      resolve();
-    };
-
-    const reg = input.RegisterForControllerConfigInfoMessages(
-      (messages: any[]) => {
-        if (settled || !Array.isArray(messages)) return;
-        const tpl = messages.find(
-          (m: any) => m && typeof m.URL === "string"
-            && m.bOfficial && m.URL.includes(filename),
-        );
-        if (!tpl) return;
-        settled = true;
-        try {
-          input.SetSelectedConfigForApp(appId, 0, tpl.URL, false, true);
-        } catch { /* swallow */ }
-        finish(reg);
-      },
-    );
-    input.QueryControllerConfigsForApp(appId, 0, false);
-    timer = setTimeout(() => {
-      if (!settled) settled = true;
-      finish(reg);
-    }, CONTROLLER_CONFIG_TIMEOUT_MS);
-  });
 }
 
 async function applyArtwork(appId: number, game: DesiredGame): Promise<ArtworkOutcome> {
@@ -720,7 +668,7 @@ export async function syncLibrary(
         SteamClient.Apps.SetShortcutLaunchOptions(appId, game.options);
 
         if (game.controller_layout) {
-          try { await applyControllerLayout(appId, game.controller_layout); }
+          try { await installControllerLayout(title, game.controller_layout); }
           catch { /* not fatal */ }
         }
 

@@ -686,10 +686,11 @@ class Plugin:
             "--provider", provider["provider"],
         ])
 
+        layout = provider.get("controller_layout") or _provider_default_layout(provider["provider"])
+        decky.logger.info("_to_desired game_id=%s provider=%s controller_layout=%s",
+                          game_id, provider["provider"], layout)
         return {
             "game_id": game_id,
-            # Recorded locally as the offline fallback, never put on the
-            # command line.
             "url": provider["launch_url"],
             "name": name,
             "provider": provider["provider"],
@@ -697,8 +698,7 @@ class Plugin:
             "options": options,
             "artwork": self._artwork(game),
             "artwork_proxy": self._artwork_proxy(game),
-            "controller_layout": provider.get("controller_layout")
-                or _provider_default_layout(provider["provider"]),
+            "controller_layout": layout,
         }
 
     async def get_website_launch(self) -> Optional[Dict[str, str]]:
@@ -1170,18 +1170,16 @@ class Plugin:
             return {"ok": False, "error": str(exc)}
         return {"ok": True, "path": path}
 
-    async def install_controller_layout(self, app_id: int,
+    async def install_controller_layout(self, shortcut_name: str,
                                         template_url: str) -> Dict:
         """Copy a Steam Input template into the per-game config directory.
 
-        SetSelectedConfigForApp alone does not persist for non-Steam shortcuts.
-        The VDF file must also exist in the per-game slot. DeckDock confirmed
-        this empirically; without the file, Steam falls back to its default.
+        Non-Steam shortcuts use the SHORTCUT NAME as the directory, not the
+        app ID. Verified on hardware: the existing configs on this Deck sit
+        under names like "xbox cloud gaming" and "tiktok", not numeric IDs.
         """
-        try:
-            app_id = int(app_id)
-        except (TypeError, ValueError):
-            return {"ok": False, "error": "bad app_id"}
+        if not isinstance(shortcut_name, str) or not shortcut_name.strip():
+            return {"ok": False, "error": "bad shortcut_name"}
         if not isinstance(template_url, str) or not template_url.startswith("template://"):
             return {"ok": False, "error": "not a template:// URL"}
 
@@ -1191,20 +1189,21 @@ class Plugin:
         if not os.path.isfile(source):
             return {"ok": False, "error": f"template not found: {filename}"}
 
-        userdata = os.path.join(steam_root, "userdata")
+        import shutil
         installed = 0
-        for user_dir in os.listdir(userdata):
-            if not user_dir.isdigit():
+        configs_root = os.path.join(
+            steam_root, "steamapps", "common", "Steam Controller Configs")
+        for user_dir in os.listdir(configs_root):
+            user_path = os.path.join(configs_root, user_dir, "config")
+            if not os.path.isdir(user_path):
                 continue
-            dest_dir = os.path.join(
-                steam_root, "steamapps", "common", "Steam Controller Configs",
-                user_dir, "config", str(app_id))
+            dest_dir = os.path.join(user_path, shortcut_name)
             os.makedirs(dest_dir, exist_ok=True)
             dest = os.path.join(dest_dir, "controller_neptune.vdf")
             try:
-                import shutil
                 shutil.copy2(source, dest)
                 installed += 1
+                decky.logger.info("controller layout: wrote %s", dest)
             except OSError as exc:
                 decky.logger.warning("controller layout copy failed: %s", exc)
         return {"ok": installed > 0, "installed": installed}

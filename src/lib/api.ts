@@ -75,7 +75,7 @@ export const setShelf =
   callable<[shelf_id: number | null], { ok: boolean; shelf_id?: number | null; error?: string }>("set_shelf");
 
 export const installControllerLayout =
-  callable<[app_id: number, template_url: string],
+  callable<[shortcut_name: string, template_url: string],
            { ok: boolean; installed?: number; error?: string }>("install_controller_layout");
 
 export const recordShortcut =
