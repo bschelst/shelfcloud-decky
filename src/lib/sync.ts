@@ -7,7 +7,7 @@
 
 import { fetchArtwork, saveIcon, strayShortcuts } from "./api";
 import { addToProviderCollections, pruneProviderCollections,
-         type CollectionMember } from "./collection";
+         removeRetiredCollections, type CollectionMember } from "./collection";
 import { renderPageCapsule } from "./pagecapsule";
 import { renderPageLogo } from "./pagelogo";
 import { providerLabel, WEBSITE_PROVIDERS, type DesiredGame, type SyncResult, type TrackedShortcut } from "./types";
@@ -767,6 +767,12 @@ export async function syncLibrary(
     const managed = new Set<number>(filed.map((m) => m.appId));
     for (const entry of Object.values(tracked)) managed.add(entry.app_id);
     await pruneProviderCollections(filed, managed);
+    // Last, and only on a complete run for the same reason the prune is: a
+    // collection this plugin made under a label it no longer uses, such as
+    // "custom (Shelfcloud)" from before website tiles were labelled
+    // "Websites". The games in it have just been filed under the current name
+    // by the lines above, so what goes is an empty grouping nobody asked for.
+    await removeRetiredCollections(managed);
   }
 
   return result;

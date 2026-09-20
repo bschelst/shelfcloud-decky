@@ -19,6 +19,7 @@ vi.mock("../../src/lib/api", () => ({ fetchArtwork: vi.fn(), saveIcon: vi.fn() }
 vi.mock("../../src/lib/collection", () => ({
   addToProviderCollections: vi.fn(),
   pruneProviderCollections: vi.fn(async () => []),
+  removeRetiredCollections: vi.fn(async () => []),
 }));
 vi.mock("../../src/lib/pagecapsule", () => ({
   renderPageCapsule: vi.fn(async () => ({ data: "DRAWN", kind: "png" })),

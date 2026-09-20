@@ -22,6 +22,7 @@ vi.mock("../../src/lib/api", () => ({ fetchArtwork: vi.fn(async () => ({ ok: fal
 vi.mock("../../src/lib/collection", () => ({
   addToProviderCollections: vi.fn(async () => []),
   pruneProviderCollections: vi.fn(async () => []),
+  removeRetiredCollections: vi.fn(async () => []),
 }));
 
 const { addToProviderCollections, pruneProviderCollections } =

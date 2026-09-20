@@ -7,7 +7,7 @@
 // nothing about where anything actually runs. "Boosteroid" and "GeForce NOW"
 // are meaningful groupings; "Shelfcloud" is just a pile.
 
-import { providerLabel } from "./types";
+import { KNOWN_PROVIDERS, providerLabel } from "./types";
 
 /** Steam's collection store, which @decky/ui does not type. */
 interface SteamCollection {
@@ -20,6 +20,13 @@ interface SteamCollection {
    *  are compared by identity — pass back what allApps already holds. */
   RemoveApps(apps: unknown[]): void;
   Save(): Promise<unknown>;
+  /** Read out of Steam's own bundle, where it is
+   *  `async Delete(){ await store.DeleteCollection(this.id) }`. The store's
+   *  side of it also does `m_cloudStorageMap.delete(id)`, which is the part
+   *  that matters: collections live in Steam Cloud, so removing one locally
+   *  without that is undone by the next sync. Optional because an older
+   *  client may not have it, and a missing method must not throw. */
+  Delete?(): Promise<unknown>;
 }
 
 interface CollectionStore {
@@ -121,6 +128,65 @@ export async function addToProviderCollections(members: CollectionMember[]): Pro
 /** Does this collection belong to Shelfcloud? */
 function isOurs(displayName: string): boolean {
   return displayName.endsWith(" (Shelfcloud)");
+}
+
+/**
+ * Delete collections we made under a name we no longer use.
+ *
+ * Nothing here ever deleted a collection: filing created them, pruning emptied
+ * them, and that was the whole lifecycle. So when a provider's label changed,
+ * the collection under the old label stayed in the user's library — emptied by
+ * the prune, and then sitting there forever with nothing in it.
+ *
+ * "custom (Shelfcloud)" is the one that prompted this. Website tiles were
+ * filed under the raw provider key before `custom` was given the label
+ * "Websites"; renaming fixed what new collections are called and left the old
+ * one exactly where it was. Deleting it by hand did not help either, because
+ * collections live in Steam Cloud and the next sync pulled it back. Steam's
+ * own DeleteCollection removes the cloud entry too, which is what makes it
+ * stick.
+ *
+ * Scoped the same way the prune is, and then once more:
+ *
+ *   - only names ending in " (Shelfcloud)";
+ *   - only names that are not one of the current providers' — a collection
+ *     still in use is never a candidate, whatever is in it;
+ *   - and only when everything inside is a tile we manage. Somebody who
+ *     dragged their own game into one of these made a grouping by hand, and
+ *     throwing that away is worse than leaving an oddly-named collection.
+ *
+ * Runs after filing and pruning, so the games have already been put in the
+ * collection they belong in before the old one goes.
+ */
+export async function removeRetiredCollections(
+  managedAppIds: Set<number>,
+): Promise<string[]> {
+  if (typeof collectionStore === "undefined") return [];
+
+  const current = new Set(KNOWN_PROVIDERS.map(collectionName));
+  const removed: string[] = [];
+  // Over a copy: deleting mutates userCollections underneath us.
+  for (const collection of [...collectionStore.userCollections]) {
+    const name = collection.displayName;
+    if (!isOurs(name) || current.has(name)) continue;
+    if (typeof collection.Delete !== "function") continue;
+    const strangers = (collection.allApps ?? []).filter(
+      (app) => !managedAppIds.has(app.appid));
+    if (strangers.length) {
+      console.warn("[shelfcloud] leaving", name,
+                   "— it holds games this plugin does not manage");
+      continue;
+    }
+    try {
+      await collection.Delete();
+      removed.push(name);
+    } catch (error) {
+      // Best effort, like the rest of the filing: an extra collection is
+      // untidy, not broken, and no sync should fail over tidiness.
+      console.error("[shelfcloud] could not delete collection", name, error);
+    }
+  }
+  return removed;
 }
 
 /**
