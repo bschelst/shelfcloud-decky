@@ -1202,7 +1202,7 @@ class Plugin:
         if not isinstance(template_url, str):
             return {"ok": False, "error": "bad template_url"}
 
-        steam_root = os.path.expanduser("~/.steam/steam")
+        steam_root = os.path.realpath(os.path.expanduser("~/.steam/steam"))
 
         if template_url.startswith("custom://"):
             vdf_text = await asyncio.to_thread(self._download_custom_layout,
