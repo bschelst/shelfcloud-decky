@@ -670,7 +670,7 @@ export async function syncLibrary(
         if (game.controller_layout) {
           try {
             await (SteamClient as any).Input.SetSelectedConfigForApp(
-              appId, 0, game.controller_layout, false,
+              appId, 0, game.controller_layout, false, false,
             );
           } catch {
             // Not fatal — the game still plays, just with Steam's default layout.
