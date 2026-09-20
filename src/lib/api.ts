@@ -76,7 +76,7 @@ export const setShelf =
 
 export const installControllerLayout =
   callable<[shortcut_name: string, template_url: string],
-           { ok: boolean; installed?: number; error?: string }>("install_controller_layout");
+           { ok: boolean; installed?: number; autosave_url?: string; error?: string }>("install_controller_layout");
 
 export const recordShortcut =
   callable<[game_id: number, app_id: number, name: string, options: string, art: string,

@@ -1256,6 +1256,7 @@ class Plugin:
                 1)
 
         installed = 0
+        autosave_url = None
         configs_root = os.path.join(
             steam_root, "steamapps", "common", "Steam Controller Configs")
         for user_dir in os.listdir(configs_root):
@@ -1270,11 +1271,13 @@ class Plugin:
                 with open(dest, "w", encoding="utf-8") as f:
                     f.write(final)
                 installed += 1
+                autosave_url = f"autosave://{dest}"
                 decky.logger.info("controller layout: wrote %s", dest)
                 _register_configset(user_path, shortcut_name)
             except OSError as exc:
                 decky.logger.warning("controller layout copy failed: %s", exc)
-        return {"ok": installed > 0, "installed": installed}
+        return {"ok": installed > 0, "installed": installed,
+                "autosave_url": autosave_url if installed else None}
 
     async def sync_finished(self, added: int, removed: int, updated: int) -> Dict:
         self._last_sync = asyncio.get_event_loop().time()

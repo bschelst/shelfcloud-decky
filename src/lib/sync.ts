@@ -713,10 +713,11 @@ export async function syncLibrary(
         SteamClient.Apps.SetShortcutLaunchOptions(appId, game.options);
 
         if (game.controller_layout) {
-          try { await installControllerLayout(title, game.controller_layout); }
-          catch { /* VDF copy best-effort */ }
-          try { await applyControllerConfig(appId, game.controller_layout); }
-          catch { /* not fatal */ }
+          try {
+            const layoutResult = await installControllerLayout(title, game.controller_layout);
+            const liveUrl = layoutResult?.autosave_url ?? game.controller_layout;
+            await applyControllerConfig(appId, liveUrl);
+          } catch { /* not fatal */ }
         }
 
         // Record the fingerprint only once the VISIBLE slot went on. It used to
@@ -735,11 +736,12 @@ export async function syncLibrary(
         // while the rest of the sync is still running.
         if (pending.length >= COLLECTION_BATCH) await flushCollections();
       } else {
-        // Ensure existing tiles have their controller layout registered.
-        // installControllerLayout is idempotent — it skips if already done.
         if (game.controller_layout) {
-          try { await installControllerLayout(title, game.controller_layout); }
-          catch { /* best effort */ }
+          try {
+            const layoutResult = await installControllerLayout(title, game.controller_layout);
+            const liveUrl = layoutResult?.autosave_url ?? game.controller_layout;
+            await applyControllerConfig(existing.app_id, liveUrl);
+          } catch { /* best effort */ }
         }
 
         const launchChanged = existing.launch !== game.options || existing.name !== title;
