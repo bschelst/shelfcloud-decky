@@ -60,6 +60,29 @@ _LAYOUT_GAMEPAD = "template://controller_neptune_gamepad_fps.vdf"
 _LAYOUT_WEB_BROWSER = "template://controller_neptune_webbrowser.vdf"
 
 
+def _register_configset(config_dir: str, app_key: str) -> None:
+    """Register a per-game config in the configset file so Steam finds it.
+
+    Without this entry Steam ignores the VDF file in the per-game directory.
+    boosteroid-steamos does the same thing in _update_configset.
+    """
+    configset = os.path.join(config_dir, "configset_controller_neptune.vdf")
+    if not os.path.isfile(configset):
+        return
+    with open(configset, "r", encoding="utf-8", errors="replace") as f:
+        text = f.read()
+    entry = f'"{app_key}"'
+    if entry in text:
+        return
+    # Insert before the final closing brace
+    insertion = f'\t{entry}\n\t{{\n\t\t"autosave" "1"\n\t}}\n'
+    idx = text.rfind("}")
+    if idx >= 0:
+        text = text[:idx] + insertion + text[idx:]
+        with open(configset, "w", encoding="utf-8") as f:
+            f.write(text)
+
+
 def _provider_default_layout(provider_key: str) -> Optional[str]:
     """Fallback when the catalog row carries no per-game controller_layout."""
     if provider_key in weburl.WEBSITE_PROVIDERS:
@@ -1248,6 +1271,7 @@ class Plugin:
                     f.write(final)
                 installed += 1
                 decky.logger.info("controller layout: wrote %s", dest)
+                _register_configset(user_path, shortcut_name)
             except OSError as exc:
                 decky.logger.warning("controller layout copy failed: %s", exc)
         return {"ok": installed > 0, "installed": installed}
