@@ -45,8 +45,9 @@ export function untiledFromRun(
   desired: Array<{ game_id: number; provider?: string }>,
   tracked: Record<string, unknown>,
 ): number[] {
-  if (!before) return [];
+  if (!before || !Array.isArray(desired)) return [];
   return desired
+    .filter((game) => game && typeof game === "object")
     .filter((game) => !WEBSITE_PROVIDERS.has(String(game.provider ?? "")))
     .map((game) => Number(game.game_id))
     .filter((id) => Number.isInteger(id)
@@ -361,8 +362,17 @@ async function adoptStrayShortcuts(
   if (!report?.ok || !Array.isArray(report.shortcuts)) return;
 
   for (const entry of report.shortcuts) {
+    // Per ROW, not just the envelope. This runs before the main loop's
+    // filtering, so one malformed row here threw out of the whole sync and
+    // cost the user every tile — the same rule the backend already applies to
+    // the library: one unusable entry is skipped, it does not stop the rest.
+    if (!entry || typeof entry !== "object"
+        || typeof entry.game_id !== "number"
+        || typeof entry.keep !== "number") continue;
+
     const key = String(entry.game_id);
-    const extras = (entry.app_ids ?? []).filter((id) => id !== entry.keep);
+    const extras = (Array.isArray(entry.app_ids) ? entry.app_ids : [])
+      .filter((id) => typeof id === "number" && id !== entry.keep);
 
     for (const appId of extras) {
       try {

@@ -285,7 +285,13 @@ async function libraryGameIds(): Promise<Set<number> | null> {
   try {
     const library = await getDesiredLibrary();
     if (!library.ok || !Array.isArray(library.desired)) return null;
-    return new Set(library.desired.map((g) => Number(g.game_id)));
+    // Rows filtered before they are read: one null entry here throws, and the
+    // catch below turns that into "could not read the library" — which is safe
+    // but silently disables the cleanup this set exists for.
+    return new Set(library.desired
+      .filter((g) => g && typeof g === "object")
+      .map((g) => Number(g.game_id))
+      .filter((id) => Number.isInteger(id)));
   } catch {
     return null;
   }

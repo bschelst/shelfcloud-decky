@@ -62,6 +62,12 @@ ARTWORK_USER_AGENT = (
     f"Shelfcloud/0.1 ({_hardware_label()}; +https://github.com/bschelst/shelfcloud)")
 ARTWORK_MAX_BYTES = 8 * 1024 * 1024
 
+# The most any gateway reply may be. Generous on purpose — the biggest is the
+# whole catalogue, a few megabytes — but not unbounded: a captive portal or a
+# broken proxy answering a stream of bytes should fail, not fill the Deck's
+# memory with it.
+RESPONSE_MAX_BYTES = 64 * 1024 * 1024
+
 # How many library entries one change may carry. The gateway refuses more than
 # 500, and a cancelled bulk add is routinely larger than that, so the caller
 # splits rather than losing the tail to a 422.
@@ -404,7 +410,16 @@ class Plugin:
 
         try:
             with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT, context=SSL_CTX) as response:
-                payload = response.read().decode()
+                # Bounded, like fetch_artwork already is. An unbounded read
+                # here trusts whatever answered to be reasonable about size,
+                # and the largest thing this asks for — a whole catalogue — is
+                # a few megabytes. Reading one byte past the cap is what tells
+                # the difference between "at the limit" and "over it".
+                raw = response.read(RESPONSE_MAX_BYTES + 1)
+                if len(raw) > RESPONSE_MAX_BYTES:
+                    raise ValueError(
+                        f"gateway sent more than {RESPONSE_MAX_BYTES} bytes")
+                payload = raw.decode()
                 self._auth_ok = True
                 return json.loads(payload) if payload else None
         except urllib.error.HTTPError as exc:
@@ -797,6 +812,13 @@ class Plugin:
         Sent in batches because the endpoint caps a change at 500 entries, and
         a bulk add is routinely larger than that.
         """
+        # The ARGUMENT before its contents. This list is built by the frontend
+        # out of a gateway response, so it is exactly as trustworthy as that
+        # response was — and `for g in None` is a TypeError out of a Decky
+        # callable, which surfaces as a dead panel with nothing to explain it.
+        if not isinstance(game_ids, (list, tuple, set)):
+            return {"ok": True, "removed": 0}
+
         # as_id, not a hand-rolled check: JSON promises nothing about types, so
         # an id arrives as an int here, a float from a language whose numbers
         # are all floats, and a string from a proxy that rewrote the body. That

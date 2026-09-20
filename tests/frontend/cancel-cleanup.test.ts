@@ -77,6 +77,20 @@ describe("what a cancelled run hands back", () => {
     expect(untiledFromRun(new Set(), desired, {})).toEqual([50]);
   });
 
+  it("survives rows that are not objects at all", () => {
+    // `desired` comes from the gateway through the plugin backend. It is
+    // validated on the way, but this function is called with the RAW list, so
+    // it must not throw on a null row — and must not turn one into a removal.
+    const desired = [null, undefined, 0, "x", [], { no: "id" }, game(70)] as never;
+    expect(untiledFromRun(new Set(), desired, {})).toEqual([70]);
+  });
+
+  it("survives desired not being a list", () => {
+    for (const junk of [null, undefined, 0, "x", {}] as never[]) {
+      expect(untiledFromRun(new Set(), junk, {})).toEqual([]);
+    }
+  });
+
   it("matches tracked ids across the string/number boundary", () => {
     // tracked is keyed by STRING in synced.json; desired carries numbers. A
     // comparison that missed that would hand back every tile it just made.

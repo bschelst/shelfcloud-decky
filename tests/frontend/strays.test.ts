@@ -73,6 +73,38 @@ const callbacks = () => ({
   forget: vi.fn(async () => {}),
 });
 
+describe("a malformed stray report", () => {
+  // This runs BEFORE the main loop's filtering, so anything that throws here
+  // throws out of the WHOLE sync and costs every tile, not just the bad row.
+  // The backend already applies the opposite rule to the library: one unusable
+  // entry is skipped and the rest still sync.
+  it.each([
+    ["not ok", { ok: false }],
+    ["no shortcuts field", { ok: true }],
+    ["shortcuts not a list", { ok: true, shortcuts: "nope" }],
+    ["a null row", { ok: true, shortcuts: [null] }],
+    ["a row that is a string", { ok: true, shortcuts: ["x"] }],
+    ["a row with no ids", { ok: true, shortcuts: [{}] }],
+    ["game_id not a number", { ok: true, shortcuts: [{ game_id: "1", keep: 2 }] }],
+    ["app_ids not a list", { ok: true, shortcuts: [{ game_id: 1, keep: 2, app_ids: 7 }] }],
+    ["the whole report null", null],
+    ["the report undefined", undefined],
+  ])("%s still syncs the library", async (_label, report) => {
+    vi.mocked(strayShortcuts).mockResolvedValue(report as never);
+
+    const result = await syncLibrary([GAME], {}, callbacks());
+
+    expect(result.added).toBe(1);
+    expect(result.failed).toBe(0);
+  });
+
+  it("survives the report throwing outright", async () => {
+    vi.mocked(strayShortcuts).mockRejectedValue(new Error("gateway down"));
+    const result = await syncLibrary([GAME], {}, callbacks());
+    expect(result.added).toBe(1);
+  });
+});
+
 describe("a game with two tiles", () => {
   it("removes the extra and keeps the tracked one", async () => {
     vi.mocked(strayShortcuts).mockResolvedValue({
