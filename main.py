@@ -54,11 +54,13 @@ IDLE_INSTALL = {
 REQUEST_TIMEOUT = 20
 SYNC_EVENT = "shelfcloud/library"
 
+# Must match backend/providers.py LAYOUT_GAMEPAD and LAYOUT_WEB_BROWSER.
 _LAYOUT_GAMEPAD = "template://controller_neptune_gamepad_fps.vdf"
 _LAYOUT_WEB_BROWSER = "template://controller_neptune_webbrowser.vdf"
 
 
 def _provider_default_layout(provider_key: str) -> Optional[str]:
+    """Fallback when the catalog row carries no per-game controller_layout."""
     if provider_key in weburl.WEBSITE_PROVIDERS:
         return _LAYOUT_WEB_BROWSER
     return _LAYOUT_GAMEPAD
