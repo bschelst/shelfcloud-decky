@@ -36,6 +36,15 @@ export const addOwnedGames = callable<[], AddOwnedResult>("add_owned_games");
 export const dropFromLibrary =
   callable<[game_ids: number[]], { ok: boolean; removed?: number; error?: string }>(
     "drop_from_library");
+/** Put games back, for a cancelled "remove all".
+ *
+ *  That run empties the library server-side first, so stopping the tile
+ *  deletions alone changes nothing that lasts — the survivors are no longer
+ *  wanted and the next sync takes them. Only tiles that still exist are
+ *  restored. */
+export const restoreToLibrary =
+  callable<[game_ids: number[]], { ok: boolean; restored?: number; error?: string }>(
+    "restore_to_library");
 export const syncSteamLibrary = callable<[], SteamLibraryResult>("sync_steam_library");
 export const getDesiredLibrary = callable<[], LibraryResponse>("get_desired_library");
 /** Artwork is downloaded by the Python backend, not the browser: inside Steam's

@@ -843,6 +843,37 @@ class Plugin:
             return {"ok": False, "error": str(exc), "removed": removed}
         return {"ok": True, "removed": removed}
 
+    async def restore_to_library(self, game_ids: List[int]) -> Dict[str, Any]:
+        """Put games back, for a cancelled "remove all".
+
+        That run empties the library server-side in one call and then deletes
+        the tiles one at a time. Stopping the deletions alone would change
+        nothing that lasts: the library is already empty, so every tile the
+        cancel saved is no longer wanted and the next sync removes it anyway.
+
+        So the games whose tiles survived are added back. Only those — a game
+        whose tile was already deleted is gone, and putting it back would
+        undo a deletion the person watched happen.
+        """
+        if not isinstance(game_ids, (list, tuple, set)):
+            return {"ok": True, "restored": 0}
+        ids = [value for value in (as_id(g) for g in game_ids) if value is not None]
+        if not ids:
+            return {"ok": True, "restored": 0}
+
+        restored = 0
+        try:
+            for start in range(0, len(ids), _LIBRARY_BATCH):
+                batch = [{"game_id": game_id} for game_id in ids[start:start + _LIBRARY_BATCH]]
+                result = await asyncio.to_thread(
+                    self._request, "/api/me/library", "POST", {"add": batch})
+                restored += int((result or {}).get("added") or 0)
+        except Exception as exc:
+            decky.logger.warning("Shelfcloud: could not restore %d games: %s",
+                                 len(ids), exc)
+            return {"ok": False, "error": str(exc), "restored": restored}
+        return {"ok": True, "restored": restored}
+
     async def sync_steam_library(self) -> Dict[str, Any]:
         """Re-read which games the user owns from Steam."""
         try:

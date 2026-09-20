@@ -18,6 +18,7 @@ import {
   clearLibrary,
   dismissInstall,
   dropFromLibrary,
+  restoreToLibrary,
   getDesiredLibrary,
   installBrowser,
   previewOwned,
@@ -390,8 +391,39 @@ async function doRemoveAll(): Promise<void> {
     const syncResult = await syncLibrary([], tracked, {
       record: recordShortcut,
       forget: forgetShortcut,
+      // Cancellable. Without this the button said "Stopping…" and went on
+      // deleting every remaining tile, because the stop was only ever checked
+      // in the ADD loop and this run has nothing to add.
+      shouldStop: cancelRequested,
     });
     await syncFinished(syncResult.added, syncResult.removed, syncResult.updated);
+
+    if (syncResult.cancelled) {
+      // Stopping the deletions is not enough on its own. The library was
+      // emptied server-side before any tile was touched, so every tile the
+      // cancel just saved is no longer wanted and the next sync would take
+      // it — the stop would have lasted about a minute. Put the survivors
+      // back, and only those: a game whose tile is already gone stays gone,
+      // because undoing a deletion somebody watched happen is worse than
+      // honouring it.
+      //
+      // Read back rather than reusing `tracked`: the removal loop tells the
+      // backend to forget each tile as it goes, but does not mutate the copy
+      // it was handed. Using that copy would restore the games whose tiles
+      // were successfully deleted — the exact opposite of honouring them.
+      const after = await getDesiredLibrary().catch(() => null);
+      const survivors = Object.keys(
+        (after?.ok && after.tracked && typeof after.tracked === "object")
+          ? after.tracked : {},
+      ).map(Number).filter((id) => Number.isInteger(id));
+
+      if (!survivors.length) return `Stopped — removed ${syncResult.removed}.`;
+      const kept = await restoreToLibrary(survivors).catch(() => null);
+      return kept?.ok
+        ? `Stopped — removed ${syncResult.removed}, kept ${survivors.length}.`
+        : `Stopped after ${syncResult.removed}, but the rest could not be kept.`;
+    }
+
     return syncResult.removed === 1
       ? "Removed 1 tile."
       : `Removed ${syncResult.removed} tiles.`;

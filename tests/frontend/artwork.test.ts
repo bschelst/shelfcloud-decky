@@ -293,6 +293,43 @@ describe("resilience", () => {
     expect(order[0]).toBe(2);
   });
 
+  it("stops DELETING when asked, which is the case cancel did nothing for", async () => {
+    // Reported as: press Remove all games, press Cancel, the button changes to
+    // "Stopping…" and every remaining tile is deleted anyway.
+    //
+    // The stop was checked in the ADD loop only. "Remove all games" passes an
+    // empty desired list, so the add loop has nothing to do and execution
+    // falls straight into the removal loop, which never asked.
+    const tracked = Object.fromEntries(
+      [1, 2, 3, 4, 5].map((id) => [String(id), {
+        app_id: 1000 + id, name: `Game ${id}`, launch: "", art: "",
+      }]),
+    );
+    let seen = 0;
+    const result = await syncLibrary([], tracked, {
+      ...callbacks(),
+      shouldStop: () => seen++ >= 2,      // allow two removals, then stop
+    });
+
+    expect(result.cancelled).toBe(true);
+    expect(result.removed).toBe(2);
+    expect(result.removed).toBeLessThan(Object.keys(tracked).length);
+  });
+
+  it("removes everything when nothing asks it to stop", async () => {
+    const tracked = Object.fromEntries(
+      [1, 2, 3].map((id) => [String(id), {
+        app_id: 2000 + id, name: `Game ${id}`, launch: "", art: "",
+      }]),
+    );
+    const result = await syncLibrary([], tracked, {
+      ...callbacks(),
+      shouldStop: () => false,
+    });
+    expect(result.cancelled).toBeFalsy();
+    expect(result.removed).toBe(3);
+  });
+
   it("runs to the end when nothing asks it to stop", async () => {
     const games = [GAME, { ...GAME, game_id: 2 }];
     const result = await syncLibrary(games, {}, {

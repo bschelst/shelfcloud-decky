@@ -660,6 +660,15 @@ export async function syncLibrary(
 
   for (const [gameId, entry] of Object.entries(tracked)) {
     if (desiredIds.has(Number(gameId))) continue;
+    // Removals are cancellable too. The check used to be on the ADD loop
+    // alone, which made Cancel do nothing at all during "Remove all games":
+    // that run passes an empty desired list, so the add loop has nothing to
+    // do and execution falls straight into this one. The button said
+    // "Stopping…" and every remaining tile was deleted anyway.
+    if (callbacks.shouldStop?.()) {
+      result.cancelled = true;
+      break;
+    }
     try {
       step("Removing", entry.name);
       try {
