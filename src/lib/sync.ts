@@ -735,6 +735,13 @@ export async function syncLibrary(
         // while the rest of the sync is still running.
         if (pending.length >= COLLECTION_BATCH) await flushCollections();
       } else {
+        // Ensure existing tiles have their controller layout registered.
+        // installControllerLayout is idempotent — it skips if already done.
+        if (game.controller_layout) {
+          try { await installControllerLayout(title, game.controller_layout); }
+          catch { /* best effort */ }
+        }
+
         const launchChanged = existing.launch !== game.options || existing.name !== title;
         // Artwork is compared separately: the gateway resolves better art over
         // time, and a tile whose launch command never changes must still pick
