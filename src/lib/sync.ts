@@ -222,6 +222,54 @@ async function clearArtwork(appId: number): Promise<void> {
   }
 }
 
+/**
+ * Find the Deck's built-in controller index (type 4 = SteamControllerNeptune).
+ * Returns null if not found. moonlight-steam-sync-decky probe confirmed
+ * the index is NOT always 0.
+ */
+function deckControllerIndex(): number | null {
+  try {
+    const store = (window as any).ControllerStore ?? (window as any).controllerStore;
+    const controllers: any[] = store?.GetControllers?.() ?? [];
+    for (const c of controllers) {
+      if (c?.eControllerType === 4) return c.nControllerIndex;
+    }
+    return controllers.length === 1 ? controllers[0]?.nControllerIndex ?? 0 : 0;
+  } catch { return 0; }
+}
+
+/**
+ * Wait for Steam to know this app exists, then set its controller config.
+ * moonlight-steam-sync probe V2: 5th arg must be 1 (CONFIG_SELECTION_USER),
+ * and the app must be in appStore before the call sticks.
+ */
+function applyControllerConfig(appId: number, templateUrl: string): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const input = (SteamClient as any).Input;
+    const set = input?.SetSelectedConfigForApp;
+    if (typeof set !== "function") { resolve(); return; }
+
+    const idx = deckControllerIndex() ?? 0;
+
+    const tryApply = (attempt: number) => {
+      const store = (window as any).appStore;
+      const loaded = !!store?.GetAppOverviewByAppID?.(appId);
+      if (loaded || attempt >= 10) {
+        try {
+          set.call(input, appId, idx, templateUrl, false, 1);
+          console.warn(`[shelfcloud] controller: applied ${templateUrl} to ${appId} idx=${idx} attempt=${attempt} loaded=${loaded}`);
+        } catch (e: any) {
+          console.error("[shelfcloud] controller: SetSelectedConfigForApp failed:", e?.message || e);
+        }
+        resolve();
+      } else {
+        setTimeout(() => tryApply(attempt + 1), 500);
+      }
+    };
+    tryApply(0);
+  });
+}
+
 async function applyArtwork(appId: number, game: DesiredGame): Promise<ArtworkOutcome> {
   let applied = 0;
 
@@ -668,13 +716,10 @@ export async function syncLibrary(
         SteamClient.Apps.SetShortcutLaunchOptions(appId, game.options);
 
         if (game.controller_layout) {
-          try {
-            await installControllerLayout(title, game.controller_layout);
-            const set = (SteamClient as any).Input?.SetSelectedConfigForApp;
-            if (typeof set === "function") {
-              set.call((SteamClient as any).Input, appId, 0, game.controller_layout, false, 1);
-            }
-          } catch { /* not fatal */ }
+          try { await installControllerLayout(title, game.controller_layout); }
+          catch { /* VDF copy best-effort */ }
+          try { await applyControllerConfig(appId, game.controller_layout); }
+          catch { /* not fatal */ }
         }
 
         // Record the fingerprint only once the VISIBLE slot went on. It used to
