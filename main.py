@@ -1170,6 +1170,45 @@ class Plugin:
             return {"ok": False, "error": str(exc)}
         return {"ok": True, "path": path}
 
+    async def install_controller_layout(self, app_id: int,
+                                        template_url: str) -> Dict:
+        """Copy a Steam Input template into the per-game config directory.
+
+        SetSelectedConfigForApp alone does not persist for non-Steam shortcuts.
+        The VDF file must also exist in the per-game slot. DeckDock confirmed
+        this empirically; without the file, Steam falls back to its default.
+        """
+        try:
+            app_id = int(app_id)
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "bad app_id"}
+        if not isinstance(template_url, str) or not template_url.startswith("template://"):
+            return {"ok": False, "error": "not a template:// URL"}
+
+        filename = template_url.removeprefix("template://")
+        steam_root = os.path.expanduser("~/.steam/steam")
+        source = os.path.join(steam_root, "controller_base", "templates", filename)
+        if not os.path.isfile(source):
+            return {"ok": False, "error": f"template not found: {filename}"}
+
+        userdata = os.path.join(steam_root, "userdata")
+        installed = 0
+        for user_dir in os.listdir(userdata):
+            if not user_dir.isdigit():
+                continue
+            dest_dir = os.path.join(
+                steam_root, "steamapps", "common", "Steam Controller Configs",
+                user_dir, "config", str(app_id))
+            os.makedirs(dest_dir, exist_ok=True)
+            dest = os.path.join(dest_dir, "controller_neptune.vdf")
+            try:
+                import shutil
+                shutil.copy2(source, dest)
+                installed += 1
+            except OSError as exc:
+                decky.logger.warning("controller layout copy failed: %s", exc)
+        return {"ok": installed > 0, "installed": installed}
+
     async def sync_finished(self, added: int, removed: int, updated: int) -> Dict:
         self._last_sync = asyncio.get_event_loop().time()
         decky.logger.info("Sync: +%d -%d ~%d (tracked=%d)",

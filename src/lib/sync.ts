@@ -5,7 +5,7 @@
 // This lives on the frontend because only here does SteamClient exist. The
 // backend decides *what* the library should contain; this makes it so.
 
-import { fetchArtwork, saveIcon, strayShortcuts } from "./api";
+import { fetchArtwork, installControllerLayout, saveIcon, strayShortcuts } from "./api";
 import { addToProviderCollections, pruneProviderCollections,
          removeRetiredCollections, type CollectionMember } from "./collection";
 import { renderPageCapsule } from "./pagecapsule";
@@ -669,6 +669,7 @@ export async function syncLibrary(
 
         if (game.controller_layout) {
           try {
+            await installControllerLayout(appId, game.controller_layout);
             (SteamClient as any).Input.SetSelectedConfigForApp(
               appId, 0, game.controller_layout, false, 0,
             );
