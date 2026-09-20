@@ -29,6 +29,10 @@ export interface DesiredGame {
   /** The same slots served back through the gateway, for art whose own host
    *  sends no CORS header and so cannot be fetched from inside Steam. */
   artwork_proxy?: Artwork;
+  /** Steam Input template URL to apply on first install, so the Deck's
+   *  controls match what the tile opens. Resolved server-side: per-game
+   *  override > provider default > null (leave Steam's own default). */
+  controller_layout?: string | null;
 }
 
 /** A shortcut this plugin created, so it can be updated or removed later. */

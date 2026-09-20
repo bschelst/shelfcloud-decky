@@ -667,6 +667,16 @@ export async function syncLibrary(
         SteamClient.Apps.SetShortcutStartDir(appId, START_DIR);
         SteamClient.Apps.SetShortcutLaunchOptions(appId, game.options);
 
+        if (game.controller_layout) {
+          try {
+            await (SteamClient as any).Input.SetSelectedConfigForApp(
+              appId, 0, game.controller_layout, false,
+            );
+          } catch {
+            // Not fatal — the game still plays, just with Steam's default layout.
+          }
+        }
+
         // Record the fingerprint only once the VISIBLE slot went on. It used to
         // be stored whenever any slot did, so a game whose capsule failed but
         // whose hero and logo succeeded counted as done — a blank tile with a

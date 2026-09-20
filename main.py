@@ -686,6 +686,7 @@ class Plugin:
             "options": options,
             "artwork": self._artwork(game),
             "artwork_proxy": self._artwork_proxy(game),
+            "controller_layout": provider.get("controller_layout"),
         }
 
     async def get_website_launch(self) -> Optional[Dict[str, str]]:
