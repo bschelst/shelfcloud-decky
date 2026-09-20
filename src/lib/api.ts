@@ -27,6 +27,15 @@ export const logout = callable<[], { ok: boolean }>("logout");
 export const clearLibrary = callable<[], { ok: boolean; removed?: number; error?: string }>("clear_library");
 export const previewOwned = callable<[], OwnedPreview>("preview_owned");
 export const addOwnedGames = callable<[], AddOwnedResult>("add_owned_games");
+/** Take games back out of the library, for a cancelled bulk add.
+ *
+ *  Cancel means "stop, and forget the rest": the bulk add put every owned game
+ *  in the library in one call, so stopping the tiles alone left them all there
+ *  to appear on the next sync. Only games that run added and never tiled are
+ *  ever passed here. */
+export const dropFromLibrary =
+  callable<[game_ids: number[]], { ok: boolean; removed?: number; error?: string }>(
+    "drop_from_library");
 export const syncSteamLibrary = callable<[], SteamLibraryResult>("sync_steam_library");
 export const getDesiredLibrary = callable<[], LibraryResponse>("get_desired_library");
 /** Artwork is downloaded by the Python backend, not the browser: inside Steam's

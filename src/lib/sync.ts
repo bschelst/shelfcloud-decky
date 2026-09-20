@@ -17,6 +17,43 @@ import { providerLabel, WEBSITE_PROVIDERS, type DesiredGame, type SyncResult, ty
  * identical name — two "Cyberpunk 2077" entries with no way to tell which
  * streams and which is installed locally.
  */
+/**
+ * Which games a cancelled bulk add should hand back.
+ *
+ * Cancel means "stop, and forget the rest". "Add all my games" puts every
+ * owned game into the library in ONE server call and then builds tiles one at
+ * a time, so cancelling the tiles alone left the library holding hundreds of
+ * games that simply appeared on the next sync — the cancel stopped that run
+ * and changed nothing that lasted.
+ *
+ * Pure, and separated from the code that performs the removal, because this is
+ * the part that decides what gets DELETED. Three conditions, all required:
+ *
+ *   - absent from `before`, so this run is what added it. A game the person
+ *     chose last week is not this run's to take away.
+ *   - untracked, so no tile was made for it. Anything tiled is a thing they
+ *     can now see and was completed.
+ *   - not a web page. Those are mandatory or hand-typed, exempt from the
+ *     cancel in the first place, and must never be removed by one.
+ *
+ * `before === null` means the library could not be read, and yields nothing:
+ * with no way to tell old from new, the safe answer is to remove none rather
+ * than guess and take away somebody's library.
+ */
+export function untiledFromRun(
+  before: Set<number> | null,
+  desired: Array<{ game_id: number; provider?: string }>,
+  tracked: Record<string, unknown>,
+): number[] {
+  if (!before) return [];
+  return desired
+    .filter((game) => !WEBSITE_PROVIDERS.has(String(game.provider ?? "")))
+    .map((game) => Number(game.game_id))
+    .filter((id) => Number.isInteger(id)
+      && !before.has(id)
+      && !(String(id) in tracked));
+}
+
 export function shortcutTitle(game: DesiredGame): string {
   // A web page carries no suffix. The suffix exists to separate a streamed
   // copy of a game from an installed one under the same name, and a page has

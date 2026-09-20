@@ -62,6 +62,11 @@ ARTWORK_USER_AGENT = (
     f"Shelfcloud/0.1 ({_hardware_label()}; +https://github.com/bschelst/shelfcloud)")
 ARTWORK_MAX_BYTES = 8 * 1024 * 1024
 
+# How many library entries one change may carry. The gateway refuses more than
+# 500, and a cancelled bulk add is routinely larger than that, so the caller
+# splits rather than losing the tail to a 422.
+_LIBRARY_BATCH = 200
+
 # How often to re-confirm the token with the gateway. Short enough that a
 # revoked session is noticed quickly, long enough not to be chatty.
 AUTH_RECHECK_SECONDS = 60
@@ -776,6 +781,45 @@ class Plugin:
             return {"ok": True, **result}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
+
+    async def drop_from_library(self, game_ids: List[int]) -> Dict[str, Any]:
+        """Take games back out of the library, for a cancelled bulk add.
+
+        "Add all my games" adds every owned game server-side in ONE call and
+        then makes the tiles one at a time. Cancelling stops the tiles, which
+        left the library holding hundreds of games that would simply appear on
+        the next sync — so the cancel undid nothing that lasted.
+
+        Removing them makes cancel mean what it says. Only games this run added
+        and never tiled are passed in; anything already on the shelf is the
+        person's own choice and is not touched.
+
+        Sent in batches because the endpoint caps a change at 500 entries, and
+        a bulk add is routinely larger than that.
+        """
+        # as_id, not a hand-rolled check: JSON promises nothing about types, so
+        # an id arrives as an int here, a float from a language whose numbers
+        # are all floats, and a string from a proxy that rewrote the body. That
+        # conversion already exists and already rejects bool, which is a
+        # subclass of int and would otherwise become the id 1 — a real game.
+        ids = [value for value in (as_id(g) for g in game_ids) if value is not None]
+        if not ids:
+            return {"ok": True, "removed": 0}
+
+        removed = 0
+        try:
+            for start in range(0, len(ids), _LIBRARY_BATCH):
+                batch = ids[start:start + _LIBRARY_BATCH]
+                result = await asyncio.to_thread(
+                    self._request, "/api/me/library", "POST", {"remove": batch})
+                removed += int(result.get("removed") or 0)
+        except Exception as exc:
+            # Best effort. The tiles are already correct; this is tidying the
+            # library behind them, and failing it must not fail the sync.
+            decky.logger.warning("Shelfcloud: could not drop %d games: %s",
+                                 len(ids), exc)
+            return {"ok": False, "error": str(exc), "removed": removed}
+        return {"ok": True, "removed": removed}
 
     async def sync_steam_library(self) -> Dict[str, Any]:
         """Re-read which games the user owns from Steam."""

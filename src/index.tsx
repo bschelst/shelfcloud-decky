@@ -17,6 +17,7 @@ import {
   addOwnedGames,
   clearLibrary,
   dismissInstall,
+  dropFromLibrary,
   getDesiredLibrary,
   installBrowser,
   previewOwned,
@@ -32,7 +33,7 @@ import {
   syncFinished,
   applyOverrides,
 } from "./lib/api";
-import { syncLibrary } from "./lib/sync";
+import { syncLibrary, untiledFromRun } from "./lib/sync";
 import { changeSummary, syncSummary } from "./lib/summary";
 import { LibrarySummary } from "./components/LibrarySummary";
 import { Logo, LogoMono, NotificationLogo } from "./components/Logo";
@@ -234,7 +235,7 @@ async function performSync(onProgress?: (message: string) => void): Promise<Sync
  * At module scope, not inside the component, for the same reason the store is:
  * this must keep running and keep reporting while the panel is closed.
  */
-async function doSync(quiet = false): Promise<void> {
+async function doSync(quiet = false): Promise<boolean> {
   setJob({ busy: true });
   try {
     const { result, total, skipped } = await runSync((line) => {
@@ -250,10 +251,16 @@ async function doSync(quiet = false): Promise<void> {
     finishJob(syncSummary(total, result, skipped));
     if (!quiet) toaster.toast({ title: "Shelfcloud", body: changeSummary(result),
                                logo: <NotificationLogo /> });
+    // Reported back so "add all my games" can tell a run that STOPPED from one
+    // that finished, and tidy up the games it never reached.
+    return Boolean(result.cancelled);
   } catch (error) {
     finishJob(String(error));
     if (!quiet) toaster.toast({ title: "Sync failed", body: String(error),
                                logo: <NotificationLogo /> });
+    // A failure is not a cancel: the library is left exactly as it is so the
+    // next sync can finish the job.
+    return false;
   }
 }
 
@@ -267,6 +274,54 @@ async function doSync(quiet = false): Promise<void> {
  */
 let addOwnedInFlight: Promise<void> | null = null;
 
+/** Every game id currently in the account's library, or null if unreadable.
+ *
+ * null rather than an empty set, deliberately: "the library is empty" and "we
+ * could not read it" must not be the same value, because the caller subtracts
+ * this from a later reading and an empty set would make every game look newly
+ * added and eligible for removal.
+ */
+async function libraryGameIds(): Promise<Set<number> | null> {
+  try {
+    const library = await getDesiredLibrary();
+    if (!library.ok || !Array.isArray(library.desired)) return null;
+    return new Set(library.desired.map((g) => Number(g.game_id)));
+  } catch {
+    return null;
+  }
+}
+
+/** After a cancelled bulk add: take back the games it added but never tiled.
+ *
+ * Cancel means "stop, and forget the rest". Without this the library still
+ * held every owned game and the next sync simply created them all, so the
+ * cancel stopped that one run and changed nothing that lasted.
+ *
+ * Three conditions, all required, because this REMOVES things:
+ *   - not in the library before this run started, so it was added by it
+ *   - has no tile, so the run never reached it
+ *   - not a web page, which is mandatory and exempt from cancel anyway
+ */
+async function forgetUntiled(before: Set<number> | null): Promise<void> {
+  if (!before) return;          // could not read the library; change nothing
+  try {
+    const library = await getDesiredLibrary();
+    if (!library.ok || !Array.isArray(library.desired)) return;
+    const tracked = (library.tracked && typeof library.tracked === "object")
+      ? library.tracked : {};
+
+    const drop = untiledFromRun(before, library.desired, tracked);
+    if (!drop.length) return;
+    setJob({ message: `Stopped. Putting back ${drop.length} games…` });
+    const result = await dropFromLibrary(drop);
+    finishJob(result?.ok
+      ? `Stopped — kept what was added, put back ${drop.length}.`
+      : "Stopped — some games could not be put back.");
+  } catch (error) {
+    console.error("[shelfcloud] could not tidy a cancelled add", error);
+  }
+}
+
 async function doAddOwned(): Promise<void> {
   if (addOwnedInFlight) return addOwnedInFlight;
 
@@ -279,6 +334,11 @@ async function doAddOwned(): Promise<void> {
         return;
       }
 
+      // What was already in the library BEFORE the bulk add. Taken first so a
+      // cancel can tell the games this run added from the ones that were
+      // already the person's choice — only the former may be taken away again.
+      const beforeAdd = await libraryGameIds();
+
       setJob({ message: `You own ${steam.owned} Steam games. Adding the cloud ones…` });
       const result = await addOwnedGames();
       if (!result.ok) {
@@ -287,7 +347,8 @@ async function doAddOwned(): Promise<void> {
       }
 
       setJob({ message: `Added ${result.added} games. Syncing to your library…` });
-      await doSync(true);
+      const stopped = await doSync(true);
+      if (stopped) await forgetUntiled(beforeAdd);
     } catch (error) {
       finishJob(String(error));
     }
