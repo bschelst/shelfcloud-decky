@@ -23,6 +23,12 @@
 // The layout is separated from the drawing on purpose: a canvas cannot be
 // exercised in this test suite, but the arithmetic that decides where the
 // words go and whether they fit can be, and that is where the bugs are.
+//
+// The capsule next door is drawn the same way, from the same fitting code —
+// see pagecapsule.ts.
+
+import { INK, loadImage, toPng, type Png, type SourceImage } from "./canvas";
+import { fitText, tidyName } from "./textfit";
 
 /** Steam's logo canvas. Matches the tiles the gateway ships. */
 export const LOGO_W = 640;
@@ -32,6 +38,7 @@ export const LOGO_H = 360;
 const MARK_BOX = 150;          // the square the mark is drawn into
 const GAP = 26;                // between mark and text
 const EDGE = 34;               // canvas margin
+const LINE = 1.16;             // line height, as a multiple of the type size
 
 /** Type sizes, largest first. The first that fits is used. */
 const SIZES = [64, 56, 48, 42, 36, 30, 26, 22];
@@ -61,81 +68,17 @@ export function logoLayout(
   name: string,
   measure: (text: string, size: number) => number,
 ): LogoLayout {
-  const clean = (name ?? "").replace(/\s+/g, " ").trim();
   const textLeft = EDGE + MARK_BOX + GAP;
   const textWidth = LOGO_W - textLeft - EDGE;
   const mark = { x: EDGE, y: (LOGO_H - MARK_BOX) / 2, size: MARK_BOX };
 
-  if (!clean) return { size: SIZES[SIZES.length - 1], lines: [], textLeft, textWidth, mark };
-
-  for (const size of SIZES) {
-    const lines = wrap(clean, textWidth, size, measure);
-    if (lines && lines.length <= MAX_LINES) {
-      return { size, lines, textLeft, textWidth, mark };
-    }
-  }
-
-  // Nothing fit even at the smallest size — one very long unbroken word, or a
-  // name in a script this font sets wide. Truncate rather than overflow: a
-  // logo that runs off the canvas is worse than one that trails off, because
-  // Steam gives it no room to spill into.
-  const smallest = SIZES[SIZES.length - 1];
-  return {
-    size: smallest,
-    lines: [ellipsise(clean, textWidth, smallest, measure)],
-    textLeft,
-    textWidth,
-    mark,
-  };
+  const fitted = fitText(
+    tidyName(name),
+    { width: textWidth, sizes: SIZES, maxLines: MAX_LINES },
+    measure,
+  );
+  return { size: fitted.size, lines: fitted.lines, textLeft, textWidth, mark };
 }
-
-/** Break `text` into at most MAX_LINES that each fit, or null if impossible. */
-function wrap(
-  text: string,
-  width: number,
-  size: number,
-  measure: (text: string, size: number) => number,
-): string[] | null {
-  if (measure(text, size) <= width) return [text];
-
-  const words = text.split(" ");
-  if (words.length < 2) return null;            // one word, cannot be broken
-
-  const lines: string[] = [];
-  let current = "";
-  for (const word of words) {
-    const candidate = current ? `${current} ${word}` : word;
-    if (measure(candidate, size) <= width) {
-      current = candidate;
-      continue;
-    }
-    if (current) lines.push(current);
-    // A single word wider than the column cannot be placed at this size.
-    if (measure(word, size) > width) return null;
-    current = word;
-    if (lines.length >= MAX_LINES) return null;
-  }
-  if (current) lines.push(current);
-  return lines.length <= MAX_LINES ? lines : null;
-}
-
-/** Cut `text` down until it fits, with an ellipsis. */
-export function ellipsise(
-  text: string,
-  width: number,
-  size: number,
-  measure: (text: string, size: number) => number,
-): string {
-  if (measure(text, size) <= width) return text;
-  let cut = text;
-  while (cut.length > 1 && measure(`${cut}…`, size) > width) {
-    cut = cut.slice(0, -1);
-  }
-  return `${cut.trimEnd()}…`;
-}
-
-/** Colours, matching the wordmark the gateway ships. */
-const INK = "#e6e8eb";
 
 /**
  * Draw the logo and return it as base64 PNG, or undefined if this environment
@@ -146,8 +89,8 @@ const INK = "#e6e8eb";
  */
 export async function renderPageLogo(
   name: string,
-  markPng?: { data: string; kind: "png" | "jpg" },
-): Promise<{ data: string; kind: "png" } | undefined> {
+  markPng?: SourceImage,
+): Promise<Png | undefined> {
   try {
     const canvas = document.createElement("canvas");
     canvas.width = LOGO_W;
@@ -174,7 +117,7 @@ export async function renderPageLogo(
     context.font = face.replace("{size}", String(layout.size));
     context.fillStyle = INK;
     context.textBaseline = "middle";
-    const lineHeight = layout.size * 1.16;
+    const lineHeight = layout.size * LINE;
     const block = (layout.lines.length - 1) * lineHeight;
     let y = LOGO_H / 2 - block / 2;
     for (const line of layout.lines) {
@@ -182,22 +125,10 @@ export async function renderPageLogo(
       y += lineHeight;
     }
 
-    const url = canvas.toDataURL("image/png");
-    const comma = url.indexOf(",");
-    if (comma < 0) return undefined;
-    return { data: url.slice(comma + 1), kind: "png" };
+    return toPng(canvas);
   } catch {
     // Drawing is a nicety. A tile with no logo shows its name as text, which
     // is the outcome this is trying to produce anyway.
     return undefined;
   }
-}
-
-function loadImage(src: string): Promise<HTMLImageElement | null> {
-  return new Promise((resolve) => {
-    const image = new Image();
-    image.onload = () => resolve(image);
-    image.onerror = () => resolve(null);
-    image.src = src;
-  });
 }

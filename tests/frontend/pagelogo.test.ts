@@ -16,7 +16,8 @@
 
 import { describe, expect, it } from "vitest";
 
-import { ellipsise, logoLayout, LOGO_W, LOGO_H } from "../../src/lib/pagelogo";
+import { logoLayout, LOGO_W, LOGO_H } from "../../src/lib/pagelogo";
+import { ellipsise } from "../../src/lib/textfit";
 
 /** A predictable stand-in for canvas text measurement: every glyph is 0.55em.
  *  Not a real font, and it does not need to be — what is under test is the

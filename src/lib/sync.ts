@@ -8,6 +8,7 @@
 import { fetchArtwork, saveIcon, strayShortcuts } from "./api";
 import { addToProviderCollections, pruneProviderCollections,
          type CollectionMember } from "./collection";
+import { renderPageCapsule } from "./pagecapsule";
 import { renderPageLogo } from "./pagelogo";
 import { providerLabel, WEBSITE_PROVIDERS, type DesiredGame, type SyncResult, type TrackedShortcut } from "./types";
 
@@ -251,7 +252,32 @@ async function applyArtwork(appId: number, game: DesiredGame): Promise<ArtworkOu
   const iconFetch = fetchSlot(game, "icon");
 
   const capsule = await fetchSlot(game, visibleSlot);
-  const capsuleWentOn = await applySlot(capsule, visibleType);
+
+  // A website tile's capsule is drawn here, with its own name on it.
+  //
+  // The gateway ships ONE capsule and every website tile gets it: our cloud,
+  // centred, on navy, with no words on it anywhere. A single page like that is
+  // fine; a shelf of them is a wall of identical squares, and the only way to
+  // tell which is which is to move the cursor onto one and read the title
+  // Steam prints somewhere else. The published page has exactly the same
+  // problem as a page somebody added, so both providers are covered.
+  //
+  // Drawn from the ICON and nothing else. The icon is the 256px square mark,
+  // which is what a mark drawn into a square wants. The capsule is not a
+  // substitute for it: it is 600x900 with the cloud already centred in it and
+  // navy all round, so squeezing that into the square would give a squashed
+  // cloud in a box — worse than the plain tile this replaces. Without an icon
+  // the gateway's own capsule stays, which is what the tile had before.
+  let visibleImage = capsule;
+  if (WEBSITE_PROVIDERS.has(game.provider)) {
+    const mark = await iconFetch;
+    if (mark) {
+      const drawn = await renderPageCapsule(game.name, mark);
+      if (drawn) visibleImage = drawn;
+    }
+  }
+
+  const capsuleWentOn = await applySlot(visibleImage, visibleType);
 
   // Whether the tile the user actually looks at got its picture.
   //
@@ -475,6 +501,27 @@ export interface SyncCallbacks {
 const ART_REVISION = "7";
 
 /**
+ * Bump when what this plugin DRAWS for a website tile changes.
+ *
+ * Deliberately separate from ART_REVISION. That one sits in every tile's
+ * fingerprint, so moving it re-downloads artwork for the entire library —
+ * hundreds of games, four slots each, several minutes of syncing — in order to
+ * reach a handful of website tiles. This one is only mixed in for a website
+ * tile, so it reaches exactly the tiles whose picture changed and leaves the
+ * games alone.
+ *
+ * It is APPENDED to the first field rather than added as a new one. A new
+ * field would change the shape of the string for every game as well, which is
+ * the whole thing being avoided.
+ *
+ * 0 -> 1: the capsule is now drawn here with the page's name on it. The
+ *         gateway still serves the same nameless capsule at the same URL, so
+ *         nothing else in the fingerprint moved and every website tile already
+ *         on a shelf would have kept the blank one.
+ */
+const WEBSITE_ART_REVISION = "w1";
+
+/**
  * A fingerprint of the artwork a tile currently carries.
  *
  * Stored alongside the shortcut so sync can tell when the gateway has resolved
@@ -484,7 +531,8 @@ const ART_REVISION = "7";
  */
 export function artworkFingerprint(game: DesiredGame): string {
   const a = game.artwork ?? {};
-  return [ART_REVISION, a.capsule ?? "", a.header ?? "", a.hero ?? "",
+  const drawn = WEBSITE_PROVIDERS.has(game.provider) ? WEBSITE_ART_REVISION : "";
+  return [ART_REVISION + drawn, a.capsule ?? "", a.header ?? "", a.hero ?? "",
           a.logo ?? "", a.icon ?? ""].join("|");
 }
 
