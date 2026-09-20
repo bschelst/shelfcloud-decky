@@ -24,7 +24,8 @@ vi.mock("../../src/lib/collection", () => ({
   pruneProviderCollections: vi.fn(async () => []),
 }));
 
-const { addToProviderCollections } = await import("../../src/lib/collection");
+const { addToProviderCollections, pruneProviderCollections } =
+  await import("../../src/lib/collection");
 
 const BATCH = 12;
 
@@ -130,5 +131,28 @@ describe("grouping", () => {
       .flatMap(([members]) => members.map((m) => m.provider));
     expect(providers.filter((p) => p === "geforce_now")).toHaveLength(2);
     expect(providers.filter((p) => p === "boosteroid")).toHaveLength(2);
+  });
+});
+
+describe("a cancelled run does not re-sort the library", () => {
+  it("skips the prune, because a slice cannot answer what belongs", async () => {
+    // pruneProviderCollections asks each collection "what should be in you"
+    // and answers from what THIS run filed — which is why its own docstring
+    // says the members must be the whole sync. A cancelled run filed only the
+    // part it reached, so pruning on one takes every tile it never got to out
+    // of its collection: a cancel quietly undoing the sorting already done.
+    let seen = 0;
+    const result = await syncLibrary(games(6, "geforce_now"), {}, {
+      ...callbacks(),
+      shouldStop: () => seen++ >= 2,
+    });
+
+    expect(result.cancelled).toBe(true);
+    expect(vi.mocked(pruneProviderCollections)).not.toHaveBeenCalled();
+  });
+
+  it("still prunes when the run finishes", async () => {
+    await syncLibrary(games(2, "geforce_now"), {}, callbacks());
+    expect(vi.mocked(pruneProviderCollections)).toHaveBeenCalled();
   });
 });

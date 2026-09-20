@@ -113,7 +113,8 @@ def test_uninstall_deletes_only_our_own_icons(grid, tmp_path):
     settings.mkdir()
 
     plugin = main.Plugin()
-    plugin._synced = {"23101": {"game_id": 23101, "app_id": 2250922664}}
+    plugin._synced = {"23101": {"app_id": 2250922664, "name": "X",
+                                "launch": "", "art": "", "provider": "shelfcloud"}}
 
     with mock.patch.object(main, "_icon_dir", return_value=str(folder)), \
          mock.patch.object(main, "_settings_icon_dir", return_value=str(settings)):
@@ -125,13 +126,60 @@ def test_uninstall_deletes_only_our_own_icons(grid, tmp_path):
             f"{name} belongs to Steam or another shortcut and must survive")
 
 
+def test_uninstall_passes_the_real_game_id(grid, tmp_path):
+    """The game id is the KEY of the tracked map, not a field in it.
+
+    A tracked entry holds app_id, name, launch, art, provider and url — so
+    `entry.get("game_id")` is always None and the legacy half of the cleanup
+    silently does nothing.
+
+    Asserted on the CALL rather than on the files, deliberately. Checking the
+    files cannot see this: uninstall also empties the settings directory
+    wholesale, so a legacy icon disappears either way and the first version of
+    this test passed with the bug reintroduced.
+    """
+    folder, _ = grid
+    settings = tmp_path / "settings-icons"
+    settings.mkdir()
+
+    plugin = main.Plugin()
+    plugin._synced = {"23101": {"app_id": 2250922664, "name": "X",
+                                "launch": "", "art": "", "provider": "shelfcloud"}}
+
+    seen = []
+    with mock.patch.object(main, "_icon_dir", return_value=str(folder)), \
+         mock.patch.object(main, "_settings_icon_dir", return_value=str(settings)), \
+         mock.patch.object(main.Plugin, "_remove_icon_files",
+                           staticmethod(lambda g, a: seen.append((g, a)))):
+        asyncio.run(plugin._uninstall())
+
+    assert seen == [("23101", 2250922664)], (
+        "uninstall must pass the map's key as the game id")
+
+
+def test_remove_icon_files_clears_both_naming_schemes(grid, tmp_path):
+    """What that game id is FOR: an icon written by an earlier version sits
+    under the game-id name, and only a real game id finds it."""
+    folder, _ = grid
+    (folder / "23101.png").write_bytes(b"written by an older version")
+
+    with mock.patch.object(main, "_icon_dir", return_value=str(folder)), \
+         mock.patch.object(main, "_settings_icon_dir", return_value=str(folder)):
+        main.Plugin._remove_icon_files(23101, 2250922664)
+
+    assert not (folder / "23101.png").exists(), "the legacy name survived"
+    assert not (folder / "2250922664_icon.png").exists()
+    assert (folder / "570.png").exists(), "Steam's own artwork is untouched"
+
+
 def test_removing_one_tile_takes_only_that_tile_s_icon(grid, tmp_path):
     folder, steams = grid
     settings = tmp_path / "settings-icons"
     settings.mkdir()
 
     plugin = main.Plugin()
-    plugin._synced = {"23101": {"game_id": 23101, "app_id": 2250922664}}
+    plugin._synced = {"23101": {"app_id": 2250922664, "name": "X",
+                                "launch": "", "art": "", "provider": "shelfcloud"}}
     plugin._save_state = mock.AsyncMock()
 
     with mock.patch.object(main, "_icon_dir", return_value=str(folder)), \

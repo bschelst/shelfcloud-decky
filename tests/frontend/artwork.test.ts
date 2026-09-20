@@ -256,6 +256,43 @@ describe("resilience", () => {
     expect(result.failed).toBe(0);
   });
 
+  it("a cancel never drops the mandatory page, however early it comes", async () => {
+    // Cancelling "add all my games" means "stop the bulk", not "stop at
+    // whatever the loop happened to reach". The published page is pushed to
+    // every account and custom pages were typed in by hand, so they are done
+    // first AND exempt — a cancel aimed at three hundred owned games must not
+    // cost the handful that were deliberate.
+    const games = [
+      { ...GAME, game_id: 1, provider: "boosteroid" },
+      { ...GAME, game_id: 2, provider: "geforce_now" },
+      { ...GAME, game_id: 3, provider: "shelfcloud" },   // pushed, last in the list
+      { ...GAME, game_id: 4, provider: "custom" },       // hand-added page
+    ];
+
+    const result = await syncLibrary(games, {}, {
+      ...callbacks(),
+      shouldStop: () => true,              // cancelled before anything starts
+    });
+
+    // Both pages went on; neither cloud game did.
+    expect(result.added).toBe(2);
+    expect(result.cancelled).toBe(true);
+  });
+
+  it("does the pages FIRST, so progress shows them before the bulk", async () => {
+    const order: number[] = [];
+    const games = [
+      { ...GAME, game_id: 1, provider: "boosteroid" },
+      { ...GAME, game_id: 2, provider: "shelfcloud" },
+      { ...GAME, game_id: 3, provider: "geforce_now" },
+    ];
+    await syncLibrary(games, {}, {
+      ...callbacks(),
+      record: async (gameId: number) => { order.push(gameId); },
+    });
+    expect(order[0]).toBe(2);
+  });
+
   it("runs to the end when nothing asks it to stop", async () => {
     const games = [GAME, { ...GAME, game_id: 2 }];
     const result = await syncLibrary(games, {}, {

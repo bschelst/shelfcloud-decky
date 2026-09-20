@@ -238,8 +238,12 @@ class Plugin:
         # It is now Steam's grid folder, which holds the library artwork of
         # every game on the machine — emptying it on uninstall would delete
         # all of it.
-        for tracked in self._synced.values():
-            self._remove_icon_files(tracked.get("game_id"), tracked.get("app_id"))
+        # The game id is the KEY here, not a field — a tracked entry holds
+        # app_id, name, launch, art, provider and url, and nothing else. Read
+        # as `tracked.get("game_id")` it is always None, which silently skips
+        # the legacy filename half of the cleanup below.
+        for game_id, tracked in self._synced.items():
+            self._remove_icon_files(game_id, tracked.get("app_id"))
 
         # The old home, which really was ours alone, so it can still go wholly.
         legacy = _settings_icon_dir()

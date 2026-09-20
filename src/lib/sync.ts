@@ -512,8 +512,26 @@ export async function syncLibrary(
     callbacks.onProgress?.(`${label} ${shorten(name)} (${done}/${total})`);
   };
 
-  for (const game of desired) {
-    if (callbacks.shouldStop?.()) {
+  // Web pages go first, and a cancel never reaches them.
+  //
+  // Cancelling "add all my games" should drop the bulk it is still working
+  // through, not whatever the loop had not got to yet. The published
+  // Shelfcloud page is pushed to every account and the custom ones were each
+  // typed in by hand — a handful of tiles, every one of them deliberate — so
+  // losing them to a cancel aimed at three hundred owned games is the loop's
+  // ordering showing through as behaviour.
+  //
+  // Ordering alone is not enough: a page added to the library AFTER a sync has
+  // already started would still sit behind the cancel. So they are also exempt
+  // from the check rather than merely early in it.
+  const ordered = [
+    ...desired.filter((g) => WEBSITE_PROVIDERS.has(g.provider)),
+    ...desired.filter((g) => !WEBSITE_PROVIDERS.has(g.provider)),
+  ];
+
+  for (const game of ordered) {
+    const mandatory = WEBSITE_PROVIDERS.has(game.provider);
+    if (!mandatory && callbacks.shouldStop?.()) {
       result.cancelled = true;
       break;
     }
@@ -612,15 +630,24 @@ export async function syncLibrary(
   // Whatever did not fill a batch. Best effort — unsorted tiles still play.
   await flushCollections();
 
-  // And take out what no longer belongs.
+  // And take out what no longer belongs — but NOT after a cancel.
   //
-  // Managed means "filed by this sync OR tracked before it" — the second half
-  // matters, because a game dropped from the library is not filed anywhere now
-  // and would otherwise be left sitting in its old collection forever. Apps
-  // outside that set are the user's own doing and are not touched.
-  const managed = new Set<number>(filed.map((m) => m.appId));
-  for (const entry of Object.values(tracked)) managed.add(entry.app_id);
-  await pruneProviderCollections(filed, managed);
+  // Pruning asks each collection "what should be in you" and answers from
+  // `filed`, which is why it must see the whole sync: a slice cannot tell
+  // "filed elsewhere" from "not reached yet". A cancelled run is exactly a
+  // slice, so pruning on one would strip every tile the loop never got to out
+  // of its collection — a cancel quietly un-sorting the library it had already
+  // sorted. Leaving it for the next complete run costs nothing: an unpruned
+  // collection holds a stale entry, which is what it held a moment ago anyway.
+  if (!result.cancelled) {
+    // Managed means "filed by this sync OR tracked before it" — the second
+    // half matters, because a game dropped from the library is not filed
+    // anywhere now and would otherwise be left sitting in its old collection
+    // forever. Apps outside that set are the user's own doing, untouched.
+    const managed = new Set<number>(filed.map((m) => m.appId));
+    for (const entry of Object.values(tracked)) managed.add(entry.app_id);
+    await pruneProviderCollections(filed, managed);
+  }
 
   return result;
 }
