@@ -8,6 +8,7 @@
 import { fetchArtwork, saveIcon, strayShortcuts } from "./api";
 import { addToProviderCollections, pruneProviderCollections,
          type CollectionMember } from "./collection";
+import { renderPageLogo } from "./pagelogo";
 import { providerLabel, WEBSITE_PROVIDERS, type DesiredGame, type SyncResult, type TrackedShortcut } from "./types";
 
 /**
@@ -315,6 +316,21 @@ async function applyArtwork(appId: number, game: DesiredGame): Promise<ArtworkOu
   const iconImage = (await iconFetch)
     ?? (logoIndex >= 0 ? images[logoIndex] : undefined)
     ?? capsule;
+
+  // A page you added gets a logo drawn from its own name.
+  //
+  // Only for `custom`: the published page has a real wordmark and that one IS
+  // its name. Every custom page was being given that same wordmark, so a shelf
+  // of them all announced themselves as Shelfcloud — and since Steam draws the
+  // logo INSTEAD of the title, the one thing saying which page you were
+  // looking at was the thing being covered.
+  //
+  // Applied after the others so a real logo, if the gateway ever serves one
+  // for this tile, always wins over a drawn one.
+  if (game.provider === "custom" && !images[logoIndex]) {
+    const drawn = await renderPageLogo(game.name, iconImage);
+    if (drawn) await applySlot(drawn, LibraryAsset.Logo);
+  }
   if (iconImage) {
     try {
       // appId as well as game_id: the file is named after the SHORTCUT now,
