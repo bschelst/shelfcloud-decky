@@ -722,7 +722,10 @@ function Content() {
                 if (pendingLogin) {
                   openSteamSignIn(pendingLogin.url, pendingLogin.session);
                 } else {
-                  const url = (status as unknown as Record<string, unknown>).pending_login_url as string || GATEWAY_URL;
+                  // Falls back to /my, not the root: this button is labelled
+                  // "Reopen sign-in page", and the sign-in lives with the
+                  // library now. The root would show the home page instead.
+                  const url = (status as unknown as Record<string, unknown>).pending_login_url as string || `${GATEWAY_URL}/my`;
                   openInSteamBrowser(url);
                 }
               }}
@@ -801,8 +804,14 @@ function Content() {
             above it should be on screen — see scrollPanelToTop. */}
         <div onFocus={scrollPanelToTop}>
           <PanelSectionRow>
-            {/* Reachable signed out on purpose: signing in happens there. */}
-            <ButtonItem layout="below" onClick={() => openInSteamBrowser(GATEWAY_URL)}>
+            {/* Straight to the library, not the site root.
+                The root is the home page now — what Shelfcloud is, the guide,
+                the catalogue — so sending somebody there to pick games would
+                land them on the pitch with another click still to make. /my is
+                the library, and puts the sign-in in front of it if needed.
+
+                Reachable signed out on purpose: signing in happens there. */}
+            <ButtonItem layout="below" onClick={() => openInSteamBrowser(`${GATEWAY_URL}/my`)}>
               {signedOut ? "Open Shelfcloud" : "Select games on Shelfcloud"}
             </ButtonItem>
           </PanelSectionRow>
