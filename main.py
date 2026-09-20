@@ -1219,11 +1219,16 @@ class Plugin:
         else:
             return {"ok": False, "error": "unsupported URL scheme"}
 
+        # Rewrite the url field to point to the actual destination. Custom VDFs
+        # arrive with whatever url the author set (often a path from a different
+        # project), and built-in templates have none at all.
+        import re as _re
+        vdf_text = _re.sub(r'"url"\s+"[^"]*"', '"url"\t\t"__PLACEHOLDER__"', vdf_text)
         if '"url"' not in vdf_text:
             vdf_text = vdf_text.replace(
                 '"controller_mappings"\n{',
                 '"controller_mappings"\n{\n'
-                f'\t"url"\t\t"{template_url}"\n'
+                '\t"url"\t\t"__PLACEHOLDER__"\n'
                 '\t"export_type"\t\t"template"',
                 1)
 
@@ -1238,8 +1243,9 @@ class Plugin:
             os.makedirs(dest_dir, exist_ok=True)
             dest = os.path.join(dest_dir, "controller_neptune.vdf")
             try:
+                final = vdf_text.replace("__PLACEHOLDER__", f"autosave://{dest}")
                 with open(dest, "w", encoding="utf-8") as f:
-                    f.write(vdf_text)
+                    f.write(final)
                 installed += 1
                 decky.logger.info("controller layout: wrote %s", dest)
             except OSError as exc:
