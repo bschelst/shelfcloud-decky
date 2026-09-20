@@ -687,8 +687,6 @@ class Plugin:
         ])
 
         layout = provider.get("controller_layout") or _provider_default_layout(provider["provider"])
-        decky.logger.info("_to_desired game_id=%s provider=%s controller_layout=%s",
-                          game_id, provider["provider"], layout)
         return {
             "game_id": game_id,
             "url": provider["launch_url"],

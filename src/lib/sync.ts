@@ -257,10 +257,7 @@ function applyControllerConfig(appId: number, templateUrl: string): Promise<void
       if (loaded || attempt >= 10) {
         try {
           set.call(input, appId, idx, templateUrl, false, 1);
-          console.warn(`[shelfcloud] controller: applied ${templateUrl} to ${appId} idx=${idx} attempt=${attempt} loaded=${loaded}`);
-        } catch (e: any) {
-          console.error("[shelfcloud] controller: SetSelectedConfigForApp failed:", e?.message || e);
-        }
+        } catch { /* swallow */ }
         resolve();
       } else {
         setTimeout(() => tryApply(attempt + 1), 500);
