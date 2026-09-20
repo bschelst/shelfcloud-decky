@@ -152,7 +152,9 @@ const PROVIDER_LABELS: Record<string, string> = {
   // a tile reading "Shelfcloud Website (shelfcloud)" and, worse, a Steam
   // collection literally called "custom (Shelfcloud)".
   shelfcloud: "Shelfcloud",
-  custom: "Website",
+  // Plural: this is the collection of pages you added, and it reads as a
+  // heading rather than as a description of one of them.
+  custom: "Websites",
   // Tiles recorded before providers were tracked. Fixed by the next sync.
   unknown: "Other",
 };

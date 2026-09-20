@@ -71,12 +71,22 @@ describe("collection names", () => {
     expect(looksLikeAKey(name.replace(" (Shelfcloud)", ""))).toBe(false);
   });
 
-  it("puts both kinds of web page in ONE collection", () => {
-    // A published page and a page the user added are the same thing to the
-    // person looking at their library: a link.
+  it("gives each kind of web page its OWN collection", () => {
+    // Merging them was tried and was wrong: it put the page Shelfcloud
+    // publishes in with the ones you typed in yourself, and left the
+    // collection named after its own provider standing empty.
     const names = [...WEBSITE_PROVIDERS].map(collectionName);
-    expect(new Set(names).size).toBe(1);
-    expect(names[0]).toBe("Websites (Shelfcloud)");
+    expect(new Set(names).size).toBe(WEBSITE_PROVIDERS.size);
+    expect(collectionName("shelfcloud")).toBe("Shelfcloud (Shelfcloud)");
+    expect(collectionName("custom")).toBe("Websites (Shelfcloud)");
+  });
+
+  it("does not leave a provider's own collection empty by filing it elsewhere", () => {
+    // The shape of the bug, stated as a rule: every provider's tiles go to
+    // the collection named after that provider, with no exceptions.
+    for (const provider of KNOWN_PROVIDERS) {
+      expect(collectionName(provider)).toBe(`${providerLabel(provider)} (Shelfcloud)`);
+    }
   });
 
   it("still separates the cloud services from each other", () => {
