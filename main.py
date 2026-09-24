@@ -55,6 +55,11 @@ IDLE_INSTALL = {
 REQUEST_TIMEOUT = 20
 SYNC_EVENT = "shelfcloud/library"
 
+# Custom layout VDFs, by name: {name: (fetched_at, text)}. See
+# _download_custom_layout for why this exists.
+_LAYOUT_CACHE: Dict[str, Any] = {}
+_LAYOUT_CACHE_TTL = 600
+
 # Must match backend/providers.py LAYOUT_GAMEPAD and LAYOUT_WEB_BROWSER.
 _LAYOUT_GAMEPAD = "template://controller_neptune_gamepad_fps.vdf"
 _LAYOUT_WEB_BROWSER = "template://controller_neptune_webbrowser.vdf"
@@ -1193,7 +1198,22 @@ class Plugin:
         return {"ok": True, "path": path}
 
     def _download_custom_layout(self, name: str) -> Optional[str]:
-        """Fetch a custom VDF from the gateway."""
+        """Fetch a custom VDF from the gateway, at most once every ten minutes.
+
+        Cached because install_controller_layout runs for EVERY tile on every
+        sync, and a library with 137 Boosteroid tiles therefore asked the
+        gateway for the same unchanged file 137 times in a row, serially. At
+        85 ms a round trip that is eleven seconds of a sync spent downloading
+        one file over and over — measured, and the whole of the "sync got slow
+        again" report.
+
+        Ten minutes rather than forever: a layout edited in the admin should
+        reach a device without anyone restarting anything, and one request per
+        ten minutes instead of 137 per sync is already the entire win.
+        """
+        cached = _LAYOUT_CACHE.get(name)
+        if cached and (time.time() - cached[0]) < _LAYOUT_CACHE_TTL:
+            return cached[1]
         gateway = self._gateway()
         url = f"{gateway}/api/controller-layout/{urllib.parse.quote(name)}"
         token = self._settings.get("api_token", "")
@@ -1203,10 +1223,14 @@ class Plugin:
         })
         try:
             with urllib.request.urlopen(req, context=SSL_CTX, timeout=REQUEST_TIMEOUT) as resp:
-                return resp.read().decode("utf-8", errors="replace")
+                text = resp.read().decode("utf-8", errors="replace")
         except Exception as exc:
             decky.logger.warning("custom layout download failed: %s", exc)
-            return None
+            # A stale copy beats no layout at all: the gateway being briefly
+            # unreachable should not strip a layout off every tile.
+            return cached[1] if cached else None
+        _LAYOUT_CACHE[name] = (time.time(), text)
+        return text
 
     async def install_controller_layout(self, shortcut_name: str,
                                         template_url: str) -> Dict:
@@ -1268,11 +1292,21 @@ class Plugin:
             dest = os.path.join(dest_dir, "controller_neptune.vdf")
             try:
                 final = vdf_text.replace("__PLACEHOLDER__", f"autosave://{dest}")
-                with open(dest, "w", encoding="utf-8") as f:
-                    f.write(final)
                 installed += 1
                 autosave_url = f"autosave://{dest}"
-                decky.logger.info("controller layout: wrote %s", dest)
+                # Only write when it would change something. This runs for
+                # every tile on every sync across every Steam user directory,
+                # so on this Deck that was 137 tiles x 4 directories = 548
+                # rewrites of files that already said exactly this.
+                try:
+                    with open(dest, "r", encoding="utf-8", errors="replace") as f:
+                        unchanged = f.read() == final
+                except OSError:
+                    unchanged = False
+                if not unchanged:
+                    with open(dest, "w", encoding="utf-8") as f:
+                        f.write(final)
+                    decky.logger.info("controller layout: wrote %s", dest)
                 _register_configset(user_path, shortcut_name)
             except OSError as exc:
                 decky.logger.warning("controller layout copy failed: %s", exc)
