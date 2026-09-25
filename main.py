@@ -133,6 +133,11 @@ def _state_file() -> str:
     return os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "synced.json")
 
 
+# How long the panel may reuse the last display probe. Docking takes seconds;
+# the panel asks every 1.5 of them.
+DISPLAY_CACHE_SECONDS = 15.0
+
+
 def _tracking_key(game_id: int, provider: str) -> str:
     """How a tile is identified in synced.json.
 
@@ -273,6 +278,13 @@ class Plugin:
         # Without this, a game removed on the web could never be found and
         # removed here, and re-syncing would create duplicate tiles.
         self._synced: Dict[str, Dict[str, Any]] = {}
+        # Tracked tiles that shortcuts.vdf did not mention LAST time it was
+        # read. Forgetting one takes two consecutive misses — see
+        # _forget_vanished_tiles for why one is not enough.
+        self._vanish_suspects: set = set()
+        # (when, answer) for the display probe, which shells out to xrandr and
+        # is asked for by a panel that polls status every 1.5 seconds.
+        self._display_cache: tuple = (0.0, "")
         self._poll_task: Optional[asyncio.Task] = None
         self._login_task: Optional[asyncio.Task] = None
         # The pairing code for a sign-in in progress, shown in the panel
@@ -905,16 +917,20 @@ class Plugin:
             if token:
                 headers["Authorization"] = f"Bearer {token}"
 
+        # On a thread. urlopen BLOCKS, and this is an async method on the one
+        # event loop the whole plugin shares — so a slow CDN did not just slow
+        # this image down, it stopped the backend: the poll loop, every other
+        # RPC, the sync's own progress. With a 20 second timeout, several
+        # artwork slots per game and hundreds of games, a single unreachable
+        # host could hold the plugin still for minutes.
         try:
-            request = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT, context=SSL_CTX) as response:
-                content_type = response.headers.get("Content-Type", "")
-                if not content_type.startswith("image/"):
-                    return {"ok": False, "error": f"not an image ({content_type})"}
-                raw = response.read(ARTWORK_MAX_BYTES + 1)
+            content_type, raw = await asyncio.to_thread(
+                self._fetch_image, url, headers)
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+        if not content_type.startswith("image/"):
+            return {"ok": False, "error": f"not an image ({content_type})"}
         if len(raw) > ARTWORK_MAX_BYTES:
             return {"ok": False, "error": "image too large"}
         return {
@@ -922,6 +938,19 @@ class Plugin:
             "base64": base64.b64encode(raw).decode(),
             "kind": "png" if content_type.endswith("png") else "jpg",
         }
+
+    @staticmethod
+    def _fetch_image(url: str, headers: Dict[str, str]) -> tuple:
+        """Blocking half of fetch_artwork, for asyncio.to_thread.
+
+        Reads one byte more than the limit so the caller can tell "exactly at
+        the limit" from "too big" without holding the whole thing in memory.
+        """
+        request = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT,
+                                    context=SSL_CTX) as response:
+            content_type = response.headers.get("Content-Type", "")
+            return content_type, response.read(ARTWORK_MAX_BYTES + 1)
 
     async def clear_library(self) -> Dict[str, Any]:
         """Empty the chosen library. Tiles are removed by the next sync."""
@@ -1118,6 +1147,20 @@ class Plugin:
         has not indexed yet is still IN the file, so only a genuinely absent
         one is dropped — appStore alone would throw away tiles that were merely
         new.
+
+        TWO STRIKES, because that file is written when Steam feels like it.
+        Measured here: the last sync ran at 01:07 and shortcuts.vdf still had
+        its 01:30 timestamp from a game launch twenty-three minutes later — so
+        a tile created moments ago can be genuinely missing from the copy on
+        disk. Forgetting it there would make the next sync build a SECOND tile
+        for the same game, which is the duplicate-tile disaster _load_state
+        exists to prevent, arrived at from the other direction.
+
+        A tile has to be absent on two consecutive passes, minutes apart. A
+        flush that has not happened yet survives one pass; a shortcut somebody
+        actually deleted survives none. The suspicion is in memory only: after
+        a restart everything gets the benefit of the doubt again, which is the
+        right way round for something whose mistake is a duplicate.
         """
         if not self._synced:
             return 0
@@ -1133,14 +1176,19 @@ class Plugin:
             return 0
 
         real = {entry["app_id"] for entry in found}
-        gone = [key for key, entry in self._synced.items()
-                if isinstance(entry, dict) and entry.get("app_id") not in real]
+        missing = {key for key, entry in self._synced.items()
+                   if isinstance(entry, dict) and entry.get("app_id") not in real}
+
+        # Only the ones missing last time too. Everything else is put on the
+        # list and left alone, and anything that came back drops off it.
+        gone = sorted(missing & self._vanish_suspects)
+        self._vanish_suspects = missing - set(gone)
         if not gone:
             return 0
 
         for key in gone:
-            decky.logger.info("tile vanished from Steam, forgetting %s (%s)",
-                              key, (self._synced[key] or {}).get("name", "?"))
+            decky.logger.info("tile gone from Steam on two passes, forgetting "
+                              "%s (%s)", key, (self._synced[key] or {}).get("name", "?"))
             self._synced.pop(key, None)
         await self._save_state()
         return len(gone)
@@ -1559,11 +1607,26 @@ class Plugin:
         The same answer the launcher will act on, from the same code, so the
         line in the panel and the line in the launch log cannot disagree —
         and so "Auto" is not a number the user has to take on trust.
+
+        Cached, because this shells out to xrandr and the panel polls status
+        every 1.5 seconds while a sync runs: uncached, the eleven-minute sync
+        measured here would have spawned four hundred processes to answer a
+        question whose answer does not change. A display is docked or
+        undocked in seconds, never in milliseconds, so a short life is plenty.
+
+        The launcher does NOT share this cache. It probes once per launch,
+        where the cost is nothing and the answer has to be current.
         """
+        now = time.monotonic()
+        when, answer = self._display_cache
+        if answer and now - when < DISPLAY_CACHE_SECONDS:
+            return answer
         try:
-            return display.describe(self._settings.get("ui_scale", "auto"))
+            answer = display.describe(self._settings.get("ui_scale", "auto"))
         except Exception as exc:                      # never break the panel
-            return f"could not detect the display ({exc})"
+            answer = f"could not detect the display ({exc})"
+        self._display_cache = (now, answer)
+        return answer
 
     def _sync_all_providers(self) -> bool:
         """Make a tile per service a game is on, instead of just the best one.

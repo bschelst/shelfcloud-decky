@@ -43,6 +43,7 @@ import main  # noqa: E402
 def _plugin(tracked):
     plugin = main.Plugin.__new__(main.Plugin)
     plugin._synced = dict(tracked)
+    plugin._vanish_suspects = set()
     plugin._save_state = mock.AsyncMock()
     return plugin
 
@@ -62,14 +63,40 @@ def _run(plugin, steam_has):
 
 def test_a_tile_steam_no_longer_has_is_forgotten():
     plugin = _plugin(TRACKED)
-    # Steam has only the second one.
+    # Steam has only the second one. The first pass suspects, the second acts.
+    assert _run(plugin, [4001205961]) == 0
     assert _run(plugin, [4001205961]) == 1
     assert "570:boosteroid" not in plugin._synced
     assert "12:geforce_now" in plugin._synced
 
 
+def test_one_pass_is_never_enough():
+    """shortcuts.vdf is written when Steam feels like it.
+
+    Measured on hardware: a sync ran at 01:07 and the file still carried its
+    01:30 timestamp from a game launch twenty-three minutes later. So a tile
+    created moments ago can be genuinely absent from the copy on disk, and
+    forgetting it there makes the next sync build a SECOND tile for the same
+    game — the duplicate disaster from the other direction.
+    """
+    plugin = _plugin(TRACKED)
+    assert _run(plugin, [4001205961]) == 0
+    assert "570:boosteroid" in plugin._synced, "one missed pass must not be enough"
+    plugin._save_state.assert_not_awaited()
+
+
+def test_a_tile_that_comes_back_is_forgiven():
+    """The flush landed between the two passes, which is the whole point."""
+    plugin = _plugin(TRACKED)
+    _run(plugin, [4001205961])                      # missing: suspected
+    _run(plugin, [2188041668, 4001205961])          # back: cleared
+    _run(plugin, [2188041668, 4001205961])
+    assert "570:boosteroid" in plugin._synced
+
+
 def test_the_state_file_is_written_when_something_went():
     plugin = _plugin(TRACKED)
+    _run(plugin, [4001205961])
     _run(plugin, [4001205961])
     plugin._save_state.assert_awaited()
 

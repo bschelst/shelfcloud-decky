@@ -252,6 +252,43 @@ async function clearArtwork(appId: number): Promise<void> {
   }
 }
 
+/* Steam's own globals, which @decky/ui does not type.
+ *
+ * Declared rather than reached for through `any`, the same way collection.ts
+ * declares the collection store. `any` turns a rename inside Steam into a
+ * silent undefined at runtime; a declared shape at least states what this
+ * code believes, and every member is optional because all of it is Steam's to
+ * change without notice. */
+interface SteamController {
+  eControllerType?: number;
+  nControllerIndex?: number;
+}
+
+interface ControllerStore {
+  GetControllers?(): SteamController[];
+}
+
+interface SteamInput {
+  SetSelectedConfigForApp?(
+    appId: number, controllerIndex: number, templateUrl: string,
+    unknownFlag: boolean, selection: number,
+  ): void;
+}
+
+interface SteamWindow {
+  ControllerStore?: ControllerStore;
+  controllerStore?: ControllerStore;
+  appStore?: { GetAppOverviewByAppID?(appId: number): unknown };
+}
+
+/* Looked up on each call, never captured at module load. `window` does not
+ * exist when these modules are imported under a test runner, and a top-level
+ * reference to it made importing sync.ts throw — taking six test files down
+ * with it. */
+function steam(): SteamWindow {
+  return (typeof window === "undefined" ? {} : window) as unknown as SteamWindow;
+}
+
 /**
  * Find the Deck's built-in controller index (type 4 = SteamControllerNeptune).
  * Returns null if not found. moonlight-steam-sync-decky probe confirmed
@@ -259,10 +296,10 @@ async function clearArtwork(appId: number): Promise<void> {
  */
 function deckControllerIndex(): number | null {
   try {
-    const store = (window as any).ControllerStore ?? (window as any).controllerStore;
-    const controllers: any[] = store?.GetControllers?.() ?? [];
+    const store = steam().ControllerStore ?? steam().controllerStore;
+    const controllers: SteamController[] = store?.GetControllers?.() ?? [];
     for (const c of controllers) {
-      if (c?.eControllerType === 4) return c.nControllerIndex;
+      if (c?.eControllerType === 4) return c.nControllerIndex ?? 0;
     }
     return controllers.length === 1 ? controllers[0]?.nControllerIndex ?? 0 : 0;
   } catch { return 0; }
@@ -277,12 +314,12 @@ function applyControllerConfig(
   appId: number, templateUrl: string, waitForStore: boolean,
 ): Promise<void> {
   return new Promise<void>((resolve) => {
-    const input = (SteamClient as any).Input;
+    const input = (SteamClient as unknown as { Input?: SteamInput }).Input;
     const set = input?.SetSelectedConfigForApp;
     if (typeof set !== "function") { resolve(); return; }
 
     const idx = deckControllerIndex() ?? 0;
-    const inStore = () => !!(window as any).appStore?.GetAppOverviewByAppID?.(appId);
+    const inStore = () => !!steam().appStore?.GetAppOverviewByAppID?.(appId);
 
     const apply = () => {
       try { set.call(input, appId, idx, templateUrl, false, 1); }
