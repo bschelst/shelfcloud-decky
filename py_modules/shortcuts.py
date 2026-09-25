@@ -32,6 +32,12 @@ from typing import Dict, List, Optional
 # Every shortcut this plugin creates runs the launcher with this flag.
 _GAME_ID = re.compile(rb"--game-id\s+(\d+)")
 
+# And with this one, which is what tells two tiles for the same game apart.
+# Optional on purpose: a tile written by an older build has no --provider, and
+# such a tile must still be recognised as ours rather than read as an orphan
+# and removed.
+_PROVIDER = re.compile(rb"--provider\s+(\S+)")
+
 _APPID = re.compile(rb"\x02appid\x00(....)", re.IGNORECASE | re.DOTALL)
 _OPTIONS = re.compile(rb"\x01LaunchOptions\x00([^\x00]*)\x00", re.IGNORECASE)
 _NAME = re.compile(rb"\x01AppName\x00([^\x00]*)\x00", re.IGNORECASE)
@@ -61,7 +67,7 @@ def shortcuts_files(steam_root: Optional[str] = None) -> List[str]:
 
 
 def parse(blob: bytes) -> List[Dict]:
-    """Every Shelfcloud shortcut in one shortcuts.vdf, as {app_id, game_id, name}.
+    """Every Shelfcloud shortcut here, as {app_id, game_id, provider, name}.
 
     Entries are split on the index markers rather than parsed as a tree: the
     file is Steam's, its exact shape varies between client versions, and a
@@ -90,9 +96,11 @@ def parse(blob: bytes) -> List[Dict]:
         (app_id,) = struct.unpack("<I", appid.group(1))
 
         name = _NAME.search(chunk)
+        provider = _PROVIDER.search(options.group(1))
         out.append({
             "app_id": app_id,
             "game_id": int(game.group(1)),
+            "provider": provider.group(1).decode("utf-8", "replace") if provider else "",
             "name": name.group(1).decode("utf-8", "replace") if name else "",
         })
     return out

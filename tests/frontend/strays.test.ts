@@ -68,7 +68,7 @@ beforeEach(() => {
 
 const callbacks = () => ({
   record: vi.fn(async (
-    _gameId: number, _appId: number, _name: string, _options: string,
+    _key: string, _appId: number, _name: string, _options: string,
     _art: string, _provider: string,
   ) => {}),
   forget: vi.fn(async () => {}),
@@ -150,8 +150,10 @@ describe("a tile that exists but was never recorded", () => {
     // The whole point: no second tile.
     expect(added).toBe(0);
     expect(removed).toEqual([]);
-    // And it is written down against the app id Steam already has.
-    expect(cb.record.mock.calls.some((c) => c[0] === 1196 && c[1] === 4242)).toBe(true);
+    // And it is written down against the app id Steam already has, under the
+    // key the report carried — this one predates per-route grouping and sends
+    // none, so it falls back to the bare game id.
+    expect(cb.record.mock.calls.some((c) => c[0] === "1196" && c[1] === 4242)).toBe(true);
   });
 
   it("gets its artwork applied, since what it carries is unknown", async () => {

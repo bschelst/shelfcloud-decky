@@ -78,10 +78,13 @@ export const installControllerLayout =
   callable<[shortcut_name: string, template_url: string],
            { ok: boolean; installed?: number; autosave_url?: string; error?: string }>("install_controller_layout");
 
+// Keyed by "<game id>:<provider>", not by game id: one game can be several
+// tiles. The backend still accepts a bare id and normalises it, so these two
+// are safe against a plugin whose halves are briefly different versions.
 export const recordShortcut =
-  callable<[game_id: number, app_id: number, name: string, options: string, art: string,
+  callable<[key: string, app_id: number, name: string, options: string, art: string,
            provider: string, url: string], unknown>("record_shortcut");
-export const forgetShortcut = callable<[game_id: number], unknown>("forget_shortcut");
+export const forgetShortcut = callable<[key: string], unknown>("forget_shortcut");
 
 /** Every Shelfcloud tile Steam actually has, read from shortcuts.vdf.
  *
@@ -92,7 +95,13 @@ export const strayShortcuts = callable<[], {
   ok: boolean;
   error?: string;
   shortcuts: Array<{
+    /** How the group is tracked: "<game id>:<provider>". Absent from an older
+     *  backend, which grouped by game alone. */
+    key?: string;
     game_id: number;
+    /** Which service these tiles open. Two tiles for one game on the SAME
+     *  service are twins; on different services they are both wanted. */
+    provider?: string;
     app_ids: number[];
     /** The one to keep: the tracked tile if there is one, else the oldest. */
     keep: number;

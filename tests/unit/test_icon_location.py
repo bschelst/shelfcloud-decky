@@ -127,11 +127,15 @@ def test_uninstall_deletes_only_our_own_icons(grid, tmp_path):
 
 
 def test_uninstall_passes_the_real_game_id(grid, tmp_path):
-    """The game id is the KEY of the tracked map, not a field in it.
+    """The game id comes from the KEY of the tracked map, not a field in it.
 
     A tracked entry holds app_id, name, launch, art, provider and url — so
     `entry.get("game_id")` is always None and the legacy half of the cleanup
     silently does nothing.
+
+    The key is "<game id>:<provider>" now, so it is no longer the game id by
+    itself either: passed whole it matches no icon filename and the cleanup
+    does nothing just the same. It has to be taken back out.
 
     Asserted on the CALL rather than on the files, deliberately. Checking the
     files cannot see this: uninstall also empties the settings directory
@@ -143,8 +147,9 @@ def test_uninstall_passes_the_real_game_id(grid, tmp_path):
     settings.mkdir()
 
     plugin = main.Plugin()
-    plugin._synced = {"23101": {"app_id": 2250922664, "name": "X",
-                                "launch": "", "art": "", "provider": "shelfcloud"}}
+    plugin._synced = {"23101:shelfcloud": {"app_id": 2250922664, "name": "X",
+                                           "launch": "", "art": "",
+                                           "provider": "shelfcloud"}}
 
     seen = []
     with mock.patch.object(main, "_icon_dir", return_value=str(folder)), \
@@ -153,8 +158,8 @@ def test_uninstall_passes_the_real_game_id(grid, tmp_path):
                            staticmethod(lambda g, a: seen.append((g, a)))):
         asyncio.run(plugin._uninstall())
 
-    assert seen == [("23101", 2250922664)], (
-        "uninstall must pass the map's key as the game id")
+    assert seen == [(23101, 2250922664)], (
+        "uninstall must pass the game id out of the map's key")
 
 
 def test_remove_icon_files_clears_both_naming_schemes(grid, tmp_path):

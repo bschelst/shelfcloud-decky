@@ -57,6 +57,36 @@ export function untiledFromRun(
       && !(String(id) in tracked));
 }
 
+/**
+ * How a tile is identified in the plugin's own record.
+ *
+ * The backend sends this as `key`; it is recomputed here only for an older
+ * backend that does not, so a version skew degrades to the previous
+ * one-tile-per-game behaviour instead of mis-keying everything.
+ */
+export function trackingKey(game: DesiredGame): string {
+  return game.key ?? `${game.game_id}:${game.provider}`;
+}
+
+/**
+ * The record for this tile, tolerating one written before the split.
+ *
+ * The backend re-keys synced.json on load, but it deliberately leaves alone
+ * any entry that recorded no provider: it cannot know which service such a
+ * tile opens, and a guessed key would make the tile match nothing desired and
+ * be deleted, taking its playtime and artwork with it. Those are matched here
+ * by game id instead, and the next write gives them the current shape.
+ */
+function trackedFor(
+  tracked: Record<string, TrackedShortcut>, game: DesiredGame,
+): TrackedShortcut | undefined {
+  const exact = tracked[trackingKey(game)];
+  if (exact) return exact;
+  const legacy = tracked[String(game.game_id)];
+  // Only if it names no provider. One that does belongs to a different tile.
+  return legacy && !legacy.provider ? legacy : undefined;
+}
+
 export function shortcutTitle(game: DesiredGame): string {
   // A web page carries no suffix. The suffix exists to separate a streamed
   // copy of a game from an installed one under the same name, and a page has
@@ -472,7 +502,12 @@ async function adoptStrayShortcuts(
         || typeof entry.game_id !== "number"
         || typeof entry.keep !== "number") continue;
 
-    const key = String(entry.game_id);
+    // The backend groups by game AND service now, and sends the key it used.
+    // Grouped by game alone, a game's Boosteroid, Luna and GeForce NOW tiles
+    // are one group and everything but `keep` below is destroyed — so falling
+    // back to the game id is only safe for an older backend, which never
+    // produces more than one tile per game in the first place.
+    const key = entry.key ?? String(entry.game_id);
     const extras = (Array.isArray(entry.app_ids) ? entry.app_ids : [])
       .filter((id) => typeof id === "number" && id !== entry.keep);
 
@@ -502,8 +537,8 @@ async function adoptStrayShortcuts(
       // No DesiredGame here — this is reconciling a tile Steam already had.
       // The empty url leaves any fallback already recorded untouched; the
       // next full sync fills it in from the gateway.
-      await callbacks.record(entry.game_id, entry.keep, adopted.name,
-                             adopted.launch, "", "", "");
+      await callbacks.record(key, entry.keep, adopted.name,
+                             adopted.launch, "", entry.provider ?? "", "");
     } catch {
       /* the in-memory map is already right; the file catches up next time */
     }
@@ -512,10 +547,12 @@ async function adoptStrayShortcuts(
 
 export interface SyncCallbacks {
   record: (
-    gameId: number, appId: number, name: string, options: string, art: string,
+    // The tracking key, "<game id>:<provider>" — not a game id. The backend
+    // still accepts a bare id from an older frontend and normalises it.
+    key: string, appId: number, name: string, options: string, art: string,
     provider: string, url: string,
   ) => Promise<unknown>;
-  forget: (gameId: number) => Promise<unknown>;
+  forget: (key: string) => Promise<unknown>;
   onProgress?: (message: string) => void;
   /** Asked before each tile. True stops the run where it stands.
    *
@@ -613,7 +650,12 @@ export async function syncLibrary(
   callbacks: SyncCallbacks,
 ): Promise<SyncResult> {
   const result: SyncResult = { added: 0, removed: 0, updated: 0, failed: 0, addedNames: [] };
-  const desiredIds = new Set(desired.map((g) => g.game_id));
+  // Keyed by game AND provider, because a game is not always one tile: with
+  // sync_all_providers on it has one per service, they all carry the same
+  // game_id, and a set of game ids cannot tell them apart — every tile past
+  // the first would read as "not desired" and be deleted on the same sync
+  // that created it.
+  const desiredKeys = new Set(desired.map(trackingKey));
 
   // Before anything is created, make what this plugin believes agree with what
   // Steam actually has.
@@ -663,9 +705,9 @@ export async function syncLibrary(
   //
   // Unchanged games do not need to tick the counter: they are skipped with no
   // network calls, so hundreds pass instantly and there is no stall to hide.
-  const toRemove = Object.keys(tracked).filter((id) => !desiredIds.has(Number(id))).length;
+  const toRemove = Object.keys(tracked).filter((key) => !desiredKeys.has(key)).length;
   const toChange = desired.filter((g) => {
-    const existing = tracked[String(g.game_id)];
+    const existing = trackedFor(tracked, g);
     if (!existing) return true;                                  // add
     if (existing.launch !== g.options) return true;              // relaunch
     if (existing.name !== shortcutTitle(g)) return true;         // renamed
@@ -706,7 +748,7 @@ export async function syncLibrary(
       result.cancelled = true;
       break;
     }
-    const existing = tracked[String(game.game_id)];
+    const existing = trackedFor(tracked, game);
     const title = shortcutTitle(game);
     const art = artworkFingerprint(game);
     try {
@@ -741,7 +783,7 @@ export async function syncLibrary(
         // fully dressed detail page, never retried.
         const appliedNew = await applyArtwork(appId, game);
         if (appliedNew.applied === 0) artUnavailable.add(game.game_id);
-        await callbacks.record(game.game_id, appId, title, game.options,
+        await callbacks.record(trackingKey(game), appId, title, game.options,
                                appliedNew.visible ? art : "", game.provider,
                                game.url ?? "");
         file({ appId, provider: game.provider });
@@ -785,7 +827,7 @@ export async function syncLibrary(
           // Keep the old fingerprint until the visible slot goes on, so a later
           // session tries again rather than marking a blank tile as finished.
           const recordedArt = tryArt && !appliedArt.visible ? (existing.art ?? "") : art;
-          await callbacks.record(game.game_id, existing.app_id, title, game.options,
+          await callbacks.record(trackingKey(game), existing.app_id, title, game.options,
                                  recordedArt, game.provider, game.url ?? "");
           result.updated++;
         }
@@ -798,8 +840,13 @@ export async function syncLibrary(
     }
   }
 
-  for (const [gameId, entry] of Object.entries(tracked)) {
-    if (desiredIds.has(Number(gameId))) continue;
+  for (const [key, entry] of Object.entries(tracked)) {
+    if (desiredKeys.has(key)) continue;
+    // A pre-split entry is keyed by game id alone and matches no desired key,
+    // so it would be removed here as unwanted — and the tile it names is one
+    // the sync just adopted and updated. Skip it while any desired tile still
+    // claims that game; the record is re-keyed on the next write.
+    if (!key.includes(":") && desired.some((g) => String(g.game_id) === key)) continue;
     // Removals are cancellable too. The check used to be on the ADD loop
     // alone, which made Cancel do nothing at all during "Remove all games":
     // that run passes an empty desired list, so the add loop has nothing to
@@ -815,7 +862,7 @@ export async function syncLibrary(
         await clearArtwork(entry.app_id);
       } catch { /* best effort — the shortcut must still go */ }
       SteamClient.Apps.RemoveShortcut(entry.app_id);
-      await callbacks.forget(Number(gameId));
+      await callbacks.forget(key);
       result.removed++;
     } catch (error) {
       console.error("[shelfcloud] could not remove", entry.name, error);

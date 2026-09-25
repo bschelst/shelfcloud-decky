@@ -132,6 +132,30 @@ def _state_file() -> str:
     return os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "synced.json")
 
 
+def _tracking_key(game_id: int, provider: str) -> str:
+    """How a tile is identified in synced.json.
+
+    It used to be the game id alone, which was enough while a game could only
+    have one tile. With sync_all_providers on it no longer is: Fortnite gets a
+    tile per service, they all carry game id 42, and a map keyed by game id
+    holds exactly one of them — so the second tile overwrites the first in the
+    record and the first becomes an orphan nothing will ever clean up.
+
+    Composite whether or not the setting is on. A key that changes shape when a
+    toggle flips is a key that orphans every tile the moment it is flipped, and
+    the migration below only has to run once this way.
+    """
+    return f"{game_id}:{provider}"
+
+
+def _key_game_id(key: str) -> Optional[int]:
+    """The game id back out of a tracking key, for old keys too."""
+    try:
+        return int(str(key).split(":", 1)[0])
+    except (TypeError, ValueError):
+        return None
+
+
 def _settings_icon_dir() -> str:
     """The fallback home for icons, inside the plugin's settings directory."""
     path = os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "icons")
@@ -293,8 +317,11 @@ class Plugin:
         # app_id, name, launch, art, provider and url, and nothing else. Read
         # as `tracked.get("game_id")` it is always None, which silently skips
         # the legacy filename half of the cleanup below.
-        for game_id, tracked in self._synced.items():
-            self._remove_icon_files(game_id, tracked.get("app_id"))
+        for key, tracked in self._synced.items():
+            # The key is "<game id>:<provider>" now, so the game id has to be
+            # taken back out of it — passed whole it matches no icon filename
+            # and the legacy half of this cleanup silently does nothing.
+            self._remove_icon_files(_key_game_id(key), tracked.get("app_id"))
 
         # The old home, which really was ours alone, so it can still go wholly.
         legacy = _settings_icon_dir()
@@ -360,7 +387,7 @@ class Plugin:
         """
         state = cls._read_json(_state_file())
         if state:
-            return state
+            return cls._migrate_keys(state)
 
         recovered = cls._recover_from_steam()
         if recovered:
@@ -368,6 +395,44 @@ class Plugin:
                 "state file missing or unreadable; recovered %d tile(s) from "
                 "shortcuts.vdf rather than recreating them", len(recovered))
         return recovered
+
+    @staticmethod
+    def _migrate_keys(state: Dict) -> Dict:
+        """Re-key an old synced.json from "42" to "42:boosteroid".
+
+        One-way and idempotent: a key that already holds a colon is left alone,
+        so this can run on every load and only does work once.
+
+        An entry with no provider recorded keeps its bare key. It cannot be
+        given the right one by guessing, and a wrong provider in the key is
+        worse than an old-shaped one — the tile would stop matching anything
+        desired and be deleted as no longer wanted, losing its playtime and its
+        artwork. Left as it is, it is picked up by the compatibility lookup in
+        the frontend and re-keyed the next time it is written.
+        """
+        if not isinstance(state, dict):
+            return {}
+
+        migrated: Dict = {}
+        moved = 0
+        for key, value in state.items():
+            if not isinstance(value, dict) or ":" in str(key):
+                migrated[key] = value
+                continue
+            provider = value.get("provider")
+            if not isinstance(provider, str) or not provider:
+                migrated[key] = value
+                continue
+            game_id = _key_game_id(key)
+            if game_id is None:
+                migrated[key] = value
+                continue
+            migrated[_tracking_key(game_id, provider)] = value
+            moved += 1
+
+        if moved:
+            decky.logger.info("re-keyed %d tracked tile(s) by game and provider", moved)
+        return migrated
 
     @staticmethod
     def _recover_from_steam() -> Dict:
@@ -384,10 +449,21 @@ class Plugin:
 
         recovered: Dict = {}
         for entry in found:
+            provider = entry.get("provider") or ""
+            # Keyed the same way a live sync keys it, so a recovered tile is
+            # matched rather than recreated beside itself. A tile from a build
+            # that wrote no --provider keeps the bare game id: the frontend's
+            # compatibility lookup still finds it, and the next write gives it
+            # the current shape.
+            key = _tracking_key(entry["game_id"], provider) if provider \
+                else str(entry["game_id"])
             # setdefault: duplicates() documents that Steam's order is oldest
             # first, and the oldest tile is the one holding the playtime and
             # the controller layout.
-            recovered.setdefault(str(entry["game_id"]), {"app_id": entry["app_id"]})
+            found_entry = {"app_id": entry["app_id"]}
+            if provider:
+                found_entry["provider"] = provider
+            recovered.setdefault(key, found_entry)
         return recovered
 
     @staticmethod
@@ -644,8 +720,15 @@ class Plugin:
         return {slot: f"{base}/api/artwork/{game_id}/{slot}"
                 for slot in ("capsule", "header", "hero", "logo", "icon")}
 
-    def _to_desired(self, game: Dict) -> Optional[Dict]:
-        """Turn a library entry into everything the frontend needs to make a tile.
+    def _to_desired(self, game: Dict) -> List[Dict]:
+        """Turn a library entry into the tiles the frontend should make.
+
+        A list, because one game is not always one tile. With
+        sync_all_providers on, a game playable on three services becomes three
+        tiles — one per service, each launching that service — so the library
+        shows where a game can actually be played rather than only where this
+        device would have picked. Off, which is the default, it is the single
+        preferred route and the list has one entry.
 
         Every field is checked rather than indexed. This reads data from a
         network service, and one malformed entry used to raise straight out of
@@ -654,12 +737,12 @@ class Plugin:
         not have what a Steam shortcut needs is skipped and counted.
         """
         if not isinstance(game, dict):
-            return None
+            return []
 
         game_id = game.get("id")
         name = game.get("name")
         if not isinstance(game_id, int) or not isinstance(name, str) or not name.strip():
-            return None
+            return []
 
         raw_providers = game.get("providers")
         providers = [p for p in raw_providers if isinstance(p, dict)] \
@@ -682,14 +765,20 @@ class Plugin:
                  else p["launch_url"].startswith("https://"))
         ]
         if not providers:
-            return None
+            return []
 
         chosen = game.get("chosen_provider")
-        provider = next((p for p in providers if p["provider"] == chosen), providers[0])
+        if self._sync_all_providers():
+            # Every route, preferred one first so it keeps whichever tile Steam
+            # happens to order first and the library reads the way it did.
+            routes = sorted(providers, key=lambda p: p["provider"] != chosen)
+        else:
+            routes = [next((p for p in providers if p["provider"] == chosen),
+                           providers[0])]
 
         browser = browsers.resolve_browser(self._settings.get("browser"))
         if browser is None:
-            return None
+            return []
 
         launcher = os.path.join(decky.DECKY_PLUGIN_DIR, "bin", "shelfcloud-launch.py")
         profile = browsers.profile_dir(browser["app_id"])
@@ -706,27 +795,37 @@ class Plugin:
         # lives in synced.json beside everything else this plugin remembers,
         # read by game id — off the command line and out of the interface.
         #
-        # --provider stays: what a signed-out page looks like and where the
-        # Play control lives differ per provider, and that has to be known
-        # before any URL is resolved.
-        options = _shell_join([
-            launcher, browser["app_id"], profile,
-            "--game-id", str(game_id),
-            "--provider", provider["provider"],
-        ])
+        # --provider stays, and now carries a second job: what a signed-out
+        # page looks like and where the Play control lives differ per provider,
+        # and with one tile per service it is also what tells the gateway which
+        # of them this tile is. Three tiles for one game share a game id, so
+        # without it all three resolve to the same service and two of them lie
+        # about what they open.
+        artwork = self._artwork(game)
+        artwork_proxy = self._artwork_proxy(game)
 
-        layout = provider.get("controller_layout") or _provider_default_layout(provider["provider"])
-        return {
-            "game_id": game_id,
-            "url": provider["launch_url"],
-            "name": name,
-            "provider": provider["provider"],
-            "exe": "/usr/bin/python3",
-            "options": options,
-            "artwork": self._artwork(game),
-            "artwork_proxy": self._artwork_proxy(game),
-            "controller_layout": layout,
-        }
+        entries: List[Dict] = []
+        for provider in routes:
+            key = provider["provider"]
+            options = _shell_join([
+                launcher, browser["app_id"], profile,
+                "--game-id", str(game_id),
+                "--provider", key,
+            ])
+            entries.append({
+                "key": _tracking_key(game_id, key),
+                "game_id": game_id,
+                "url": provider["launch_url"],
+                "name": name,
+                "provider": key,
+                "exe": "/usr/bin/python3",
+                "options": options,
+                "artwork": artwork,
+                "artwork_proxy": artwork_proxy,
+                "controller_layout": (provider.get("controller_layout")
+                                      or _provider_default_layout(key)),
+            })
+        return entries
 
     async def get_website_launch(self) -> Optional[Dict[str, str]]:
         """Launch command for a Steam tile that opens the Shelfcloud website.
@@ -951,13 +1050,13 @@ class Plugin:
                 skipped += 1
                 continue
             try:
-                entry = self._to_desired(game)
+                entries = self._to_desired(game)
             except Exception as exc:
                 # One unusable row must never cost the user their whole library.
                 decky.logger.warning("Skipping a malformed game entry: %s", exc)
-                entry = None
-            if entry:
-                desired.append(entry)
+                entries = []
+            if entries:
+                desired.extend(entries)
             else:
                 skipped += 1
 
@@ -1067,23 +1166,45 @@ class Plugin:
 
     # ------------------------------------------------- shortcut bookkeeping
 
-    async def record_shortcut(self, game_id: int, app_id: int, name: str,
+    def _resolve_key(self, key: Any, provider: str = "") -> str:
+        """The tracking key to write, accepting either shape.
+
+        A frontend from before the per-provider split sends a bare game id.
+        Rather than trust whatever arrives, it is normalised here: with a
+        provider to hand the composite key is built, and the old-shaped entry
+        it replaces is dropped so the tile is not recorded twice under two
+        different keys.
+        """
+        text = str(key)
+        if ":" in text:
+            return text
+        game_id = _key_game_id(text)
+        if game_id is None or not provider:
+            return text
+        composite = _tracking_key(game_id, provider)
+        # The same tile under its old key, now superseded.
+        if text in self._synced and text != composite:
+            self._synced.pop(text, None)
+        return composite
+
+    async def record_shortcut(self, game_id: Any, app_id: int, name: str,
                               options: str, art: str = "", provider: str = "",
                               url: str = "") -> Dict:
         """Remember a tile, and where its game launches if the gateway is down.
 
         `url` is the offline fallback. It used to be an argument in the Steam
         shortcut, which put a provider deep link in the game's properties for
-        anyone to read; it lives here instead, keyed by game id, and the
-        launcher looks it up only when the gateway does not answer.
+        anyone to read; it lives here instead, keyed by game and provider, and
+        the launcher looks it up only when the gateway does not answer.
 
         https only, and checked here rather than trusted: this file is what the
         launcher falls back to, so a bad value written now is a bad URL opened
         later, when the gateway is unreachable and nothing can correct it.
         """
-        previous = self._synced.get(str(game_id)) or {}
+        key = self._resolve_key(game_id, provider)
+        previous = self._synced.get(key) or {}
         keep = url if isinstance(url, str) and url.startswith("https://") else ""
-        self._synced[str(game_id)] = {
+        self._synced[key] = {
             "app_id": app_id, "name": name, "launch": options,
             "art": art, "provider": provider,
             # Keep the previous fallback rather than blanking it when a caller
@@ -1118,38 +1239,62 @@ class Plugin:
 
         # What this plugin believes, so the caller can prefer the tile that
         # already carries artwork and playtime over an accidental twin.
-        tracked: Dict[int, int] = {}
-        for game_id, entry in self._synced.items():
+        tracked: Dict[str, int] = {}
+        for key, entry in self._synced.items():
             app_id = as_id((entry or {}).get("app_id"))
-            key = as_id(game_id)
-            if key is not None and app_id is not None:
-                tracked[key] = app_id
+            if app_id is not None:
+                tracked[str(key)] = app_id
 
-        by_game: Dict[int, List[int]] = {}
+        # Grouped by game AND provider, which is the whole point.
+        #
+        # Grouped by game alone, the caller deletes every tile in a group but
+        # one — and with sync_all_providers on, a game's Boosteroid, Luna and
+        # GeForce NOW tiles ARE one group. Two of the three would be destroyed
+        # on every sync, taking their playtime and controller layout with them.
+        # Two tiles for the same game on the SAME service are still twins, and
+        # those are what this is for.
+        by_route: Dict[str, Dict[str, Any]] = {}
         for entry in found:
-            by_game.setdefault(entry["game_id"], []).append(entry["app_id"])
+            provider = entry.get("provider") or ""
+            key = _tracking_key(entry["game_id"], provider) if provider \
+                else str(entry["game_id"])
+            row = by_route.setdefault(key, {"game_id": entry["game_id"],
+                                            "provider": provider,
+                                            "app_ids": []})
+            row["app_ids"].append(entry["app_id"])
 
         return {
             "ok": True,
             "shortcuts": [
                 {
-                    "game_id": game_id,
-                    "app_ids": app_ids,
+                    "key": key,
+                    "game_id": row["game_id"],
+                    "provider": row["provider"],
+                    "app_ids": row["app_ids"],
                     # Keep the one already tracked; failing that the oldest,
                     # which is the one likelier to hold playtime.
-                    "keep": tracked[game_id] if tracked.get(game_id) in app_ids
-                            else app_ids[0],
-                    "tracked": tracked.get(game_id),
+                    "keep": tracked[key] if tracked.get(key) in row["app_ids"]
+                            else row["app_ids"][0],
+                    "tracked": tracked.get(key),
                 }
-                for game_id, app_ids in by_game.items()
+                for key, row in by_route.items()
             ],
         }
 
-    async def forget_shortcut(self, game_id: int) -> Dict:
-        tracked = self._synced.pop(str(game_id), None) or {}
+    async def forget_shortcut(self, game_id: Any) -> Dict:
+        key = str(game_id)
+        tracked = self._synced.pop(key, None) or {}
+        numeric = _key_game_id(key)
         # The tile is gone, so its icon file is dead weight. Left alone these
         # accumulate forever: one per game ever added, never read again.
-        self._remove_icon_files(game_id, tracked.get("app_id"))
+        #
+        # Only once the LAST tile for this game is gone. With one tile per
+        # service they share the game's artwork, so removing the Boosteroid
+        # copy of a game still on GeForce NOW must not take the icon the other
+        # tile is drawn with.
+        if numeric is not None and not any(
+                _key_game_id(other) == numeric for other in self._synced):
+            self._remove_icon_files(numeric, tracked.get("app_id"))
         await self._save_state()
         return {"ok": True}
 
@@ -1335,6 +1480,16 @@ class Plugin:
             counts[provider] = counts.get(provider, 0) + 1
         return counts
 
+    def _sync_all_providers(self) -> bool:
+        """Make a tile per service a game is on, instead of just the best one.
+
+        Off unless explicitly turned on. It multiplies the library — measured
+        here, 387 tiles become 636 — and most people want the one route their
+        preferred service gives them, so this is a choice someone makes rather
+        than one they have made for them.
+        """
+        return self._settings.get("sync_all_providers") is True
+
     def _sync_minutes(self) -> int:
         """Minutes between automatic syncs, clamped to a sane range."""
         try:
@@ -1386,6 +1541,7 @@ class Plugin:
             "install": dict(self._install),
             "sync_minutes": self._sync_minutes(),
             "sync_choices": SYNC_INTERVAL_CHOICES,
+            "sync_all_providers": self._sync_all_providers(),
             "last_error": self._last_error,
             # Only while a sign-in is in flight; the browser that
             # asks for this closed the panel that first showed it.
@@ -1531,7 +1687,7 @@ class Plugin:
     # Keys the frontend may write. Anything else — especially api_token — is
     # rejected. Shelf selection goes through set_shelf, not here.
     # If a new dropdown is added to the panel, its key must be listed here.
-    ALLOWED_SETTINGS = {"browser", "sync_minutes"}
+    ALLOWED_SETTINGS = {"browser", "sync_minutes", "sync_all_providers"}
 
     async def set_setting(self, key: str, value: Any) -> Dict[str, Any]:
         if key not in self.ALLOWED_SETTINGS:

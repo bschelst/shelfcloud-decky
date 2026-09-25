@@ -319,8 +319,17 @@ def resolve_launch(game_id: str, fallback_url: str, provider: str = "") -> tuple
         return fallback_url, "not signed in"
 
     try:
+        # The provider goes WITH the request. Without it the gateway answers
+        # from the library pin or its own ranking, which is right when a game
+        # has one tile and wrong the moment it has one per service: three
+        # Fortnite tiles share a game_id, so all three would open whichever
+        # service the ranking preferred and two of them would be lying about
+        # what they are.
+        endpoint = f"{gateway}/api/me/launch/{game_id}"
+        if provider:
+            endpoint += "?provider=" + urllib.parse.quote(provider, safe="")
         request = urllib.request.Request(
-            f"{gateway}/api/me/launch/{game_id}",
+            endpoint,
             data=b"",
             method="POST",
             headers={

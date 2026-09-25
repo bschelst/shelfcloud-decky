@@ -281,7 +281,7 @@ describe("resilience", () => {
   });
 
   it("does the pages FIRST, so progress shows them before the bulk", async () => {
-    const order: number[] = [];
+    const order: string[] = [];
     const games = [
       { ...GAME, game_id: 1, provider: "boosteroid" },
       { ...GAME, game_id: 2, provider: "shelfcloud" },
@@ -289,9 +289,9 @@ describe("resilience", () => {
     ];
     await syncLibrary(games, {}, {
       ...callbacks(),
-      record: async (gameId: number) => { order.push(gameId); },
+      record: async (key: string) => { order.push(key); },
     });
-    expect(order[0]).toBe(2);
+    expect(order[0]).toBe("2:shelfcloud");
   });
 
   it("stops DELETING when asked, which is the case cancel did nothing for", async () => {
@@ -425,7 +425,7 @@ describe("when artwork counts as finished", () => {
    *  The fingerprint is argument 5. */
   const recording = () => ({
     record: vi.fn(async (
-      _gameId: number, _appId: number, _name: string, _options: string,
+      _key: string, _appId: number, _name: string, _options: string,
       _art: string, _provider: string,
     ) => {}),
     forget: vi.fn(async () => {}),

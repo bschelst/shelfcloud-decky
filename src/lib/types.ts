@@ -16,6 +16,13 @@ export interface Artwork {
 
 /** A game the library should contain, with its launch command already built. */
 export interface DesiredGame {
+  /** How this tile is recorded: "<game id>:<provider>".
+   *
+   *  A game is not always one tile. With sync_all_providers on it gets one per
+   *  service it can be played on, and those all carry the same game_id — so a
+   *  game id no longer identifies a tile on its own. Optional only so an older
+   *  backend that does not send one still syncs. */
+  key?: string;
   game_id: number;
   name: string;
   provider: string;
@@ -42,6 +49,9 @@ export interface TrackedShortcut {
   launch: string;
   /** Fingerprint of the artwork applied, so better art can be detected later. */
   art?: string;
+  /** Which service this tile opens. Absent on an entry written before tiles
+   *  were recorded per provider, which is what makes it worth checking. */
+  provider?: string;
 }
 
 export interface LibraryResponse {
@@ -95,6 +105,9 @@ export interface Status {
   pending_login_code?: string;
   sync_minutes: number;
   sync_choices: number[];
+  /** Make a tile per service a game is on, rather than only the best one.
+   *  Off unless turned on: it multiplies the size of the library. */
+  sync_all_providers?: boolean;
   by_provider: Record<string, number>;
   last_error?: string | null;
 }

@@ -64,7 +64,12 @@ def desired(game):
     plugin = main.Plugin()
     plugin._settings = {"api_token": "t", "browser": BROWSER["app_id"]}
     with mock.patch.object(main.browsers, "resolve_browser", lambda _: dict(BROWSER)):
-        return plugin._to_desired(game)
+        made = plugin._to_desired(game)
+    # _to_desired answers with a LIST now — one tile per service a game is on.
+    # Nothing in this file is about that: each case offers a single route and
+    # asks whether it becomes a tile, so the one entry is unwrapped here and
+    # every test below keeps reading the way it did.
+    return made[0] if made else None
 
 
 # ------------------------------------------------------------------ pages

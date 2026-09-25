@@ -5,6 +5,7 @@ import {
   Dropdown,
   Focusable,
   PanelSectionRow,
+  ToggleField,
 } from "@decky/ui";
 import { FC } from "react";
 import {
@@ -74,6 +75,22 @@ export const SettingsSection: FC<SettingsSectionProps> = ({
           onChange={(option) => { void onSetSetting("sync_minutes", option.data).then(setStatus); }}
         />
       </Focusable>
+    </PanelSectionRow>
+
+    <PanelSectionRow>
+      <ToggleField
+        label="A tile per service"
+        description={
+          "Off, a game gets one tile on whichever service suits it best. On, "
+          + "it gets one for every service it plays on, so it appears in each "
+          + "of those collections. This makes the library much larger."
+        }
+        disabled={signedOut || busy}
+        checked={status.sync_all_providers === true}
+        onChange={(value) => {
+          void onSetSetting("sync_all_providers", value).then(setStatus);
+        }}
+      />
     </PanelSectionRow>
 
     {shelves?.ok && (shelves.shelves?.length ?? 0) > 0 && (

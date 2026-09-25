@@ -1,0 +1,139 @@
+# Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
+"""One tile per service, for people who want to choose at launch time.
+
+Off, a game gets the single route its preferred service gives it, which is what
+almost everyone wants. On, it gets one tile per service it plays on, so it
+turns up in each of those collections and the library says where a game can
+actually be played rather than only where this device would have picked.
+
+The two rules that matter and are easy to get wrong:
+
+  - each tile has to carry its OWN provider on the command line, because all
+    of them share a game id and the gateway would otherwise answer from its
+    ranking and open the same service three times;
+  - each tile needs its own tracking key, or the record keeps one of them and
+    the rest become orphans nothing will ever clean up.
+
+Run: python3 -m pytest tests/unit
+"""
+
+import os
+import sys
+import types
+from unittest import mock
+
+# Decky's runtime is not importable off-device; stub what main.py touches.
+decky = types.ModuleType("decky")
+decky.DECKY_PLUGIN_DIR = "/plugins/Shelfcloud"
+decky.DECKY_PLUGIN_SETTINGS_DIR = "/settings/Shelfcloud"
+decky.logger = mock.MagicMock()
+decky.emit = mock.AsyncMock()
+decky.DECKY_PLUGIN_VERSION = "0.0.0-test"
+sys.modules["decky"] = decky
+
+helpers = types.ModuleType("helpers")
+helpers.get_ssl_context = lambda: None
+sys.modules.setdefault("helpers", helpers)
+
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.join(ROOT, "py_modules"))
+
+import main  # noqa: E402
+
+BROWSER = {"app_id": "com.google.Chrome", "label": "Google Chrome"}
+
+FORTNITE = {
+    "id": 42,
+    "name": "Fortnite",
+    "chosen_provider": "amazon_luna",
+    "providers": [
+        {"provider": "boosteroid",
+         "launch_url": "https://cloud.boosteroid.com/play/fortnite"},
+        {"provider": "amazon_luna",
+         "launch_url": "https://luna.amazon.com/play/fortnite"},
+        {"provider": "geforce_now",
+         "launch_url": "https://play.geforcenow.com/games?game-id=fortnite"},
+    ],
+}
+
+
+def desired(game, all_providers: bool):
+    plugin = main.Plugin()
+    plugin._settings = {"api_token": "t", "browser": BROWSER["app_id"],
+                        "sync_all_providers": all_providers}
+    with mock.patch.object(main.browsers, "resolve_browser", lambda _: dict(BROWSER)):
+        return plugin._to_desired(game)
+
+
+# ------------------------------------------------------------------- off
+
+def test_off_by_default_one_game_is_one_tile():
+    plugin = main.Plugin()
+    plugin._settings = {"browser": BROWSER["app_id"]}
+    assert plugin._sync_all_providers() is False
+
+
+def test_off_it_is_the_preferred_service():
+    made = desired(FORTNITE, all_providers=False)
+    assert len(made) == 1
+    assert made[0]["provider"] == "amazon_luna"
+
+
+# -------------------------------------------------------------------- on
+
+def test_on_every_service_becomes_a_tile():
+    made = desired(FORTNITE, all_providers=True)
+    assert [m["provider"] for m in made] == [
+        "amazon_luna", "boosteroid", "geforce_now",
+    ], "the preferred service first, then the rest in order"
+
+
+def test_each_tile_gets_its_own_tracking_key():
+    made = desired(FORTNITE, all_providers=True)
+    keys = [m["key"] for m in made]
+    assert len(set(keys)) == len(keys), "two tiles sharing a key orphans one"
+    assert set(keys) == {"42:amazon_luna", "42:boosteroid", "42:geforce_now"}
+
+
+def test_each_tile_launches_its_own_service():
+    # The whole point. Without --provider on each one the gateway answers from
+    # its own ranking and all three tiles open the same service.
+    for made in desired(FORTNITE, all_providers=True):
+        assert f"--provider {made['provider']}" in made["options"]
+
+
+def test_every_tile_points_at_the_same_game():
+    made = desired(FORTNITE, all_providers=True)
+    assert {m["game_id"] for m in made} == {42}
+    for m in made:
+        assert "--game-id 42" in m["options"]
+
+
+def test_each_tile_keeps_the_url_of_its_own_service():
+    by_provider = {m["provider"]: m["url"] for m in desired(FORTNITE, True)}
+    assert by_provider["boosteroid"].startswith("https://cloud.boosteroid.com")
+    assert by_provider["amazon_luna"].startswith("https://luna.amazon.com")
+    assert by_provider["geforce_now"].startswith("https://play.geforcenow.com")
+
+
+def test_a_game_on_one_service_is_still_one_tile():
+    single = dict(FORTNITE, providers=FORTNITE["providers"][:1],
+                  chosen_provider="boosteroid")
+    assert len(desired(single, all_providers=True)) == 1
+
+
+def test_a_game_with_no_usable_route_makes_nothing():
+    # http for a game is refused whether or not the setting is on.
+    broken = dict(FORTNITE, providers=[
+        {"provider": "boosteroid", "launch_url": "http://insecure.example/"}])
+    assert desired(broken, all_providers=True) == []
+    assert desired(broken, all_providers=False) == []
+
+
+def test_the_setting_only_accepts_a_real_yes():
+    # A stray truthy string from an older settings file must not silently
+    # double the size of somebody's library.
+    plugin = main.Plugin()
+    plugin._settings = {"sync_all_providers": "no"}
+    assert plugin._sync_all_providers() is False
