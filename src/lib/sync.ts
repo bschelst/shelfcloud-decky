@@ -243,25 +243,40 @@ function deckControllerIndex(): number | null {
  * moonlight-steam-sync probe V2: 5th arg must be 1 (CONFIG_SELECTION_USER),
  * and the app must be in appStore before the call sticks.
  */
-function applyControllerConfig(appId: number, templateUrl: string): Promise<void> {
+function applyControllerConfig(
+  appId: number, templateUrl: string, waitForStore: boolean,
+): Promise<void> {
   return new Promise<void>((resolve) => {
     const input = (SteamClient as any).Input;
     const set = input?.SetSelectedConfigForApp;
     if (typeof set !== "function") { resolve(); return; }
 
     const idx = deckControllerIndex() ?? 0;
+    const inStore = () => !!(window as any).appStore?.GetAppOverviewByAppID?.(appId);
 
+    const apply = () => {
+      try { set.call(input, appId, idx, templateUrl, false, 1); }
+      catch { /* swallow */ }
+      resolve();
+    };
+
+    // A tile that ALREADY existed is either in appStore now or is never going
+    // to be, so it gets one look and no waiting. Polling it was costing five
+    // seconds of every sync: one tracked tile ("Decimated (Boosteroid)") had
+    // been removed from shortcuts.vdf behind the plugin's back, so its appid
+    // resolved to nothing, and the loop is serial — ten attempts at 500 ms
+    // stalled all 387 tiles behind it.
+    if (!waitForStore) {
+      if (inStore()) apply(); else resolve();
+      return;
+    }
+
+    // A tile created moments ago is different: appStore genuinely lags
+    // AddShortcut, and without the wait the call lands before Steam knows the
+    // app and silently selects nothing.
     const tryApply = (attempt: number) => {
-      const store = (window as any).appStore;
-      const loaded = !!store?.GetAppOverviewByAppID?.(appId);
-      if (loaded || attempt >= 10) {
-        try {
-          set.call(input, appId, idx, templateUrl, false, 1);
-        } catch { /* swallow */ }
-        resolve();
-      } else {
-        setTimeout(() => tryApply(attempt + 1), 500);
-      }
+      if (inStore() || attempt >= 10) apply();
+      else setTimeout(() => tryApply(attempt + 1), 500);
     };
     tryApply(0);
   });
@@ -716,7 +731,7 @@ export async function syncLibrary(
           try {
             const layoutResult = await installControllerLayout(title, game.controller_layout);
             const liveUrl = layoutResult?.autosave_url ?? game.controller_layout;
-            await applyControllerConfig(appId, liveUrl);
+            await applyControllerConfig(appId, liveUrl, true);
           } catch { /* not fatal */ }
         }
 
@@ -740,7 +755,7 @@ export async function syncLibrary(
           try {
             const layoutResult = await installControllerLayout(title, game.controller_layout);
             const liveUrl = layoutResult?.autosave_url ?? game.controller_layout;
-            await applyControllerConfig(existing.app_id, liveUrl);
+            await applyControllerConfig(existing.app_id, liveUrl, false);
           } catch { /* best effort */ }
         }
 

@@ -90,7 +90,21 @@ export async function addToProviderCollections(members: CollectionMember[]): Pro
       const overviews = appIds
         .map((id) => appStore.GetAppOverviewByAppID(id))
         .filter(Boolean);
-      if (!overviews.length) continue;
+      if (!overviews.length) {
+        // Said out loud rather than skipped in silence. "Shelfcloud
+        // (Shelfcloud)" sat at added=0 removed=0 while its one tile was
+        // tracked and present in shortcuts.vdf, and this `continue` is the
+        // only path that empties a collection without recording anything —
+        // so the one thing nobody could tell was whether it had been taken.
+        console.warn("[shelfcloud] not filing", name,
+                     "— appStore knows none of", appIds.join(", "));
+        continue;
+      }
+      const unknown = appIds.length - overviews.length;
+      if (unknown > 0) {
+        console.warn("[shelfcloud] filing", name, "without", unknown,
+                     "tile(s) appStore does not know");
+      }
 
       const existing = collectionStore.userCollections.find((c) => c.displayName === name);
       if (existing) {
