@@ -19,6 +19,10 @@ interface SteamCollection {
    *  SetApps stores the array itself and builds a Set from it, so these
    *  are compared by identity — pass back what allApps already holds. */
   RemoveApps(apps: unknown[]): void;
+  /** Rename in place, keeping the id — and so keeping the local membership
+   *  record that hangs off it. Optional: an older client may not have it, and
+   *  a wrong spelling is far better than a thrown sync. */
+  SetName?(name: string): void;
   Save(): Promise<unknown>;
   /** Read out of Steam's own bundle, where it is
    *  `async Delete(){ await store.DeleteCollection(this.id) }`. The store's
@@ -67,6 +71,36 @@ export function collectionName(provider: string): string {
 }
 
 /**
+ * Our collection under this name, whatever case it is currently spelled in.
+ *
+ * Case-insensitive because the alternative was a collection that vanished and
+ * came back every few minutes, and a Steam config with 941 membership records
+ * for thirteen collections.
+ *
+ * A collection's membership for SHORTCUTS is local, not cloud: shortcut app
+ * ids are generated per machine, so they cannot roam, and the cloud record for
+ * one of ours is `"added":[]` by design. What identifies that local record is
+ * the collection's id. So an id is not a detail — it IS the membership.
+ *
+ * Steam Cloud still holds a record named "shelfcloud (Shelfcloud)", written by
+ * a build from before the provider labels existed. It keeps being delivered
+ * back, and an exact-match lookup does not recognise it as ours: every sync
+ * that ran while it was the live one made a SECOND collection under the
+ * properly-cased name, with a new id, and the tile's membership was written
+ * against that new id. The previous id kept its record and became an orphan.
+ * Round and round: seven new ids in twelve minutes, and the user watching the
+ * collection appear and disappear.
+ *
+ * Matching case-insensitively adopts the one that is already there instead of
+ * minting another, which is what stops the cycle.
+ */
+function findCollection(name: string): SteamCollection | undefined {
+  const wanted = name.toLowerCase();
+  return collectionStore.userCollections.find(
+    (c) => c.displayName?.toLowerCase() === wanted);
+}
+
+/**
  * Put each synced app into the collection for the provider it launches through.
  *
  * Best effort: failing to sort tiles leaves them playable, which is not worth
@@ -106,8 +140,13 @@ export async function addToProviderCollections(members: CollectionMember[]): Pro
                      "tile(s) appStore does not know");
       }
 
-      const existing = collectionStore.userCollections.find((c) => c.displayName === name);
+      const existing = findCollection(name);
       if (existing) {
+        // Adopt it under the current spelling rather than leaving a second one
+        // to be made beside it. See findCollection for what this repairs.
+        if (existing.displayName !== name && typeof existing.SetName === "function") {
+          try { existing.SetName(name); } catch { /* the id is what matters */ }
+        }
         // Save() rewrites the whole collection and makes Steam re-read its
         // library, so it is the expensive part of a sync - measured at roughly
         // half a second. Adding an app that is already filed still costs a
@@ -177,12 +216,18 @@ export async function removeRetiredCollections(
 ): Promise<string[]> {
   if (typeof collectionStore === "undefined") return [];
 
-  const current = new Set(KNOWN_PROVIDERS.map(collectionName));
+  // Lower-cased, so a collection is judged retired by what it IS and not by
+  // how it happens to be spelled right now. "shelfcloud (Shelfcloud)" is the
+  // same collection as "Shelfcloud (Shelfcloud)" — deleting it as retired,
+  // while filing was creating a fresh one under the proper spelling, is the
+  // other half of the cycle described on findCollection. The two took turns
+  // and the user watched the collection flicker in and out of the library.
+  const current = new Set(KNOWN_PROVIDERS.map((p) => collectionName(p).toLowerCase()));
   const removed: string[] = [];
   // Over a copy: deleting mutates userCollections underneath us.
   for (const collection of [...collectionStore.userCollections]) {
     const name = collection.displayName;
-    if (!isOurs(name) || current.has(name)) continue;
+    if (!isOurs(name) || current.has(name.toLowerCase())) continue;
     if (typeof collection.Delete !== "function") continue;
     const strangers = (collection.allApps ?? []).filter(
       (app) => !managedAppIds.has(app.appid));
@@ -230,9 +275,13 @@ export async function pruneProviderCollections(
 ): Promise<string[]> {
   if (typeof collectionStore === "undefined") return [];
 
+  // Keyed lower-case, and read lower-case below. A collection living under an
+  // older spelling — "shelfcloud (Shelfcloud)" — matched nothing here, so
+  // `belongs` came out empty and every managed tile in it was pruned away.
+  // That emptied the collection on its own, with no cycle needed.
   const wanted = new Map<string, Set<number>>();
   for (const member of members) {
-    const name = collectionName(member.provider);
+    const name = collectionName(member.provider).toLowerCase();
     const set = wanted.get(name) ?? new Set<number>();
     set.add(member.appId);
     wanted.set(name, set);
@@ -242,7 +291,7 @@ export async function pruneProviderCollections(
   for (const collection of collectionStore.userCollections) {
     if (!isOurs(collection.displayName)) continue;
     try {
-      const belongs = wanted.get(collection.displayName) ?? new Set<number>();
+      const belongs = wanted.get(collection.displayName.toLowerCase()) ?? new Set<number>();
       // From allApps, so the objects handed back are the ones Steam holds.
       const stale = (collection.allApps ?? []).filter(
         (app) => managedAppIds.has(app.appid) && !belongs.has(app.appid));
