@@ -1079,6 +1079,8 @@ class Plugin:
         if skipped:
             decky.logger.info("Skipped %d entries that were not usable", skipped)
 
+        await self._forget_vanished_tiles()
+
         self._last_error = None
         return {
             "ok": True,
@@ -1087,6 +1089,55 @@ class Plugin:
             "skipped": skipped,
             "tracked": self._synced,
         }
+
+    async def _forget_vanished_tiles(self) -> int:
+        """Drop tracked tiles whose Steam shortcut is gone.
+
+        stray_shortcuts covers one direction — Steam has a tile we never wrote
+        down — and nothing covered the other. A tile removed from shortcuts.vdf
+        behind the plugin's back stays in synced.json forever, and every sync
+        then treats it as present: it is "existing", so no new tile is made,
+        and the reconcile updates a shortcut that is not there. The game simply
+        stops being in the library, and no amount of syncing brings it back.
+
+        It also cannot be filed into its collection, because appStore has never
+        heard of the app id — which is why "Decimated (Boosteroid)" left the
+        Boosteroid collection one short of its tracked count, permanently, for
+        as long as anyone had been looking at it.
+
+        Forgetting the entry is the whole fix: the next sync sees the game as
+        untracked and makes it a fresh tile.
+
+        Reads shortcuts.vdf rather than trusting appStore. A tile Steam simply
+        has not indexed yet is still IN the file, so only a genuinely absent
+        one is dropped — appStore alone would throw away tiles that were merely
+        new.
+        """
+        if not self._synced:
+            return 0
+        try:
+            found = await asyncio.to_thread(shortcuts.shelfcloud_shortcuts)
+        except Exception as exc:                      # never fail a sync over it
+            decky.logger.warning("could not read shortcuts.vdf: %s", exc)
+            return 0
+        # An empty read means the file could not be parsed, not that Steam has
+        # no shortcuts. Forgetting everything on that would recreate the whole
+        # library under new app ids, losing every playtime and layout with it.
+        if not found:
+            return 0
+
+        real = {entry["app_id"] for entry in found}
+        gone = [key for key, entry in self._synced.items()
+                if isinstance(entry, dict) and entry.get("app_id") not in real]
+        if not gone:
+            return 0
+
+        for key in gone:
+            decky.logger.info("tile vanished from Steam, forgetting %s (%s)",
+                              key, (self._synced[key] or {}).get("name", "?"))
+            self._synced.pop(key, None)
+        await self._save_state()
+        return len(gone)
 
     # ------------------------------------------------------------- shelves
     #
