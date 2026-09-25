@@ -117,6 +117,50 @@ def test_each_tile_keeps_the_url_of_its_own_service():
     assert by_provider["geforce_now"].startswith("https://play.geforcenow.com")
 
 
+def test_two_rows_for_one_service_make_one_tile():
+    """The catalog holds more than one row for a game on a service.
+
+    A regional entry, a re-release, a second storefront. Measured on a real
+    account: 402 boosteroid rows across 316 games, and games listing six,
+    seven and eight "providers" when only five exist.
+
+    One tile per row gives them all the same tracking key, so they collide in
+    synced.json — the sync makes the tile, makes it again for the next row,
+    and the launch URL flips between the two.
+    """
+    twice = dict(FORTNITE, providers=[
+        {"provider": "boosteroid",
+         "launch_url": "https://cloud.boosteroid.com/play/fortnite"},
+        {"provider": "boosteroid",
+         "launch_url": "https://cloud.boosteroid.com/play/fortnite-eu"},
+    ], chosen_provider="boosteroid")
+
+    made = desired(twice, all_providers=True)
+    assert len(made) == 1
+    assert made[0]["key"] == "42:boosteroid"
+
+
+def test_the_first_row_for_a_service_is_the_one_kept():
+    twice = dict(FORTNITE, providers=[
+        {"provider": "boosteroid", "launch_url": "https://cloud.boosteroid.com/first"},
+        {"provider": "boosteroid", "launch_url": "https://cloud.boosteroid.com/second"},
+    ], chosen_provider="boosteroid")
+
+    assert desired(twice, True)[0]["url"].endswith("/first")
+
+
+def test_duplicate_rows_never_produce_a_repeated_key():
+    messy = dict(FORTNITE, providers=[
+        {"provider": "geforce_now", "launch_url": "https://play.geforcenow.com/a"},
+        {"provider": "boosteroid", "launch_url": "https://cloud.boosteroid.com/a"},
+        {"provider": "geforce_now", "launch_url": "https://play.geforcenow.com/b"},
+        {"provider": "boosteroid", "launch_url": "https://cloud.boosteroid.com/b"},
+        {"provider": "amazon_luna", "launch_url": "https://luna.amazon.com/a"},
+    ])
+    keys = [m["key"] for m in desired(messy, all_providers=True)]
+    assert len(keys) == len(set(keys)) == 3
+
+
 def test_a_game_on_one_service_is_still_one_tile():
     single = dict(FORTNITE, providers=FORTNITE["providers"][:1],
                   chosen_provider="boosteroid")

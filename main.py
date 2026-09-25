@@ -771,7 +771,23 @@ class Plugin:
         if self._sync_all_providers():
             # Every route, preferred one first so it keeps whichever tile Steam
             # happens to order first and the library reads the way it did.
-            routes = sorted(providers, key=lambda p: p["provider"] != chosen)
+            ordered = sorted(providers, key=lambda p: p["provider"] != chosen)
+            # One route per SERVICE, not one per row.
+            #
+            # The catalog can hold several rows for the same game on the same
+            # service — a regional entry, a re-release, a second storefront.
+            # Measured on this account: 402 boosteroid rows across 316 games,
+            # and games listing six, seven and eight "providers" when only
+            # five exist. One tile per row gives them all the same key, so
+            # they collide in synced.json: the sync makes a tile, makes it
+            # again for the next row, and the launch URL flips between them.
+            routes = []
+            taken = set()
+            for route in ordered:
+                if route["provider"] in taken:
+                    continue
+                taken.add(route["provider"])
+                routes.append(route)
         else:
             routes = [next((p for p in providers if p["provider"] == chosen),
                            providers[0])]

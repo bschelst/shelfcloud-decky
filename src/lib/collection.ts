@@ -19,10 +19,6 @@ interface SteamCollection {
    *  SetApps stores the array itself and builds a Set from it, so these
    *  are compared by identity — pass back what allApps already holds. */
   RemoveApps(apps: unknown[]): void;
-  /** Rename in place, keeping the id — and so keeping the local membership
-   *  record that hangs off it. Optional: an older client may not have it, and
-   *  a wrong spelling is far better than a thrown sync. */
-  SetName?(name: string): void;
   Save(): Promise<unknown>;
   /** Read out of Steam's own bundle, where it is
    *  `async Delete(){ await store.DeleteCollection(this.id) }`. The store's
@@ -144,8 +140,18 @@ export async function addToProviderCollections(members: CollectionMember[]): Pro
       if (existing) {
         // Adopt it under the current spelling rather than leaving a second one
         // to be made beside it. See findCollection for what this repairs.
-        if (existing.displayName !== name && typeof existing.SetName === "function") {
-          try { existing.SetName(name); } catch { /* the id is what matters */ }
+        //
+        // Assigning displayName, because there is no SetName to call — checked
+        // on hardware, the only name member a collection has is displayName,
+        // and it is an accessor with a setter behind it. A first attempt at
+        // this called SetName guarded by a typeof check, so it did nothing at
+        // all and did it silently.
+        let renamed = false;
+        if (existing.displayName !== name) {
+          try {
+            existing.displayName = name;
+            renamed = true;
+          } catch { /* the id is the membership; the spelling is cosmetic */ }
         }
         // Save() rewrites the whole collection and makes Steam re-read its
         // library, so it is the expensive part of a sync - measured at roughly
@@ -162,7 +168,12 @@ export async function addToProviderCollections(members: CollectionMember[]): Pro
           ((existing.allApps ?? []) as Array<{ appid: number }>).map((app) => app.appid));
         const missing = overviews.filter(
           (app) => !already.has((app as { appid: number }).appid));
-        if (!missing.length) continue;
+        if (!missing.length) {
+          // Nothing to add, but a rename still has to be written or the name
+          // reverts and the collection is a stranger again on the next sync.
+          if (renamed) await existing.Save();
+          continue;
+        }
 
         existing.AsDragDropCollection().AddApps(missing);
         await existing.Save();

@@ -31,6 +31,12 @@ import {
   removeRetiredCollections,
 } from "../../src/lib/collection";
 
+// Shaped like the real thing, which matters here more than usual: a
+// collection has NO SetName. Its only name member is displayName, an accessor
+// with a setter behind it — checked on hardware. The first attempt at this fix
+// called SetName behind a typeof guard, so it silently did nothing, and the
+// collection stayed under the old spelling. A fake that offered SetName would
+// have let that ship.
 type FakeCollection = {
   id: string;
   displayName: string;
@@ -38,8 +44,8 @@ type FakeCollection = {
   deleted: boolean;
   added: number[];
   removedApps: number[];
+  saves: number;
   Delete: () => Promise<void>;
-  SetName: (name: string) => void;
   RemoveApps: (apps: Array<{ appid: number }>) => void;
   AsDragDropCollection: () => { AddApps: (apps: Array<{ appid: number }>) => void };
   Save: () => Promise<void>;
@@ -53,13 +59,13 @@ function collection(name: string, appIds: number[] = []): FakeCollection {
     deleted: false,
     added: [],
     removedApps: [],
+    saves: 0,
     Delete: async () => { self.deleted = true; },
-    SetName: (next: string) => { self.displayName = next; },
     RemoveApps: (apps) => { self.removedApps.push(...apps.map((a) => a.appid)); },
     AsDragDropCollection: () => ({
       AddApps: (apps) => { self.added.push(...apps.map((a) => a.appid)); },
     }),
-    Save: async () => {},
+    Save: async () => { self.saves += 1; },
   };
   return self;
 }
@@ -115,6 +121,30 @@ describe("filing into a collection spelled differently", () => {
     await addToProviderCollections([{ appId: TILE, provider: "shelfcloud" }]);
 
     expect(collections[0].displayName).toBe(PROPER);
+  });
+
+  it("writes the rename even when there is nothing to add", async () => {
+    // Otherwise the new name is never saved, the old one comes back, and the
+    // collection is a stranger again on the very next sync.
+    const existing = collection(LOWER, [TILE]);
+    collections.push(existing);
+
+    await addToProviderCollections([{ appId: TILE, provider: "shelfcloud" }]);
+
+    expect(existing.added).toEqual([]);
+    expect(existing.displayName).toBe(PROPER);
+    expect(existing.saves).toBe(1);
+  });
+
+  it("does not save when the name was already right and nothing is new", async () => {
+    // Save makes Steam re-read the whole library; doing it for nothing is what
+    // made a no-op sync take fifteen seconds.
+    const existing = collection(PROPER, [TILE]);
+    collections.push(existing);
+
+    await addToProviderCollections([{ appId: TILE, provider: "shelfcloud" }]);
+
+    expect(existing.saves).toBe(0);
   });
 
   it("still creates one when there is genuinely none", async () => {
