@@ -109,6 +109,11 @@ ARTWORK_MAX_BYTES = 8 * 1024 * 1024
 # memory with it.
 RESPONSE_MAX_BYTES = 64 * 1024 * 1024
 
+# A controller layout is a few kilobytes of VDF text. The largest this plugin
+# ships is under 20 KB, so a megabyte is already far past anything genuine —
+# and unlike the catalogue, this one is held in a module-level cache.
+LAYOUT_MAX_BYTES = 1024 * 1024
+
 # How many library entries one change may carry. The gateway refuses more than
 # 500, and a cancelled bulk add is routinely larger than that, so the caller
 # splits rather than losing the tail to a 422.
@@ -481,11 +486,41 @@ class Plugin:
 
     @staticmethod
     def _read_json(path: str) -> Dict:
+        """Read a JSON object from disk, or {} for anything else at all.
+
+        Two things this used to get wrong, both of which take the whole plugin
+        down rather than the one file.
+
+        It caught FileNotFoundError and JSONDecodeError only. A settings file
+        with a wrong mode raises PermissionError; one with a corrupted byte
+        raises UnicodeDecodeError, which is NOT a JSONDecodeError; a path that
+        is somehow a directory raises IsADirectoryError. Any of those reached
+        _main and stopped the plugin loading at all.
+
+        And it returned whatever JSON happened to parse to. `[]` in
+        settings.json is valid JSON and not a mapping, so `self._settings`
+        became a list and every `.get()` after it raised AttributeError — a
+        plugin that loads and then fails at everything, which is harder to
+        diagnose than one that does not load.
+
+        Returning {} is right for both: an unreadable settings file means "no
+        settings", and the caller that cares about losing state — _load_state
+        — already treats {} as "ask Steam instead" rather than "no tiles".
+        """
         try:
             with open(path, encoding="utf-8") as handle:
-                return json.load(handle)
-        except (FileNotFoundError, json.JSONDecodeError):
+                loaded = json.load(handle)
+        except (OSError, ValueError) as exc:
+            # ValueError covers JSONDecodeError and UnicodeDecodeError; OSError
+            # covers missing, unreadable, and not-a-file.
+            if not isinstance(exc, FileNotFoundError):
+                decky.logger.warning("could not read %s: %s", path, exc)
             return {}
+        if not isinstance(loaded, dict):
+            decky.logger.warning("%s holds %s, not an object; ignoring it",
+                                 path, type(loaded).__name__)
+            return {}
+        return loaded
 
     @staticmethod
     def _write_json(path: str, data: Dict) -> None:
@@ -1489,7 +1524,16 @@ class Plugin:
         })
         try:
             with urllib.request.urlopen(req, context=SSL_CTX, timeout=REQUEST_TIMEOUT) as resp:
-                text = resp.read().decode("utf-8", errors="replace")
+                # Bounded, like _request and fetch_artwork already are. This
+                # was the one read that trusted whatever answered to be
+                # reasonable about size — a controller layout is a few
+                # kilobytes of text, and the whole of it is held in memory and
+                # then in a module-level cache.
+                raw = resp.read(LAYOUT_MAX_BYTES + 1)
+                if len(raw) > LAYOUT_MAX_BYTES:
+                    raise ValueError(
+                        f"layout {name!r} is larger than {LAYOUT_MAX_BYTES} bytes")
+                text = raw.decode("utf-8", errors="replace")
         except Exception as exc:
             decky.logger.warning("custom layout download failed: %s", exc)
             # A stale copy beats no layout at all: the gateway being briefly
@@ -1514,6 +1558,18 @@ class Plugin:
             return {"ok": False, "error": "bad shortcut_name"}
         if not isinstance(template_url, str):
             return {"ok": False, "error": "bad template_url"}
+        # The name becomes a DIRECTORY, and it is built from the game's title
+        # in the catalogue — which is scraped from each provider's own API and
+        # is not ours to trust. A title containing a separator or a `..` would
+        # have this creating directories and writing files anywhere the plugin
+        # can reach: os.path.join(user_path, "../../x") leaves user_path
+        # without complaint. Checked here AND again on the resolved path
+        # below, because this one is easy to reason about and that one cannot
+        # be fooled by anything clever.
+        if (os.sep in shortcut_name or (os.altsep and os.altsep in shortcut_name)
+                or shortcut_name.strip(".") == ""):
+            decky.logger.warning("refusing a layout directory named %r", shortcut_name)
+            return {"ok": False, "error": "unsafe shortcut_name"}
 
         steam_root = os.path.realpath(os.path.expanduser("~/.steam/steam"))
 
@@ -1554,6 +1610,16 @@ class Plugin:
             if not os.path.isdir(user_path):
                 continue
             dest_dir = os.path.join(user_path, shortcut_name)
+            # Belt and braces: resolve it and confirm it really is inside the
+            # per-user config directory. The check above reads clearly and
+            # catches the obvious shapes; this one catches whatever it did
+            # not, and it is the one that has to be right.
+            if not os.path.realpath(dest_dir).startswith(
+                    os.path.realpath(user_path) + os.sep):
+                decky.logger.warning(
+                    "layout directory for %r resolves outside %s; skipping",
+                    shortcut_name, user_path)
+                continue
             os.makedirs(dest_dir, exist_ok=True)
             dest = os.path.join(dest_dir, "controller_neptune.vdf")
             try:

@@ -45,6 +45,7 @@ import { LinksSection } from "./components/LinksSection";
 import { AboutSection } from "./components/AboutSection";
 import { cancelJob, cancelRequested, finishJob, getJob, runJob, setJob, subscribeJob } from "./lib/job";
 import { theme } from "./lib/theme";
+import { isSafeExternalUrl } from "./lib/url";
 import type { DesiredGame, InstallState, Status, SyncResult } from "./lib/types";
 
 const SYNC_EVENT = "shelfcloud/library";
@@ -119,6 +120,10 @@ function scrollPanelToTop(event: React.FocusEvent<HTMLDivElement>): void {
 type SteamUrlApi = { ExecuteSteamURL(url: string): void };
 
 function openInSteamBrowser(url: string): void {
+  if (!isSafeExternalUrl(url)) {
+    console.error("[shelfcloud] refusing to open an unsafe URL", url);
+    return;
+  }
   try {
     (SteamClient.URL as unknown as SteamUrlApi).ExecuteSteamURL(`steam://openurl/${url}`);
     // Retry after a short delay — on the first call the browser window may not
