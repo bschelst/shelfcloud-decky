@@ -114,6 +114,39 @@ export const SettingsSection: FC<SettingsSectionProps> = ({
       </div>
     </PanelSectionRow>
 
+    <PanelSectionRow>
+      <Focusable style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        <div style={{ fontSize: "0.75em", opacity: 0.7 }}>Interface size</div>
+        <Dropdown
+          selectedOption={String(status.ui_scale ?? "auto")}
+          rgOptions={[
+            { data: "auto", label: "Auto" },
+            ...[1, 1.25, 1.5, 2].map((s) => ({
+              data: String(s),
+              label: `${Math.round(s * 100)}%`,
+            })),
+          ]}
+          onChange={(option) => {
+            void onSetSetting("ui_scale", option.data).then(setStatus);
+          }}
+        />
+        {/* What was detected, said out loud. The scale is applied before the
+            browser paints, so a wrong guess shows up only as a UI that is the
+            wrong size — and "Auto" is otherwise a number taken on trust. The
+            same sentence goes into the launch log. */}
+        {status.ui_scale_detected && (
+          <div style={{
+            fontSize: "0.7em",
+            opacity: 0.55,
+            lineHeight: 1.4,
+            paddingTop: 2,
+          }}>
+            {status.ui_scale_detected}
+          </div>
+        )}
+      </Focusable>
+    </PanelSectionRow>
+
     {shelves?.ok && (shelves.shelves?.length ?? 0) > 0 && (
       <PanelSectionRow>
         <Focusable style={{ display: "flex", flexDirection: "column", gap: 2 }}>

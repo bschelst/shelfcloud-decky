@@ -108,6 +108,13 @@ export interface Status {
   /** Make a tile per service a game is on, rather than only the best one.
    *  Off unless turned on: it multiplies the size of the library. */
   sync_all_providers?: boolean;
+  /** How much to scale a provider's web interface: "auto", or a number.
+   *  A cloud service's UI is built for a monitor at arm's length and is small
+   *  on a 7" handheld, smaller still across a room on a television. */
+  ui_scale?: string | number;
+  /** What was detected, in words — shown under the dropdown so "Auto" is not
+   *  a number the user has to take on trust. */
+  ui_scale_detected?: string;
   by_provider: Record<string, number>;
   last_error?: string | null;
 }

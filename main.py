@@ -30,6 +30,7 @@ from typing import Any, Dict, List, Optional
 import decky
 
 import browsers
+import display
 import weburl
 import shortcuts
 from poll import (  # re-exported so tests that import main.X keep working
@@ -1552,6 +1553,18 @@ class Plugin:
             counts[provider] = counts.get(provider, 0) + 1
         return counts
 
+    def _detected_display(self) -> str:
+        """What the panel shows under the scale dropdown.
+
+        The same answer the launcher will act on, from the same code, so the
+        line in the panel and the line in the launch log cannot disagree —
+        and so "Auto" is not a number the user has to take on trust.
+        """
+        try:
+            return display.describe(self._settings.get("ui_scale", "auto"))
+        except Exception as exc:                      # never break the panel
+            return f"could not detect the display ({exc})"
+
     def _sync_all_providers(self) -> bool:
         """Make a tile per service a game is on, instead of just the best one.
 
@@ -1614,6 +1627,8 @@ class Plugin:
             "sync_minutes": self._sync_minutes(),
             "sync_choices": SYNC_INTERVAL_CHOICES,
             "sync_all_providers": self._sync_all_providers(),
+            "ui_scale": self._settings.get("ui_scale", "auto"),
+            "ui_scale_detected": await asyncio.to_thread(self._detected_display),
             "last_error": self._last_error,
             # Only while a sign-in is in flight; the browser that
             # asks for this closed the panel that first showed it.
@@ -1759,7 +1774,7 @@ class Plugin:
     # Keys the frontend may write. Anything else — especially api_token — is
     # rejected. Shelf selection goes through set_shelf, not here.
     # If a new dropdown is added to the panel, its key must be listed here.
-    ALLOWED_SETTINGS = {"browser", "sync_minutes", "sync_all_providers"}
+    ALLOWED_SETTINGS = {"browser", "sync_minutes", "sync_all_providers", "ui_scale"}
 
     async def set_setting(self, key: str, value: Any) -> Dict[str, Any]:
         if key not in self.ALLOWED_SETTINGS:

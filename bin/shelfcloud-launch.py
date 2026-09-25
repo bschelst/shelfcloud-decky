@@ -43,6 +43,7 @@ import time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "py_modules"))
 
 import browsers  # noqa: E402
+import display  # noqa: E402
 import weburl  # noqa: E402
 import cdp  # noqa: E402
 from autoplay import (  # noqa: E402
@@ -225,7 +226,17 @@ def stored_fallback(game_id: str, provider: str = "") -> str:
     try:
         with open(STATE_FILE, encoding="utf-8") as handle:
             state = json.load(handle)
-        entry = state.get(str(game_id))
+        # Keyed "<game id>:<provider>" now, because a game can have a tile per
+        # service and they cannot share one record. The bare id is still tried,
+        # for an entry written before that and not yet rewritten — this is the
+        # offline path, which runs precisely when nothing can fetch the right
+        # answer instead, so it reads both shapes rather than one.
+        entry = state.get(f"{game_id}:{provider}") if provider else None
+        if entry is None:
+            entry = state.get(str(game_id))
+        if entry is None:
+            entry = next((v for k, v in state.items()
+                          if k.split(":", 1)[0] == str(game_id)), None)
         url = (entry or {}).get("url")
     except Exception:
         return ""
@@ -268,6 +279,34 @@ def log(message: str) -> None:
             handle.write(f"{stamp} {line}\n")
     except Exception:
         pass
+
+
+def configured_scale():
+    """What the user chose for the interface scale, or "auto".
+
+    Read from the plugin's settings at LAUNCH, deliberately, rather than baked
+    into the Steam shortcut. Launch options are written once per tile, so
+    putting it there would mean re-syncing hundreds of shortcuts to change one
+    number — and a half-finished re-sync would leave a library scaled two
+    different ways.
+    """
+    try:
+        with open(SETTINGS_FILE, encoding="utf-8") as handle:
+            return json.load(handle).get("ui_scale", "auto")
+    except Exception:
+        return "auto"
+
+
+def display_flags() -> list:
+    """Window size and scale for this display, with a line in the log.
+
+    Logged because it is otherwise invisible: the flags are applied before the
+    browser paints anything, so a wrong guess shows up only as a UI that is
+    the wrong size, with nothing to say what was detected or why.
+    """
+    setting = configured_scale()
+    log("display: " + display.describe(setting))
+    return display.flags(setting)
 
 
 def resolve_launch(game_id: str, fallback_url: str, provider: str = "") -> tuple:
@@ -421,7 +460,7 @@ def build_website_command(app_id: str, profile: str, url: str) -> list:
         f"--filesystem={profile}",
         app_id,
         f"--user-data-dir={profile}",
-        "--window-size=1280,800",
+        *display_flags(),
         "--start-maximized",
         "--class=shelfcloud-web",
         *browsers.BASE_FLAGS,
@@ -461,7 +500,7 @@ def build_browser_command(app_id: str, profile: str, url: str, kiosk: bool = Tru
         app_id,
         f"--user-data-dir={profile}",
         f"--remote-debugging-port={CDP_PORT}",
-        "--window-size=1280,800",
+        *display_flags(),
         "--class=shelfcloud",
         *browsers.BASE_FLAGS,
         *([f"--user-agent={user_agent}"] if user_agent else []),
