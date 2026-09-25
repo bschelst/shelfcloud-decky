@@ -120,7 +120,15 @@ export function NoBrowser({ installable, install, onInstall, onDismiss }: NoBrow
 
       {!busy && installable.length > 0 && (
         <PanelSectionRow>
-          <div style={{ fontSize: "0.76em", color: theme.textFaint, lineHeight: 1.45 }}>
+          {/* Inset like the per-browser note above it, which carries the same
+              padding. Without it this line sat flush against the last Install
+              button while the notes between the buttons did not. */}
+          <div style={{
+            fontSize: "0.76em",
+            color: theme.textFaint,
+            lineHeight: 1.45,
+            padding: "4px 4px 2px",
+          }}>
             Downloaded from Flathub — the same source the Discover store uses.
             About 10 MB.
           </div>

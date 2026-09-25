@@ -736,7 +736,10 @@ function Content() {
             </ButtonItem>
           </PanelSectionRow>
           <PanelSectionRow>
-            <div style={{ fontSize: 11, opacity: 0.7 }}>
+            {/* The same marginTop the note above the button already had. Two
+                footnotes in one panel were sitting at different distances
+                from the thing they explain. */}
+            <div style={{ fontSize: 11, opacity: 0.7, marginTop: 6 }}>
               Reopen this panel any time to see the code again.
             </div>
           </PanelSectionRow>

@@ -78,11 +78,13 @@ export const SettingsSection: FC<SettingsSectionProps> = ({
     </PanelSectionRow>
 
     <PanelSectionRow>
-      {/* Spaced off the dropdown above it. The rows before this one are a
-          label and a control; this one is a label, a switch AND a paragraph,
-          and with no gap the paragraph reads as if it belongs to the "Sync
-          every" dropdown sitting directly on top of it. */}
-      <div style={{ paddingTop: "10px" }}>
+      {/* Spaced on BOTH sides, which the rows around it do not need.
+          Every other row here is a small label and a control. This one is a
+          label, a switch and a paragraph — and a paragraph with nothing above
+          it reads as if it belongs to the "Sync every" dropdown sitting on
+          top, while one with nothing below it runs straight into the "Shelf
+          for …" label underneath. Padding only above fixes half of that. */}
+      <div style={{ padding: "10px 0" }}>
         <ToggleField
           label="A tile per service"
           description={
