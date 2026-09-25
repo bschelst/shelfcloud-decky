@@ -890,6 +890,17 @@ function Content() {
             });
           }}
           onSetSetting={setSetting}
+          // Turning "a tile per service" ON has to bring the games in, not
+          // just re-shape the ones already there. Fanning out a library that
+          // holds 8 of Luna's 119 games gives 8 Luna tiles and looks broken,
+          // because the other 111 were never added — a subscription covers
+          // them, and nothing had ever asked for them on the user's behalf.
+          //
+          // doAddOwned, rather than a second path of its own: it reads the
+          // Steam library, adds everything playable (owned, free-to-play and
+          // subscription alike) and syncs, with the progress, the Cancel and
+          // the put-back-on-cancel that a run this size needs.
+          onTilePerServiceEnabled={() => void doAddOwned()}
           onSetShelf={setShelf}
           onShelfChanged={() => void doSync()}
           toaster={toaster}

@@ -939,7 +939,12 @@ class Plugin:
             return {"ok": False, "error": str(exc)}
 
     async def add_owned_games(self) -> Dict[str, Any]:
-        """Add every game the user owns on Steam that is playable on cloud.
+        """Add every game the user can play on cloud.
+
+        No provider argument, so the gateway answers for all of them at once:
+        games owned on Steam, free-to-play ones, and — since a subscription is
+        itself the entitlement — whatever the user's Luna or Xbox Cloud tier
+        already covers.
 
         The alternative is picking a few hundred games one at a time on the
         website, which is the whole point of having this button.

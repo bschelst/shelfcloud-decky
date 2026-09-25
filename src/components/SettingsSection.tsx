@@ -17,6 +17,7 @@ import {
 
 import { Collapsible, IconLabel } from "./Collapsible";
 import { NotificationLogo } from "./Logo";
+import { applyTilePerService } from "../lib/settings";
 import { theme } from "../lib/theme";
 import type { Status } from "../lib/types";
 
@@ -39,6 +40,12 @@ interface SettingsSectionProps {
   onSignOut: () => void;
   onApplyOverrides: () => void;
   onSetSetting: (key: string, value: unknown) => Promise<Status>;
+  /** Run after "a tile per service" is switched ON, to pull in the games the
+   *  user can play but has never added — a subscription covers a whole
+   *  catalogue, and fanning out a library that does not contain it produces a
+   *  handful of tiles and looks broken. Not called when switching OFF: that
+   *  only removes tiles, and needs nothing fetched. */
+  onTilePerServiceEnabled?: () => void;
   onSetShelf: (shelfId: number | null) => Promise<{ ok: boolean; shelf_id?: number | null; error?: string }>;
   onShelfChanged: () => void;
   toaster: { toast: (opts: { title: string; body: string; logo?: React.ReactNode }) => void };
@@ -48,7 +55,7 @@ export const SettingsSection: FC<SettingsSectionProps> = ({
   status, setStatus, signedOut, busy, shelves,
   confirmClear, confirmSignOut,
   onRemoveAll, onSignOut, onApplyOverrides,
-  onSetSetting, onSetShelf, onShelfChanged, toaster,
+  onSetSetting, onTilePerServiceEnabled, onSetShelf, onShelfChanged, toaster,
 }) => (
   <Collapsible title="Settings" icon={<FaCog size={14} />}>
     <PanelSectionRow>
@@ -90,12 +97,18 @@ export const SettingsSection: FC<SettingsSectionProps> = ({
           description={
             "Off, a game gets one tile on whichever service suits it best. On, "
             + "it gets one for every service it plays on, so it appears in each "
-            + "of those collections. This makes the library much larger."
+            + "of those collections. Switching it on also adds the games your "
+            + "subscriptions cover but you have never added. This makes the "
+            + "library much larger and the first sync a long one."
           }
           disabled={signedOut || busy}
           checked={status.sync_all_providers === true}
           onChange={(value) => {
-            void onSetSetting("sync_all_providers", value).then(setStatus);
+            void applyTilePerService(value, {
+              setSetting: onSetSetting,
+              setStatus,
+              onEnabled: onTilePerServiceEnabled,
+            });
           }}
         />
       </div>
