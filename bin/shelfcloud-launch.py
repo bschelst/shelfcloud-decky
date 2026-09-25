@@ -48,7 +48,8 @@ import weburl  # noqa: E402
 import cdp  # noqa: E402
 from autoplay import (  # noqa: E402
     CLICK_PLAY_JS, PLAY_WORDS, DENY_WORDS, DENY_PHRASES,
-    IS_STREAMING_JS, LIST_CANDIDATES_JS, PROVIDERS, provider_profile,
+    IS_STREAMING_JS, LIST_CANDIDATES_JS, PROVIDERS, STREAM_STATS_JS,
+    provider_profile,
 )
 from luna_shims import (  # noqa: E402
     NEUTRALISE_APP_HANDOFF_JS, VIRTUAL_GAMEPAD_JS, FULLSCREEN_CHECK_JS,
@@ -61,6 +62,12 @@ CDP_PORT = 9223
 USER_AGENT = "Shelfcloud-Launcher/0.1 (+https://github.com/bschelst/shelfcloud)"
 PAGE_TIMEOUT = 45.0
 CLICK_TIMEOUT = 60.0
+
+# How long to wait for a first frame before giving up on measuring the stream.
+# Generous because a queue on a busy evening is minutes, not seconds, and this
+# costs nothing while it waits — it runs beside the session, not in front of
+# it, and a game that never starts simply goes unmeasured.
+STREAM_STATS_TIMEOUT = 180.0
 
 # Where this plugin's gateway lives. Fixed, and https.
 #
@@ -551,6 +558,58 @@ def wake_gamepads(url: str, provider: str = "") -> None:
 
 
 
+def _safely(work, *args) -> None:
+    """Run a diagnostic on a thread without letting it take the launch down.
+
+    An exception on a thread does not kill the process, but it does print a
+    traceback into a log people read when something is already wrong. One line
+    naming what failed is more use than twenty naming where.
+    """
+    try:
+        work(*args)
+    except Exception as exc:
+        log(f"{getattr(work, '__name__', 'diagnostic')} failed, continuing: {exc}")
+
+
+def log_stream_resolution(url: str, provider: str = "") -> None:
+    """Record what the stream actually came down at, once one is running.
+
+    The open question behind the interface scaling. Raising the scale shrinks
+    the CSS viewport — 1280x720 at 1.25 leaves the page believing it is
+    1024x576 — and whether that costs picture quality depends on whether the
+    provider sizes its stream from CSS pixels or from real ones. That is not
+    documented anywhere and differs per provider, so it is measured here
+    rather than assumed.
+
+    Read `stream` against `css` and `physical` in the log:
+      stream == physical  the interface got bigger for nothing in return
+      stream == css       the scaling is costing resolution, and the ladder
+                          in py_modules/display.py wants revisiting
+
+    Best effort and never fatal: this is a diagnostic, not a feature.
+    """
+    profile = provider_profile(provider)
+    marker = profile.get("page_match") or (url.split("/")[2] if "//" in url else url)
+    target = cdp.wait_for_page(CDP_PORT, marker, timeout=PAGE_TIMEOUT)
+    if not target or not target.get("webSocketDebuggerUrl"):
+        return
+    ws_url = target["webSocketDebuggerUrl"]
+
+    # A stream does not start the moment Play is pressed: there is a queue, a
+    # handshake and a first frame. Polling beats one timed guess, and giving
+    # up quietly beats holding the launch open for a session that never began.
+    deadline = time.monotonic() + STREAM_STATS_TIMEOUT
+    while time.monotonic() < deadline:
+        try:
+            stats = cdp.evaluate(ws_url, STREAM_STATS_JS)
+        except cdp.CDPError:
+            return                      # page gone; the session is over
+        if stats:
+            log(f"stream: {stats}")
+            return
+        time.sleep(2)
+
+
 def log_browser_gamepads(url: str, provider: str = "") -> None:
     """Record what the PAGE sees, which is the only view that decides anything.
 
@@ -947,6 +1006,17 @@ def main() -> int:
         log_browser_gamepads(url, provider)
     except Exception as exc:          # diagnostics never break a launch
         log(f"gamepad diagnostic failed, continuing: {exc}")
+
+    # In the background, because it waits for a first frame and a queue on a
+    # busy evening is minutes. Holding the launch open for that would delay
+    # nothing useful — the browser is already up and the game is already
+    # starting — and a daemon thread cannot keep the process alive past the
+    # session it is measuring.
+    try:
+        threading.Thread(target=_safely, args=(log_stream_resolution, url, provider),
+                         name="stream-stats", daemon=True).start()
+    except Exception as exc:
+        log(f"stream diagnostic failed to start, continuing: {exc}")
 
     started = time.monotonic()
     code = browser.wait()

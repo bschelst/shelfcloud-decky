@@ -248,6 +248,33 @@ IS_STREAMING_JS = """
 })()
 """
 
+# What the stream actually came down at, beside what the window asked for.
+#
+# Scaling the interface with --force-device-scale-factor makes a provider's UI
+# readable on a handheld and across a room, but it also shrinks the CSS
+# viewport: 1280x720 at 1.25 leaves the page believing it is 1024x576. Whether
+# that costs picture quality depends on something only the provider knows —
+# whether it sizes the stream from CSS pixels or from real ones — and the only
+# honest way to find out is to read the video element while a game runs.
+#
+# Logged, not acted on. If `stream` comes back matching `css` rather than
+# `physical`, the scaling is costing resolution and the ladder wants
+# revisiting. If it matches `physical`, the interface got bigger for free.
+STREAM_STATS_JS = """
+(() => {
+  const v = [...document.querySelectorAll('video')].find(
+    (el) => el.videoWidth > 1 && el.videoHeight > 1);
+  if (!v) return null;
+  return JSON.stringify({
+    stream: v.videoWidth + 'x' + v.videoHeight,
+    css: window.innerWidth + 'x' + window.innerHeight,
+    physical: Math.round(window.innerWidth * window.devicePixelRatio) + 'x' +
+              Math.round(window.innerHeight * window.devicePixelRatio),
+    dpr: window.devicePixelRatio,
+  });
+})()
+"""
+
 # What the page offered, for the log when nothing matched. Every provider
 # words and marks up its Play button differently and changes it without
 # notice, so a bare "not found" costs a trip to the device to find out why.
