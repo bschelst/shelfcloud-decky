@@ -78,19 +78,25 @@ export const SettingsSection: FC<SettingsSectionProps> = ({
     </PanelSectionRow>
 
     <PanelSectionRow>
-      <ToggleField
-        label="A tile per service"
-        description={
-          "Off, a game gets one tile on whichever service suits it best. On, "
-          + "it gets one for every service it plays on, so it appears in each "
-          + "of those collections. This makes the library much larger."
-        }
-        disabled={signedOut || busy}
-        checked={status.sync_all_providers === true}
-        onChange={(value) => {
-          void onSetSetting("sync_all_providers", value).then(setStatus);
-        }}
-      />
+      {/* Spaced off the dropdown above it. The rows before this one are a
+          label and a control; this one is a label, a switch AND a paragraph,
+          and with no gap the paragraph reads as if it belongs to the "Sync
+          every" dropdown sitting directly on top of it. */}
+      <div style={{ paddingTop: "10px" }}>
+        <ToggleField
+          label="A tile per service"
+          description={
+            "Off, a game gets one tile on whichever service suits it best. On, "
+            + "it gets one for every service it plays on, so it appears in each "
+            + "of those collections. This makes the library much larger."
+          }
+          disabled={signedOut || busy}
+          checked={status.sync_all_providers === true}
+          onChange={(value) => {
+            void onSetSetting("sync_all_providers", value).then(setStatus);
+          }}
+        />
+      </div>
     </PanelSectionRow>
 
     {shelves?.ok && (shelves.shelves?.length ?? 0) > 0 && (
