@@ -9,6 +9,7 @@ import { fetchArtwork, installControllerLayout, saveIcon, strayShortcuts } from 
 import { addToProviderCollections, pruneProviderCollections,
          removeRetiredCollections, type CollectionMember } from "./collection";
 import { renderPageCapsule } from "./pagecapsule";
+import { BRAND_MARK } from "./brandmark";
 import { renderPageLogo } from "./pagelogo";
 import { providerLabel, WEBSITE_PROVIDERS, type DesiredGame, type SyncResult, type TrackedShortcut } from "./types";
 
@@ -505,7 +506,14 @@ async function applyArtwork(appId: number, game: DesiredGame): Promise<ArtworkOu
   // Applied after the others so a real publisher logo always wins over a
   // drawn one.
   if (!images[logoIndex]) {
-    const drawn = await renderPageLogo(game.name, iconImage);
+    // BRAND_MARK, not iconImage. The mark beside the name is ours and is the
+    // same on every tile; iconImage is a FALLBACK CHAIN for the shortcut icon
+    // and lands wherever it lands. Once the icon slot began 404ing for
+    // catalogue games -- correctly, a game should wear its own art -- that
+    // chain fell through to the capsule, and a game with no capsule gets the
+    // gateway's default tile, which is fully opaque. The name then sat beside
+    // a black rectangle instead of a floating cloud.
+    const drawn = await renderPageLogo(game.name, BRAND_MARK);
     if (drawn) await applySlot(drawn, LibraryAsset.Logo);
   }
   if (iconImage) {
@@ -662,8 +670,13 @@ export interface SyncCallbacks {
  *         The canvas is now cut to the content. Every tile already carries the
  *         floating version and nothing else about it changed, so without this
  *         they would keep it for as long as they exist.
+ * 8 -> 9: the mark beside the name was coming from the shortcut icon's
+ *         fallback chain, which now 404s for catalogue games and fell through
+ *         to the capsule -- opaque for any game without one, so the name sat
+ *         beside a black rectangle. The mark is compiled in now. Same reason
+ *         as above: every tile already carries the black version.
  */
-export const ART_REVISION = "8";
+export const ART_REVISION = "9";
 
 /**
  * Bump when what this plugin DRAWS for a website tile changes.
