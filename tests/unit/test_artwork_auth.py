@@ -82,25 +82,39 @@ def fetch(instance, url, response=None):
     """Call fetch_artwork, returning (result, the Request that went out)."""
     sent = {}
 
-    def fake_urlopen(request, timeout=None, **kwargs):
-        # **kwargs, not a fixed signature: fetch_artwork passes context= (the
-        # pinned SSL context), and a stub that refuses it raises INSIDE the
-        # try block, where the error is caught and returned as {"ok": False}.
-        # That is indistinguishable from "the fetch was refused" — the very
-        # thing these tests assert about gating — so each of them went on
-        # passing for the wrong reason from the day TLS was pinned.
-        sent["request"] = request
-        sent["kwargs"] = kwargs
+    def fake_open(url, headers=None, method="GET", body=None, timeout=None):
+        # The signature is _open's, exactly: a stub that refuses an argument
+        # the real call passes raises INSIDE the try block, where the error is
+        # caught and returned as {"ok": False} -- indistinguishable from "the
+        # fetch was refused", which is the very thing these tests assert
+        # about. They passed for the wrong reason once already that way.
+        #
+        # A headers DICT now rather than a urllib Request: requests go through
+        # the shared connection pool, because a fresh TCP connection and TLS
+        # handshake per artwork slot is hundreds of handshakes a sync. What is
+        # asserted is unchanged -- which header reached which host.
+        sent["request"] = {"url": url, "headers": dict(headers or {})}
         return response or FakeResponse()
 
-    with mock.patch.object(main.urllib.request, "urlopen", fake_urlopen):
+    with mock.patch.object(main, "_open", fake_open):
         result = asyncio.run(instance.fetch_artwork(url))
     return result, sent.get("request")
 
 
 def header_of(request, name):
-    # urllib title-cases header names as they are added.
-    return request.get_header(name.capitalize()) if request else None
+    """One header from the captured call, however it was spelled.
+
+    A plain dict now: the pooled _open takes headers as a mapping rather than
+    building a urllib Request, so there is no get_header to ask and no
+    title-casing to work around. Matched case-insensitively, which is what
+    HTTP means anyway.
+    """
+    if not request:
+        return None
+    for key, value in request["headers"].items():
+        if key.lower() == name.lower():
+            return value
+    return None
 
 
 # --------------------------------------------------- the token goes to us

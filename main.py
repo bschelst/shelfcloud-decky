@@ -184,6 +184,99 @@ def _sized(fn):
     return wrapper
 
 
+# One connection pool for every call this plugin makes.
+#
+# urlopen opens a NEW TCP connection -- and a TLS handshake with it -- for
+# every single request. A sync makes hundreds: a layout per new tile, six
+# artwork slots per changed game, a slice per two megabytes of a hero, a
+# player count per page opened. All to the same two or three hosts, each one
+# paying for a fresh handshake before a byte of payload moves, and each one
+# leaving a socket in TIME_WAIT behind it.
+#
+# urllib3 keeps them alive and hands the same connection back. It is already
+# present -- Decky ships it -- so this costs no new dependency.
+try:
+    import urllib3 as _urllib3
+except Exception:                       # pragma: no cover - urllib3 is present
+    _urllib3 = None
+
+_POOL = None
+
+
+def _http():
+    """The shared pool, opened on first use."""
+    global _POOL
+    if _POOL is None:
+        _POOL = _urllib3.PoolManager(
+            # A handful of live connections is plenty: the calls are issued a
+            # few at a time by design, and a bigger pool would only hold
+            # sockets open for work that is not coming.
+            maxsize=4,
+            block=False,
+            # Redirects yes, retries no. A CDN moving an image is normal; an
+            # automatic retry is not ours to decide -- the callers already
+            # treat a failure as "skip this one", and a silent second attempt
+            # would double a slow request's cost without telling anybody.
+            retries=_urllib3.Retry(total=0, redirect=5, raise_on_redirect=False,
+                                   raise_on_status=False),
+            ssl_context=SSL_CTX,
+            timeout=_urllib3.Timeout(total=REQUEST_TIMEOUT),
+        )
+    return _POOL
+
+
+class _PooledResponse:
+    """A urllib3 response wearing the shape urlopen's callers expect."""
+
+    def __init__(self, raw):
+        self._raw = raw
+        self.headers = raw.headers
+        self.status = raw.status
+
+    def read(self, amount=None):
+        return self._raw.read(amount) if amount is not None else self._raw.read()
+
+    def close(self):
+        try:
+            self._raw.release_conn()
+        except Exception:
+            pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.close()
+
+
+def _open(url: str, headers: Optional[Dict[str, str]] = None, method: str = "GET",
+          body: Optional[bytes] = None, timeout: Optional[float] = None):
+    """A pooled request that FAILS the way urlopen does.
+
+    Raising HTTPError on a non-2xx is the point. Every caller here already
+    handles that shape -- a 304 meaning "what you hold is current", a 401
+    meaning "sign in again" -- and rewriting all of it around urllib3's
+    status-code-in-the-response would be a second change riding on a first.
+    """
+    if _urllib3 is None:                # pragma: no cover
+        request = urllib.request.Request(url, data=body, method=method,
+                                         headers=headers or {})
+        return urllib.request.urlopen(request, timeout=timeout or REQUEST_TIMEOUT,
+                                      context=SSL_CTX)
+
+    raw = _http().request(
+        method, url, body=body, headers=headers or {},
+        preload_content=False,
+        timeout=_urllib3.Timeout(total=timeout) if timeout else None,
+    )
+    if not (200 <= raw.status < 300):
+        raw.read()                      # drain, so the connection can be reused
+        raw.release_conn()
+        raise urllib.error.HTTPError(url, raw.status, str(raw.reason),
+                                     raw.headers, None)
+    return _PooledResponse(raw)
+
+
 def _register_configset(config_dir: str, app_key: str,
                         controller_type: str = "neptune") -> None:
     """Register a per-game config in the configset file so Steam finds it.
@@ -724,7 +817,10 @@ class Plugin:
             request.add_header("Authorization", f"Bearer {token}")
 
         try:
-            with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT, context=SSL_CTX) as response:
+            # Pooled. See _open: urlopen opened a fresh TCP connection and TLS
+            # handshake per call, and a sync makes hundreds of them.
+            with _open(url, headers=dict(request.header_items()),
+                       method=method, body=data) as response:
                 # Bounded, like fetch_artwork already is. An unbounded read
                 # here trusts whatever answered to be reasonable about size,
                 # and the largest thing this asks for — a whole catalogue — is
@@ -1200,9 +1296,7 @@ class Plugin:
         Reads one byte more than the limit so the caller can tell "exactly at
         the limit" from "too big" without holding the whole thing in memory.
         """
-        request = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT,
-                                    context=SSL_CTX) as response:
+        with _open(url, headers=headers) as response:
             content_type = response.headers.get("Content-Type", "")
             return content_type, response.read(ARTWORK_MAX_BYTES + 1)
 
@@ -1776,7 +1870,7 @@ class Plugin:
             headers["If-None-Match"] = etag
         req = urllib.request.Request(url, headers=headers)
         try:
-            with urllib.request.urlopen(req, context=SSL_CTX, timeout=REQUEST_TIMEOUT) as resp:
+            with _open(url, headers=headers) as resp:
                 # Bounded, like _request and fetch_artwork already are. This
                 # was the one read that trusted whatever answered to be
                 # reasonable about size — a controller layout is a few
@@ -2081,11 +2175,8 @@ class Plugin:
     @classmethod
     def _fetch_players(cls, steam_app_id: str) -> Dict[str, Any]:
         """Blocking half of current_players, for asyncio.to_thread."""
-        request = urllib.request.Request(
-            cls.PLAYERS_URL % steam_app_id,
-            headers={"User-Agent": ARTWORK_USER_AGENT})
-        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT,
-                                    context=SSL_CTX) as response:
+        with _open(cls.PLAYERS_URL % steam_app_id,
+                   headers={"User-Agent": ARTWORK_USER_AGENT}) as response:
             raw = response.read(64 * 1024)
         body = json.loads(raw.decode("utf-8", errors="replace"))
         inner = body.get("response") or {}

@@ -214,7 +214,8 @@ def test_a_reply_is_read_with_a_ceiling():
         headers = {"Content-Type": "application/json"}
 
     plugin = a_plugin()
-    with mock.patch.object(main.urllib.request, "urlopen",
-                           lambda *a, **k: Endless()):
+    # Patched at _open, the shared connection pool every request now goes
+    # through -- the ceiling it is guarding is unchanged.
+    with mock.patch.object(main, "_open", lambda *a, **k: Endless()):
         with pytest.raises(ValueError, match="more than"):
             plugin._request("/health", authenticated=False)
