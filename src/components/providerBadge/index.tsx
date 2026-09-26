@@ -75,6 +75,17 @@ export default function ProviderBadge(): ReactElement {
   // ever set this true if it started false.
   const [show, setShow] = useState(true);
   const [heroHeight, setHeroHeight] = useState<number | null>(null);
+  // Whether the number above came from the real hero art yet.
+  //
+  // The badge used to draw immediately at the fallback position and then
+  // JUMP down once the artwork loaded and the measurement corrected — on
+  // every game, every time the page opened. It is kept invisible until the
+  // measurement is real, so it appears once, in the right place.
+  //
+  // Invisible rather than absent: it has to be IN the document to be
+  // measured at all — offsetParent is null for an element that is not
+  // rendered, and that is the very thing being measured against.
+  const [placed, setPlaced] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -150,6 +161,7 @@ export default function ProviderBadge(): ReactElement {
         // to report. The badge kept the first wrong answer for the life of
         // the page — which is why two correct-looking fixes moved it by
         // nothing at all.
+        if (art !== hero) setPlaced(true);
         if (art !== watched && art !== hero) {
           if (watched) resizes?.unobserve(watched);
           resizes?.observe(art);
@@ -166,6 +178,10 @@ export default function ProviderBadge(): ReactElement {
       for (const delay of [150, 400, 1000, 2500]) {
         retries.push(setTimeout(measure, delay));
       }
+      // If the artwork never turns up, show it anyway rather than leaving a
+      // badge that is permanently invisible. The fallback position is only
+      // roughly right, but roughly right and visible beats correct and gone.
+      retries.push(setTimeout(() => setPlaced(true), 3000));
     };
 
     // After a tick, so the ref is attached.
@@ -192,6 +208,9 @@ export default function ProviderBadge(): ReactElement {
         zIndex: 10,
         ...badgePosition(position, heroHeight),
         display: show ? "flex" : "none",
+        // See `placed`: invisible until it knows where it goes, so it does
+        // not appear in one spot and hop to another.
+        visibility: placed ? "visible" : "hidden",
         alignItems: "center",
         gap: 6,
         padding: "5px 10px",
