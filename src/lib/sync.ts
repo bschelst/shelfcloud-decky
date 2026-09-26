@@ -120,6 +120,20 @@ const START_DIR = "/usr/bin/";
  *  reload gives every game one more try. */
 const artUnavailable = new Set<number>();
 
+/** Tiles whose controller layout has already been selected this session.
+ *
+ *  Selecting is cheap per call and ruinous in bulk: it is two Steam round
+ *  trips, and doing it for every tile on every sync turned a run that changes
+ *  NOTHING into a full minute of work -- measured at 61 seconds for 844 tiles
+ *  reporting `+0 -0 ~0`. Pressing Sync then looked like the plugin had hung,
+ *  because from the outside a minute of silence is a minute of silence.
+ *
+ *  Steam keeps the selection once it is made -- verified across syncs and a
+ *  restart -- so the second pass had nothing to do. Session-scoped rather than
+ *  stored: a plugin reload costs one slow sync and buys back the certainty
+ *  that a selection Steam dropped is put back. */
+const layoutSelected = new Set<number>();
+
 /** Ask the Python backend for an image, already base64-encoded.
  *
  *  Not fetch(): this code runs inside Steam's client at
@@ -1135,8 +1149,10 @@ export async function syncLibrary(
             const liveUrl = layoutResult?.autosave_url ?? game.controller_layout;
             await applyControllerConfig(existing.app_id, liveUrl, false,
                                         selectionBase?.repair === true);
+            layoutSelected.add(existing.app_id);
           } catch { /* best effort */ }
-        } else if (game.controller_layout && selectionBase) {
+        } else if (game.controller_layout && selectionBase
+                   && !layoutSelected.has(existing.app_id)) {
           // SELECTING is not INSTALLING, and tying them together is what broke
           // this. Installing writes files and rightly happens only for a tile
           // being touched. Selecting is a pure Steam-client call -- no RPC, no
@@ -1163,6 +1179,7 @@ export async function syncLibrary(
               `autosave://${selectionBase.base}/${layoutKey(title)}`
                 + `/controller_${selectionBase.native}.vdf`,
               false, selectionBase.repair);
+            layoutSelected.add(existing.app_id);
           } catch { /* best effort */ }
         }
 
