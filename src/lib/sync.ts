@@ -848,6 +848,24 @@ export async function syncLibrary(
     done++;
     callbacks.onProgress?.(`${label} ${shorten(name)} (${done}/${total})`);
   };
+  /** Say what is being looked at, WITHOUT a fraction.
+   *
+   *  The denominator counts games that need work, and deliberately so: making
+   *  it every game walked put 308 on a panel whose button had offered 124,
+   *  which reads as a bug even though both are right. That stays.
+   *
+   *  What did not stay true is the reason unchanged games were left silent --
+   *  "hundreds pass instantly, there is no stall to hide". They do not pass
+   *  instantly on a library of nine hundred: the scan is most of half a
+   *  minute, and for all of it the panel showed one frozen line. After an
+   *  afternoon where the plugin genuinely was stuck, a progress display that
+   *  looks stuck is the one thing it must not do.
+   *
+   *  So the name moves and the fraction does not. Nothing to reconcile with
+   *  the button, and it is visibly alive. */
+  const scanning = (name: string) => {
+    callbacks.onProgress?.(`Checking ${shorten(name)} (${done}/${total})`);
+  };
 
   // Web pages go first, and a cancel never reaches them.
   //
@@ -876,6 +894,7 @@ export async function syncLibrary(
     const existing = trackedFor(tracked, game);
     const title = shortcutTitle(game);
     const art = artworkFingerprint(game);
+    scanning(game.name);
     try {
       // The whole turn, under one deadline. See PER_GAME_TIMEOUT: the inner
       // calls are each bounded already, and the sync still froze, so this
