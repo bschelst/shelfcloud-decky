@@ -1,6 +1,10 @@
 // Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 //
 // Calls into the plugin's Python backend (main.py).
+//
+// Declare every backend method here, through guarded(). Nothing should reach
+// for callable() directly: that bypasses the payload size check, the call
+// deadline and the concurrency limit. See docs/RPC-PAYLOAD-LIMITS.md.
 
 import { guarded } from "./rpc";
 

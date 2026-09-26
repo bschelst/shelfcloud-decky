@@ -2,6 +2,10 @@
 //
 // Every call into the Python backend goes through here.
 //
+// RULE: no single message may exceed 4 MB, in either direction. Breaking it
+// does not raise, it closes the socket and freezes the plugin with an empty
+// log. Read docs/RPC-PAYLOAD-LIMITS.md before adding or changing an RPC.
+//
 // Decky carries these over a single websocket. That socket dies under a burst:
 // measured on hardware mid-sync, `DeckyBackend.ws.readyState` was CLOSED with
 // 553 calls outstanding and the request counter still climbing, because the

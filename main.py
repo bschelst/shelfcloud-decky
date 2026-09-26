@@ -355,6 +355,9 @@ ARTWORK_MAX_BYTES = 8 * 1024 * 1024
 # message. So an image is sent in slices now and the frontend puts it back
 # together. Two megabytes leaves room for the JSON around it and still moves a
 # 7 MB hero in five messages.
+# See docs/RPC-PAYLOAD-LIMITS.md. Decky's websocket closes on a message over
+# 4 MB without raising, so nothing large crosses it whole -- artwork is sliced
+# to this, and the icon is named by URL rather than shipped as bytes.
 ARTWORK_CHUNK_CHARS = 192 * 1024
 
 # Two megabytes was picked against aiohttp's 4 MB ceiling -- one message under
