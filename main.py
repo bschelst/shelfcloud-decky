@@ -2461,10 +2461,16 @@ class Plugin:
 
     # How long a player count may be reused, and how long a failure is
     # remembered. Steam's own store refreshes this on the order of minutes,
-    # and a badge on a game page is opened over and over on a Deck -- so a
-    # short cache is the difference between one request per game and one per
-    # press of the A button.
-    PLAYERS_CACHE_SECONDS = 300.0
+    # and a badge on a game page is opened over and over on a Deck -- so the
+    # cache is the difference between one request per game and one per press
+    # of the A button.
+    #
+    # Fifteen minutes rather than five: this number is context, not a
+    # readout. Nobody decides anything differently because a game moved from
+    # 61,000 players to 60,400, and paging through a library is the usual way
+    # to meet it -- so three times fewer requests to a public endpoint costs
+    # the reader nothing they would notice.
+    PLAYERS_CACHE_SECONDS = 900.0
     PLAYERS_URL = ("https://api.steampowered.com/ISteamUserStats/"
                    "GetNumberOfCurrentPlayers/v1/?appid=%s")
 
