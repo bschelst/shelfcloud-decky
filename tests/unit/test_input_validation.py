@@ -92,6 +92,61 @@ def test_nothing_is_written_outside_the_config_directory(tmp_path):
     assert not (tmp_path.parent / "escaped").exists()
 
 
+def _install_for_real(name, tmp_path):
+    """Like _install, but with the template where the code actually looks.
+
+    _install mocks a module constant the install path does not consult, so it
+    always stops at "template not found" -- fine for the refusal tests above,
+    which only care whether the NAME was accepted, but useless for checking
+    where a file lands. This builds the tree the code really reads:
+    <steam>/controller_base/templates/.
+    """
+    steam = tmp_path / "steam"
+    cfg = steam / "steamapps" / "common" / "Steam Controller Configs" / "1" / "config"
+    cfg.mkdir(parents=True, exist_ok=True)
+    templates = steam / "controller_base" / "templates"
+    templates.mkdir(parents=True, exist_ok=True)
+    (templates / "controller_neptune_gamepad+mouse.vdf").write_text(
+        '"controller_mappings"\n{\n\t"controller_type"\t\t"controller_neptune"\n}\n')
+
+    plugin = main.Plugin.__new__(main.Plugin)
+    plugin._settings = {}          # extra pad types off, the default
+    with mock.patch.object(main.os.path, "expanduser", return_value=str(steam)):
+        result = asyncio.run(plugin.install_controller_layout(
+            name, "template://controller_neptune_gamepad+mouse.vdf"))
+    return result, cfg
+
+
+def test_a_title_with_a_slash_nests_instead_of_being_refused(tmp_path):
+    """"Disney/Pixar WALL-E" is a real game, not an attack.
+
+    Steam keys a shortcut's config by its NAME and joins that onto the config
+    directory, so a slash in a title simply nests one level -- and Steam
+    resolves it back the same way when it looks the layout up. Refusing every
+    separator was an over-correction on top of a real fix: it cost two Amazon
+    Luna games their controller layout on every single sync, and the warning
+    it logged looked like an attack being blocked rather than a bug.
+    """
+    result, cfg = _install_for_real("Disney/Pixar WALL-E (Amazon Luna)", tmp_path)
+    assert "unsafe" not in str(result.get("error", "")), result
+
+    written = list(cfg.rglob("controller_neptune.vdf"))
+    assert written, "a legitimate slashed title got no layout at all"
+    # Nested, and still inside the per-user config directory.
+    for path in written:
+        assert str(path.resolve()).startswith(str(cfg.resolve()) + os.sep)
+
+
+def test_a_slash_still_cannot_be_used_to_climb(tmp_path):
+    """Allowing the separator must not re-open the hole it was closing."""
+    for bad in ("Disney/../../../x", "foo/../../bar", "/etc/passwd",
+                "a//b", "./../x"):
+        result, _ = _install(bad, tmp_path)
+        assert result["ok"] is False, f"{bad!r} was accepted"
+    assert not (tmp_path.parent / "x").exists()
+    assert not (tmp_path / "x").exists()
+
+
 def test_an_ordinary_game_title_is_still_accepted(tmp_path):
     # Real titles have colons, apostrophes and brackets. Rejecting those would
     # turn a security fix into a broken feature.

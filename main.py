@@ -120,6 +120,42 @@ def _best_template(steam_root: str, controller_type: str, flavour: str) -> Optio
     return None
 
 
+def _safe_layout_name(shortcut_name: str) -> bool:
+    """Whether a shortcut's name can be used as its config directory.
+
+    A title is not a path, but Steam treats it as one: the configset keys each
+    entry by the shortcut's NAME, and the directory is that name joined onto
+    the per-user config directory. So a title containing a slash NESTS, and
+    Steam resolves it back the same way -- "Disney/Pixar WALL-E (Amazon Luna)"
+    is a real game whose layout lives two directories deep, and Steam finds it
+    there quite happily.
+
+    This used to refuse any separator at all. That was an over-correction:
+    guarding against a title climbing out of the directory is right, but a
+    plain slash is not climbing, and two Luna games silently lost their
+    layout every sync because of it.
+
+    What is refused is a segment that means something to the filesystem rather
+    than naming a folder:
+
+      ".."          climbs, and a title has no reason to
+      ""            a leading or doubled slash -- and join() on an absolute
+                    path DISCARDS everything before it, so "/etc/x" would not
+                    be inside the config directory at all
+      "." only      resolves to the directory itself, so the layout would be
+                    written over whatever shares that name
+
+    The resolved-path check at the destination is still there and is still the
+    one that has to be right; this only makes the refusal legible and early.
+    """
+    if not shortcut_name or not shortcut_name.strip():
+        return False
+    parts = shortcut_name.split(os.sep)
+    if os.altsep:
+        parts = [bit for part in parts for bit in part.split(os.altsep)]
+    return all(part not in ("", ".", "..") for part in parts)
+
+
 def _register_configset(config_dir: str, app_key: str,
                         controller_type: str = "neptune") -> None:
     """Register a per-game config in the configset file so Steam finds it.
@@ -1694,8 +1730,7 @@ class Plugin:
         # without complaint. Checked here AND again on the resolved path
         # below, because this one is easy to reason about and that one cannot
         # be fooled by anything clever.
-        if (os.sep in shortcut_name or (os.altsep and os.altsep in shortcut_name)
-                or shortcut_name.strip(".") == ""):
+        if not _safe_layout_name(shortcut_name):
             decky.logger.warning("refusing a layout directory named %r", shortcut_name)
             return {"ok": False, "error": "unsafe shortcut_name"}
 
