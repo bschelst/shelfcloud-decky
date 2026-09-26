@@ -235,3 +235,33 @@ def test_a_gateway_that_says_nothing_about_tiers_changes_nothing():
     """needs_tier is absent on an older gateway, and for anyone who has not
     said which tier they hold. Neither of those is a paywall."""
     assert len(desired(FORTNITE, all_providers=True)) == 3
+
+
+# ------------------------------------------- the Steam appid round trip
+#
+# The player badge asks Steam how many people are playing a game, which needs
+# the game's id ON STEAM. The gateway sends it; this plugin read it and then
+# dropped it here, so `game.steam_app_id` was undefined on the frontend, the
+# map the sync builds at the end of its run was always empty, and
+# set_steam_ids was never called at all.
+#
+# So the badge had nothing to ask about on any tile: inert by construction,
+# not merely unfinished. It appeared to work for a while only because a
+# hand-written synced.json was sitting there, and the next save -- which
+# writes the in-memory copy -- overwrote it.
+
+def test_a_desired_tile_carries_the_games_steam_id():
+    game = dict(FORTNITE, steam_app_id=1172470)
+    for made in desired(game, all_providers=True):
+        assert made["steam_app_id"] == "1172470"
+
+
+def test_a_game_that_is_not_on_steam_carries_an_empty_string():
+    """About one in six of the catalogue.
+
+    An empty string rather than a missing key: the sync skips falsy values, so
+    both read the same to it, but a missing key would break anything that
+    indexes the field instead of getting it.
+    """
+    for made in desired(FORTNITE, all_providers=True):
+        assert made["steam_app_id"] == ""

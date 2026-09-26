@@ -1324,6 +1324,17 @@ class Plugin:
                 "artwork_proxy": artwork_proxy,
                 "controller_layout": (provider.get("controller_layout")
                                       or _provider_default_layout(key)),
+                # The game's id on STEAM, carried through so the sync can fill
+                # it in on every tile in one call at the end of its run.
+                #
+                # It was read from the gateway and then dropped here, so
+                # `game.steam_app_id` was undefined on the frontend, the map it
+                # builds was always empty, and set_steam_ids was never called
+                # at all. The player badge therefore had nothing to ask Steam
+                # about on any tile -- the feature was inert by construction,
+                # and looked like it worked only while a hand-written
+                # synced.json survived, which the next save overwrote.
+                "steam_app_id": str(game.get("steam_app_id") or ""),
             })
         return entries
 
