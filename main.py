@@ -264,11 +264,23 @@ def _open(url: str, headers: Optional[Dict[str, str]] = None, method: str = "GET
         return urllib.request.urlopen(request, timeout=timeout or REQUEST_TIMEOUT,
                                       context=SSL_CTX)
 
-    raw = _http().request(
-        method, url, body=body, headers=headers or {},
-        preload_content=False,
-        timeout=_urllib3.Timeout(total=timeout) if timeout else None,
-    )
+    try:
+        raw = _http().request(
+            method, url, body=body, headers=headers or {},
+            preload_content=False,
+            timeout=_urllib3.Timeout(total=timeout) if timeout else None,
+        )
+    except _urllib3.exceptions.HTTPError as exc:
+        # Translated, not passed through. urllib3 raises MaxRetryError and
+        # SSLError where urlopen raised URLError, and the callers here are
+        # written against urlopen -- _request's handler that names a
+        # certificate failure in the log catches URLError, so an untranslated
+        # urllib3 error would sail past it and the one diagnostic that says
+        # "your TLS is wrong" would never be printed again.
+        #
+        # Wrapped rather than reraised bare so the original is still attached
+        # for anything that looks.
+        raise urllib.error.URLError(exc) from exc
     if not (200 <= raw.status < 300):
         raw.read()                      # drain, so the connection can be reused
         raw.release_conn()
