@@ -13,6 +13,9 @@ export interface TilePerServiceDeps {
   setStatus: (s: Status) => void;
   /** Pulls in the games the user can play but has never added. */
   onEnabled?: () => void;
+  /** Whether a sync or bulk add is already running. The setting is stored
+   *  regardless; only the fetch that follows is held back. */
+  busy?: boolean;
 }
 
 /**
@@ -39,7 +42,15 @@ export async function applyTilePerService(
   value: boolean,
   deps: TilePerServiceDeps,
 ): Promise<void> {
+  // The setting is stored FIRST and unconditionally, whatever else is going
+  // on. It used to be reachable only when nothing was running, which meant a
+  // tap during one of the syncs that happen every few minutes did nothing at
+  // all and said nothing about it.
   const next = await deps.setSetting("sync_all_providers", value);
   deps.setStatus(next);
-  if (value) deps.onEnabled?.();
+  // The games that follow can wait for a free moment; the answer to "is this
+  // on" cannot. `busy` is what the caller knows about a run in flight — with
+  // one going, the fetch is skipped and the sync already under way picks the
+  // setting up on its next pass.
+  if (value && !deps.busy) deps.onEnabled?.();
 }

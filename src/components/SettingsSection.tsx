@@ -102,13 +102,21 @@ export const SettingsSection: FC<SettingsSectionProps> = ({
             + "subscriptions cover but you have never added. This makes the "
             + "library much larger and the first sync a long one."
           }
-          disabled={signedOut || busy}
+          // NOT disabled while a sync runs.
+          //
+          // It used to be, and a sync runs every few minutes — so tapping it
+          // at the wrong moment did nothing, said nothing, and left the switch
+          // where it was. From the outside that is a setting that will not
+          // turn on. Storing it is instant and safe at any time; only the
+          // bulk add that follows has to wait, and it already waits.
+          disabled={signedOut}
           checked={status.sync_all_providers === true}
           onChange={(value) => {
             void applyTilePerService(value, {
               setSetting: onSetSetting,
               setStatus,
               onEnabled: onTilePerServiceEnabled,
+              busy,
             });
           }}
         />

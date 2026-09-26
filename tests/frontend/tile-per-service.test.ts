@@ -83,3 +83,20 @@ describe("a panel that passes no callback", () => {
     expect(d.setSetting).toHaveBeenCalled();
   });
 });
+
+describe("while a sync is already running", () => {
+  it("still stores the setting", async () => {
+    // The toggle used to be disabled during a sync, and syncs happen every
+    // few minutes — so a tap at the wrong moment did nothing and said
+    // nothing, which from the outside is a setting that will not turn on.
+    const d = deps();
+    await applyTilePerService(true, { ...d, busy: true });
+    expect(d.setSetting).toHaveBeenCalledWith("sync_all_providers", true);
+  });
+
+  it("does not start a second bulk add on top of the run in flight", async () => {
+    const d = deps();
+    await applyTilePerService(true, { ...d, busy: true });
+    expect(d.onEnabled).not.toHaveBeenCalled();
+  });
+});
