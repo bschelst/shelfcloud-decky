@@ -663,7 +663,7 @@ export interface SyncCallbacks {
  *         floating version and nothing else about it changed, so without this
  *         they would keep it for as long as they exist.
  */
-const ART_REVISION = "8";
+export const ART_REVISION = "8";
 
 /**
  * Bump when what this plugin DRAWS for a website tile changes.

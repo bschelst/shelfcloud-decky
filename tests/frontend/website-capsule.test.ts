@@ -12,7 +12,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { artworkFingerprint, syncLibrary } from "../../src/lib/sync";
+import { ART_REVISION, artworkFingerprint, syncLibrary } from "../../src/lib/sync";
 import type { DesiredGame } from "../../src/lib/types";
 
 vi.mock("../../src/lib/api", () => ({ fetchArtwork: vi.fn(), saveIcon: vi.fn() }));
@@ -117,7 +117,7 @@ describe("reaching tiles that are already on a shelf", () => {
     // The gateway serves the same nameless capsule at the same URL, so nothing
     // the fingerprint is built from moved. Without a marker of our own, every
     // website tile already synced would keep the blank capsule forever.
-    const before = "7|||||";                       // the shape before this change
+    const before = `${ART_REVISION}|||||`;         // the shape before this change
     expect(artworkFingerprint(page())).not.toBe(before);
     expect(artworkFingerprint(page())).toContain("w1");
   });
@@ -133,7 +133,13 @@ describe("reaching tiles that are already on a shelf", () => {
     // place along, so a prefix check would pass while the whole library
     // re-synced anyway.
     const game = page({ provider: "geforce_now", artwork: { capsule: "https://cdn.test/c" } });
-    expect(artworkFingerprint(game)).toBe("7|https://cdn.test/c||||");
+    // Against the CURRENT revision, not a literal. The point of this test is
+    // that the website marker stays out of a game's fingerprint and does not
+    // shift the fields along -- neither of which has anything to do with what
+    // ART_REVISION happens to be, and pinning the digit made a deliberate
+    // bump look like a regression in the website marker.
+    expect(artworkFingerprint(game)).toBe(`${ART_REVISION}|https://cdn.test/c||||`);
+    expect(artworkFingerprint(game)).not.toContain("w1");
   });
 
   it("tells the two apart even with identical artwork", async () => {
