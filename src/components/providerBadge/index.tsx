@@ -81,6 +81,7 @@ export default function ProviderBadge(): ReactElement {
     let mutations: MutationObserver | null = null;
     let resizes: ResizeObserver | null = null;
     let retry: ReturnType<typeof setTimeout> | null = null;
+    const retries: Array<ReturnType<typeof setTimeout>> = [];
 
     const attach = () => {
       const hero = findHeroCapsule(ref.current);
@@ -133,16 +134,38 @@ export default function ProviderBadge(): ReactElement {
         const scope = ref.current?.offsetParent ?? ref.current?.parentElement;
         return scope?.querySelector('img[src*="_hero"]') ?? hero;
       };
+      let watched: Element | null = null;
       const measure = () => {
         const anchor = ref.current?.offsetParent ?? ref.current?.parentElement;
         if (!anchor) return;
-        const heroBottom = heroArt().getBoundingClientRect().bottom;
-        const anchorTop = anchor.getBoundingClientRect().top;
-        setHeroHeight(heroBottom - anchorTop);
+        const art = heroArt();
+        setHeroHeight(art.getBoundingClientRect().bottom
+                      - anchor.getBoundingClientRect().top);
+
+        // Watch the ART once it exists, not only the capsule.
+        //
+        // This measured once, at mount, and then never again: the hero image
+        // had not loaded yet so the lookup fell back to the capsule, and the
+        // capsule's own box never changes, so the ResizeObserver had nothing
+        // to report. The badge kept the first wrong answer for the life of
+        // the page — which is why two correct-looking fixes moved it by
+        // nothing at all.
+        if (art !== watched && art !== hero) {
+          if (watched) resizes?.unobserve(watched);
+          resizes?.observe(art);
+          watched = art;
+        }
       };
-      measure();
       resizes = new ResizeObserver(measure);
       resizes.observe(hero);
+      measure();
+
+      // And a few more attempts, because artwork arrives when it arrives.
+      // Cheap, bounded, and it stops as soon as the answer stops changing —
+      // setHeroHeight with an unchanged number is not a re-render.
+      for (const delay of [150, 400, 1000, 2500]) {
+        retries.push(setTimeout(measure, delay));
+      }
     };
 
     // After a tick, so the ref is attached.
@@ -150,6 +173,7 @@ export default function ProviderBadge(): ReactElement {
     return () => {
       clearTimeout(start);
       if (retry) clearTimeout(retry);
+      for (const timer of retries) clearTimeout(timer);
       mutations?.disconnect();
       resizes?.disconnect();
     };
