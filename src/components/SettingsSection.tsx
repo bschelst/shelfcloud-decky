@@ -18,6 +18,7 @@ import {
 import { Collapsible, IconLabel } from "./Collapsible";
 import { NotificationLogo } from "./Logo";
 import { applyTilePerService } from "../lib/settings";
+import { invalidateBadgeData } from "../lib/badgeData";
 import { theme } from "../lib/theme";
 import type { Status } from "../lib/types";
 
@@ -146,6 +147,52 @@ export const SettingsSection: FC<SettingsSectionProps> = ({
         )}
       </Focusable>
     </PanelSectionRow>
+
+    <PanelSectionRow>
+      <div style={{ padding: "10px 0" }}>
+        <ToggleField
+          label="Provider badge"
+          description={
+            "Shows which service a game streams from, on its page in the "
+            + "library. Only on the games Shelfcloud added, so it is also how "
+            + "you tell a cloud game from one that is installed."
+          }
+          checked={status.badge_enabled !== false}
+          onChange={(value) => {
+            void onSetSetting("badge_enabled", value).then((next) => {
+              setStatus(next);
+              // The badge caches this for half a minute so that paging
+              // through a library is not two RPCs per press. A setting the
+              // user just changed must not wait that out.
+              invalidateBadgeData();
+            });
+          }}
+        />
+      </div>
+    </PanelSectionRow>
+
+    {status.badge_enabled !== false && (
+      <PanelSectionRow>
+        <Focusable style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          <div style={{ fontSize: "0.75em", opacity: 0.7 }}>Badge corner</div>
+          <Dropdown
+            selectedOption={status.badge_position ?? "bl"}
+            rgOptions={[
+              { data: "bl", label: "Bottom left" },
+              { data: "br", label: "Bottom right" },
+              { data: "tl", label: "Top left" },
+              { data: "tr", label: "Top right" },
+            ]}
+            onChange={(option) => {
+              void onSetSetting("badge_position", option.data).then((next) => {
+                setStatus(next);
+                invalidateBadgeData();
+              });
+            }}
+          />
+        </Focusable>
+      </PanelSectionRow>
+    )}
 
     {shelves?.ok && (shelves.shelves?.length ?? 0) > 0 && (
       <PanelSectionRow>

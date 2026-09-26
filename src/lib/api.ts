@@ -86,6 +86,15 @@ export const recordShortcut =
            provider: string, url: string], unknown>("record_shortcut");
 export const forgetShortcut = callable<[key: string], unknown>("forget_shortcut");
 
+/** app id -> which service that tile launches, for the library badge.
+ *
+ *  Its own call rather than the whole library: this runs on a patched Steam
+ *  route, once per game page opened, and it only needs one word. */
+export const trackedProviders = callable<[], {
+  ok: boolean;
+  providers?: Record<string, string>;
+}>("tracked_providers");
+
 /** Every Shelfcloud tile Steam actually has, read from shortcuts.vdf.
  *
  *  The plugin's own record can drift: a shortcut created but never written

@@ -1,6 +1,6 @@
 // Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 
-import { addEventListener, definePlugin, removeEventListener, toaster } from "@decky/api";
+import { addEventListener, definePlugin, removeEventListener, routerHook, toaster } from "@decky/api";
 import {
   ButtonItem,
   Focusable,
@@ -46,6 +46,8 @@ import { AboutSection } from "./components/AboutSection";
 import { cancelJob, cancelRequested, finishJob, getJob, runJob, setJob, subscribeJob } from "./lib/job";
 import { theme } from "./lib/theme";
 import { isSafeExternalUrl } from "./lib/url";
+import { invalidateBadgeData } from "./lib/badgeData";
+import { patchLibraryApp } from "./lib/patchLibraryApp";
 import type { DesiredGame, InstallState, Status, SyncResult } from "./lib/types";
 
 const SYNC_EVENT = "shelfcloud/library";
@@ -967,12 +969,20 @@ export default definePlugin(() => {
         // notifying from every waiter would be one toast per poll tick that
         // happened to land during a long sync.
         if (owned && result.added > 0) toaster.toast(newGamesToast(result.addedNames));
+        // Tiles were made or removed, so the badge's app-id map is stale by
+        // definition. Cheaper than a shorter cache life, and exact.
+        invalidateBadgeData();
       })
       .catch((error) => {
         console.error("[shelfcloud] background sync failed", error);
       });
   };
   addEventListener(SYNC_EVENT, onLibraryChanged);
+
+  // The provider badge on Steam's own game page. Patched here rather than in
+  // the panel: the panel exists only while it is open, and the badge has to
+  // be there whenever a game page is.
+  const libraryPatch = patchLibraryApp();
 
 
 
@@ -993,6 +1003,13 @@ export default definePlugin(() => {
     icon: <LogoMono />,
     onDismount() {
       removeEventListener(SYNC_EVENT, onLibraryChanged);
+      // Removed explicitly. A patch left behind survives the plugin being
+      // unloaded and keeps rendering a component whose module is gone.
+      try {
+        routerHook.removePatch("/library/app/:appid", libraryPatch);
+      } catch (error) {
+        console.error("[shelfcloud] could not remove the library patch", error);
+      }
     },
   };
 });

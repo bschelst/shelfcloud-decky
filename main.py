@@ -1645,6 +1645,28 @@ class Plugin:
         return {"ok": installed > 0, "installed": installed,
                 "autosave_url": autosave_url if installed else None}
 
+    async def tracked_providers(self) -> Dict[str, Any]:
+        """app id -> which service that tile launches, for the library badge.
+
+        Its own call rather than reading the whole library: the badge runs on
+        a patched Steam route, once per game page opened, and asking the
+        gateway for several hundred games to learn one word would be absurd.
+        This reads only what is already in memory.
+
+        Keys are strings because they cross to JavaScript, where a number that
+        large is fine but an object key is a string regardless — returning
+        ints would make the frontend convert them back on every lookup.
+        """
+        out: Dict[str, str] = {}
+        for entry in self._synced.values():
+            if not isinstance(entry, dict):
+                continue
+            app_id = entry.get("app_id")
+            provider = entry.get("provider")
+            if isinstance(app_id, int) and isinstance(provider, str) and provider:
+                out[str(app_id)] = provider
+        return {"ok": True, "providers": out}
+
     async def sync_finished(self, added: int, removed: int, updated: int) -> Dict:
         self._last_sync = asyncio.get_event_loop().time()
         decky.logger.info("Sync: +%d -%d ~%d (tracked=%d)",
@@ -1758,6 +1780,12 @@ class Plugin:
             "sync_all_providers": self._sync_all_providers(),
             "ui_scale": self._settings.get("ui_scale", "auto"),
             "ui_scale_detected": await asyncio.to_thread(self._detected_display),
+            # On unless turned off: a badge that says where a tile streams
+            # from is the point of having the tiles look different at all.
+            "badge_enabled": self._settings.get("badge_enabled") is not False,
+            "badge_position": (self._settings.get("badge_position")
+                               if self._settings.get("badge_position")
+                               in self.BADGE_POSITIONS else "bl"),
             "last_error": self._last_error,
             # Only while a sign-in is in flight; the browser that
             # asks for this closed the panel that first showed it.
@@ -1903,11 +1931,24 @@ class Plugin:
     # Keys the frontend may write. Anything else — especially api_token — is
     # rejected. Shelf selection goes through set_shelf, not here.
     # If a new dropdown is added to the panel, its key must be listed here.
-    ALLOWED_SETTINGS = {"browser", "sync_minutes", "sync_all_providers", "ui_scale"}
+    ALLOWED_SETTINGS = {"browser", "sync_minutes", "sync_all_providers", "ui_scale",
+                        "badge_enabled", "badge_position"}
+
+    # Where the provider badge sits on a game's page. Validated as a set
+    # rather than trusted: this value is written into a style, and a dropdown
+    # is not the only thing that can call set_setting.
+    BADGE_POSITIONS = ("tl", "tr", "bl", "br")
 
     async def set_setting(self, key: str, value: Any) -> Dict[str, Any]:
         if key not in self.ALLOWED_SETTINGS:
             decky.logger.warning("Rejected setting key: %s", key)
+            return await self.get_status()
+        # badge_position is written into a CSS rule on a patched Steam page,
+        # so it is checked against the list rather than taken on trust. The
+        # dropdown can only send one of four values; set_setting is an RPC and
+        # the dropdown is not the only thing that can call it.
+        if key == "badge_position" and value not in self.BADGE_POSITIONS:
+            decky.logger.warning("Rejected badge position: %r", value)
             return await self.get_status()
         self._settings[key] = value
         await self._save_settings()

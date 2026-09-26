@@ -115,6 +115,11 @@ export interface Status {
   /** What was detected, in words — shown under the dropdown so "Auto" is not
    *  a number the user has to take on trust. */
   ui_scale_detected?: string;
+  /** Show a mark on a cloud game's page saying which service streams it.
+   *  On unless turned off. */
+  badge_enabled?: boolean;
+  /** Which corner it sits in: "tl", "tr", "bl" or "br". */
+  badge_position?: string;
   by_provider: Record<string, number>;
   last_error?: string | null;
 }

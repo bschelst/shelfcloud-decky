@@ -1,0 +1,182 @@
+// Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
+//
+// A small mark on a game's page saying which service streams it.
+//
+// Shaped after the ProtonDB plugin's medal, which solves the same problem on
+// the same page: sit over the hero image, survive the fullscreen transition,
+// and be placed by the user rather than by us. The mechanics that are not
+// obvious — the mutation observer, measuring the hero to place a bottom
+// badge — are taken from there deliberately, because they were arrived at
+// against a moving Steam UI and re-deriving them would be re-earning scars.
+//
+// What is different: a cloud tile is a NON-Steam shortcut, so the app id in
+// the route is the shortcut's own and needs no lookup against Steam's
+// catalogue. And the badge is shown only for tiles this plugin made — on
+// anything else it renders nothing at all, which is what makes it mean
+// "this one is a cloud game".
+
+import { appDetailsClasses, appDetailsHeaderClasses } from "@decky/ui";
+import { useEffect, useRef, useState, type CSSProperties, type ReactElement } from "react";
+import { FaAmazon, FaCloud, FaXbox } from "react-icons/fa";
+import { SiNvidia } from "react-icons/si";
+
+import { LogoMono } from "../Logo";
+import { providerInfo } from "../../lib/theme";
+import { useParams } from "../../lib/useParams";
+import { useBadgeSettings, useProviderForApp } from "../../lib/badgeData";
+
+/** Distance from the bottom of the hero image, for the bottom positions. */
+const BOTTOM_OFFSET = 40;
+
+/** Used when the hero has not been measured yet. The same number the
+ *  ProtonDB medal falls back to, for the same reason: it is roughly where the
+ *  hero ends at the Deck's own resolution, so a badge placed with it lands
+ *  close enough not to jump visibly once the real height arrives. */
+const FALLBACK_HERO_HEIGHT = 290;
+
+const TOP_POSITIONS: Record<string, CSSProperties> = {
+  tl: { top: "40px", left: "20px" },
+  tr: { top: "60px", right: "20px" },
+};
+
+function positionStyle(position: string, heroHeight: number | null): CSSProperties {
+  if (position in TOP_POSITIONS) return TOP_POSITIONS[position];
+  const top = `${(heroHeight ?? FALLBACK_HERO_HEIGHT) - BOTTOM_OFFSET}px`;
+  return position === "br" ? { top, right: "20px" } : { top, left: "20px" };
+}
+
+/** The mark for each service.
+ *
+ *  Boosteroid has no icon in react-icons and no wordmark we may redistribute,
+ *  so it gets a generic cloud. The two website providers get the Shelfcloud
+ *  mark, because what they have in common is that WE published them. */
+function ProviderIcon({ provider, size }: { provider: string; size: number }) {
+  switch (provider) {
+    case "geforce_now": return <SiNvidia size={size} />;
+    case "xbox_cloud": return <FaXbox size={size} />;
+    case "amazon_luna": return <FaAmazon size={size} />;
+    case "shelfcloud":
+    case "custom":
+      // LogoMono sizes itself in em, so the font-size around it is the knob.
+      return <span style={{ fontSize: size, lineHeight: 0 }}><LogoMono /></span>;
+    default: return <FaCloud size={size} />;
+  }
+}
+
+/** Find the hero capsule, which is what a bottom badge is measured against.
+ *
+ *  Walks from our own node rather than querying the document: there is one of
+ *  these per app page and more than one app page can exist in the tree during
+ *  a transition, so a global query can return somebody else's. */
+function findHeroCapsule(node: HTMLDivElement | null): Element | null {
+  const siblings = node?.parentElement?.children;
+  if (!siblings) return null;
+
+  let header: Element | undefined;
+  for (const child of siblings) {
+    if (child.className.includes(appDetailsClasses.Header)) { header = child; break; }
+  }
+  if (!header) return null;
+
+  for (const child of header.children) {
+    if (child.className.includes(appDetailsHeaderClasses.TopCapsule)) return child;
+  }
+  return null;
+}
+
+export default function ProviderBadge(): ReactElement {
+  const { appid } = useParams<{ appid: string }>();
+  const provider = useProviderForApp(appid);
+  const { enabled, position } = useBadgeSettings();
+
+  // Visible by default: opening a page is not a mutation, so nothing would
+  // ever set this true if it started false.
+  const [show, setShow] = useState(true);
+  const [heroHeight, setHeroHeight] = useState<number | null>(null);
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    let mutations: MutationObserver | null = null;
+    let resizes: ResizeObserver | null = null;
+    let retry: ReturnType<typeof setTimeout> | null = null;
+
+    const attach = () => {
+      const hero = findHeroCapsule(ref.current);
+      if (!hero) {
+        // The tree is not finished yet. Retrying beats giving up: this
+        // component mounts as part of the render it is measuring.
+        retry = setTimeout(attach, 100);
+        return;
+      }
+
+      // Steam animates in and out of the fullscreen hero, and an absolutely
+      // positioned child sits over the animation looking wrong for its
+      // duration. Hide for the transition, come back when it settles.
+      mutations = new MutationObserver((entries) => {
+        for (const entry of entries) {
+          if (entry.type !== "attributes" || entry.attributeName !== "class") continue;
+          const name = (entry.target as Element).className;
+          const moving =
+            name.includes(appDetailsHeaderClasses.FullscreenEnterStart) ||
+            name.includes(appDetailsHeaderClasses.FullscreenEnterActive) ||
+            name.includes(appDetailsHeaderClasses.FullscreenEnterDone) ||
+            name.includes(appDetailsHeaderClasses.FullscreenExitStart) ||
+            name.includes(appDetailsHeaderClasses.FullscreenExitActive);
+          const settled = name.includes(appDetailsHeaderClasses.FullscreenExitDone);
+          setShow(!moving || settled);
+        }
+      });
+      mutations.observe(hero, { attributes: true, attributeFilter: ["class"] });
+
+      const measure = () => setHeroHeight(hero.getBoundingClientRect().height);
+      measure();
+      resizes = new ResizeObserver(measure);
+      resizes.observe(hero);
+    };
+
+    // After a tick, so the ref is attached.
+    const start = setTimeout(attach, 0);
+    return () => {
+      clearTimeout(start);
+      if (retry) clearTimeout(retry);
+      mutations?.disconnect();
+      resizes?.disconnect();
+    };
+  }, []);
+
+  // Nothing at all unless this is one of ours. A badge on every game would
+  // say nothing; the whole meaning is "this tile streams".
+  if (!enabled || !provider) return <></>;
+
+  const { label, color: accent } = providerInfo(provider);
+  return (
+    <div
+      ref={ref}
+      style={{
+        position: "absolute",
+        zIndex: 10,
+        ...positionStyle(position, heroHeight),
+        display: show ? "flex" : "none",
+        alignItems: "center",
+        gap: 6,
+        padding: "5px 10px",
+        borderRadius: 999,
+        // Dark and translucent rather than the provider's colour: it sits on
+        // artwork nobody chose, and a solid block of brand colour over a
+        // screenshot reads as damage. The colour is the icon.
+        background: "rgba(8, 10, 14, 0.78)",
+        border: `1px solid ${accent}`,
+        color: accent,
+        fontSize: 12,
+        fontWeight: 600,
+        lineHeight: 1,
+        whiteSpace: "nowrap",
+        pointerEvents: "none",          // never steal a click from the page
+        backdropFilter: "blur(6px)",
+      }}
+    >
+      <ProviderIcon provider={provider} size={14} />
+      <span style={{ color: "#e8ecf2" }}>{label}</span>
+    </div>
+  );
+}
