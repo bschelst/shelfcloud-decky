@@ -30,9 +30,33 @@
 import { INK, loadImage, toPng, type Png, type SourceImage } from "./canvas";
 import { fitText, tidyName } from "./textfit";
 
-/** Steam's logo canvas. Matches the tiles the gateway ships. */
+/** Steam's logo canvas.
+ *
+ *  640 wide like every logo Steam serves. The HEIGHT is not 360, and that is
+ *  the point: 360 is what a publisher ships when the artwork FILLS it, and
+ *  ours does not. The mark is 150 tall and the words beside it about the
+ *  same, so on a 360 canvas the content sat between 29% and 71% of the
+ *  height with nothing above or below it.
+ *
+ *  Steam pins the logo against the bottom of the hero, so that empty 29%
+ *  became a gap under the words and the whole thing floated. Disney/Pixar
+ *  WALL-E sat visibly higher than the games either side of it.
+ *
+ *  Measured rather than guessed, off Steam's own CDN. Real logos put their
+ *  content between roughly 20% and 85% of the canvas:
+ *
+ *      Hades           y 19%..87%      Cyberpunk 2077  y 27%..79%
+ *      Hollow Knight   y 24%..88%      Terraria        y 25%..78%
+ *
+ *  and Portal 2 ships 640x191 with the artwork filling all of it, which is
+ *  the case that settles it: a short, wide logo canvas is normal and Steam
+ *  draws it correctly. So the canvas is cut to the content instead of the
+ *  content being floated in a canvas built for someone else's artwork.
+ *
+ *  At 210 the same content lands at 14%..86%, which is where the measured
+ *  logos live. */
 export const LOGO_W = 640;
-export const LOGO_H = 360;
+export const LOGO_H = 210;
 
 /** Where the mark sits and how much room is left for words. */
 const MARK_BOX = 150;          // the square the mark is drawn into

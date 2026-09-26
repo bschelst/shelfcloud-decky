@@ -71,6 +71,23 @@ describe("fitting the name", () => {
     expect(widthOf(layout)).toBeLessThanOrEqual(layout.textWidth + 0.5);
   });
 
+  it("fills the canvas rather than floating in the middle of it", () => {
+    // Steam pins the logo against the bottom of the hero, so empty canvas
+    // under the artwork becomes a gap under the words and the whole logo
+    // rides high -- which is exactly what Disney/Pixar WALL-E did on a 360
+    // tall canvas, where the content only ever reached 71% of the height.
+    //
+    // The bound comes off Steam's own CDN, not off taste. Real logos put
+    // their content between roughly 20% and 85%: Hades 19..87, Hollow Knight
+    // 24..88, Cyberpunk 27..79, Terraria 25..78, and Portal 2 fills a 640x191
+    // canvas completely. Leave at most 20% of the height empty underneath.
+    const layout = logoLayout("Anything", measure);
+    const bottom = layout.mark.y + layout.mark.size;
+    expect(bottom / LOGO_H).toBeGreaterThan(0.8);
+    // Symmetric: the mark is centred, so the same holds above it.
+    expect(layout.mark.y / LOGO_H).toBeLessThan(0.2);
+  });
+
   it("keeps the mark inside the canvas and clear of the words", () => {
     const layout = logoLayout("Anything", measure);
     expect(layout.mark.x).toBeGreaterThanOrEqual(0);
