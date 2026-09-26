@@ -49,7 +49,7 @@ describe("a socket that has died", () => {
   it("fails the call instead of leaving it pending forever", async () => {
     const { guarded } = await freshRpc();
     socket(3);
-    await expect(guarded("get_status")()).rejects.toThrow(/socket is closed/);
+    await expect(guarded("get_status")()).rejects.toThrow(/connection to the plugin has dropped/);
     expect(calls).toHaveLength(0);          // nothing was posted into it
   });
 

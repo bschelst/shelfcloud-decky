@@ -80,8 +80,15 @@ export function guarded<A extends unknown[], R>(name: string): (...args: A) => P
         // Thrown rather than left pending. The callers already treat a failed
         // call as "skip this and carry on", and an error that says why beats
         // a sync that stops with no reason recorded anywhere.
-        return Promise.reject(
-          new Error(`backend unreachable: Decky's socket is closed (${name})`));
+        //
+        // It says what to DO, because nothing here can fix it: Decky exposes
+        // no way to reopen this socket, and it does not reopen itself. An
+        // error that only says "unreachable" leaves you pressing Sync at
+        // something that can never answer.
+        return Promise.reject(new Error(
+          "Decky's connection to the plugin has dropped and does not come "
+          + "back on its own \u2014 reload Shelfcloud in Decky \u203a Settings "
+          + `\u203a Plugins. (${name})`));
       }
       return call(...args);
     });

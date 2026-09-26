@@ -17,6 +17,7 @@ Stdlib only: Decky's Python environment does not guarantee third-party packages.
 
 import asyncio
 import base64
+import functools
 import json
 import os
 import random
@@ -154,6 +155,33 @@ def _safe_layout_name(shortcut_name: str) -> bool:
     if os.altsep:
         parts = [bit for part in parts for bit in part.split(os.altsep)]
     return all(part not in ("", ".", "..") for part in parts)
+
+
+def _sized(fn):
+    """Log a reply big enough to close Decky's websocket.
+
+    aiohttp's WebSocketResponse refuses a message over 4 MB by CLOSING the
+    connection -- no exception on either side, so the plugin does not fail, it
+    stops, and every later call waits for an answer that cannot arrive. A 7 MB
+    Steam hero did that on every sync until artwork was cut into slices, and
+    something else is still doing it at around the eightieth call.
+
+    Guessing which reply took seven attempts last time. This names it.
+    """
+    @functools.wraps(fn)
+    async def wrapper(self, *args, **kwargs):
+        reply = await fn(self, *args, **kwargs)
+        try:
+            size = len(json.dumps(reply, default=str))
+            if size > 512 * 1024:
+                decky.logger.warning(
+                    "reply %s is %.2f MB%s", fn.__name__, size / 1048576.0,
+                    "  <-- OVER aiohttp's 4 MB limit, this closes the socket"
+                    if size > 4 * 1024 * 1024 else "")
+        except Exception:
+            pass
+        return reply
+    return wrapper
 
 
 def _register_configset(config_dir: str, app_key: str,
@@ -1111,6 +1139,7 @@ class Plugin:
         }
 
 
+    @_sized
     async def fetch_artwork(self, url: str, offset: int = 0) -> Dict[str, Any]:
         """Download one artwork image and return it base64-encoded, in slices.
 
@@ -1212,6 +1241,7 @@ class Plugin:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    @_sized
     async def preview_owned(self) -> Dict[str, Any]:
         """How many owned-on-Steam games could be added in one go."""
         try:
@@ -1316,6 +1346,7 @@ class Plugin:
             return {"ok": False, "error": str(exc), "restored": restored}
         return {"ok": True, "restored": restored}
 
+    @_sized
     async def sync_steam_library(self) -> Dict[str, Any]:
         """Re-read which games the user owns from Steam."""
         try:
@@ -1326,6 +1357,7 @@ class Plugin:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    @_sized
     async def get_desired_library(self) -> Dict[str, Any]:
         """What the Steam library should contain, ready to act on."""
         try:
@@ -1588,6 +1620,7 @@ class Plugin:
         await self._save_state()
         return {"ok": True}
 
+    @_sized
     async def stray_shortcuts(self) -> Dict:
         """Shelfcloud tiles Steam has that this plugin does not account for.
 
@@ -2018,6 +2051,7 @@ class Plugin:
         decky.logger.warning("frontend: %s", message[:300])
         return {"ok": True}
 
+    @_sized
     async def tracked_providers(self) -> Dict[str, Any]:
         """app id -> which service that tile launches, for the library badge.
 
@@ -2135,6 +2169,7 @@ class Plugin:
     def _version() -> str:
         return decky.DECKY_PLUGIN_VERSION or "unknown"
 
+    @_sized
     async def get_status(self) -> Dict[str, Any]:
         browser = await asyncio.to_thread(browsers.resolve_browser, self._settings.get("browser"))
         signed_in = await self._verify_auth()
