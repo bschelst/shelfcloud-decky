@@ -28,11 +28,27 @@ export interface SourceImage {
   kind: "png" | "jpg";
 }
 
+/** How long an image may take to decode before it is given up on. */
+const DECODE_TIMEOUT = 10000;
+
 export function loadImage(src: string): Promise<HTMLImageElement | null> {
   return new Promise((resolve) => {
+    // onload and onerror cover a picture that arrives and one that is refused.
+    // They do not cover a decode that simply never finishes, and this is fed
+    // base64 that came off the network -- so a third ending is needed, or a
+    // single bad image stops the sync where it stands. Drawing is a nicety
+    // anyway: null here means the tile keeps its own art.
+    let done = false;
+    const finish = (value: HTMLImageElement | null) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const timer = setTimeout(() => finish(null), DECODE_TIMEOUT);
     const image = new Image();
-    image.onload = () => resolve(image);
-    image.onerror = () => resolve(null);
+    image.onload = () => finish(image);
+    image.onerror = () => finish(null);
     image.src = src;
   });
 }
