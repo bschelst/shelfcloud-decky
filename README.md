@@ -172,6 +172,12 @@ No. Provider sign-ins happen in the browser's own profile. Shelfcloud never touc
 </details>
 
 <details>
+<summary><strong>Can my Steam friends see which game I'm playing?</strong></summary>
+
+Yes. Each tile is named after its game and service &mdash; for example, `Valheim (Boosteroid)` &mdash; and Steam shows that name to your friends while you play, exactly as it does for any other game. This is standard Steam presence, not something Shelfcloud adds. If you'd rather not broadcast it, hide your game activity in Steam's privacy settings or set your status to invisible.
+</details>
+
+<details>
 <summary><strong>What's the difference between shelves and the shared library?</strong></summary>
 
 The **shared library** is your default game list — every device sees it. A **shelf** is an optional, named subset you create on the website. When you point a device at a shelf, it syncs only the games on that shelf (plus the shared ones). This lets you tailor each device without removing games from other devices. If you only have one device, you don't need shelves — the shared library is all you need.
