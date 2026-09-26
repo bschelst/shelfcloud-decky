@@ -57,7 +57,9 @@ export const getDesiredLibrary = guarded<[], LibraryResponse>("get_desired_libra
  *  client every image URL is cross-origin, and our own gateway is plain HTTP
  *  (mixed content). Python has neither restriction. */
 export const fetchArtwork =
-  guarded<[url: string], { ok: boolean; base64?: string; kind?: string; error?: string }>("fetch_artwork");
+  guarded<[url: string, offset?: number],
+          { ok: boolean; base64?: string; kind?: string; error?: string;
+            offset?: number; total?: number }>("fetch_artwork");
 /** Write an icon to disk and get its path back.
  *
  *  Steam takes the four library slots as bytes, but takes a shortcut icon as a

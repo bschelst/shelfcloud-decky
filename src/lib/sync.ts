@@ -143,12 +143,29 @@ async function phase(name: string): Promise<void> {
 
 async function fetchArtworkBase64(url: string): Promise<{ data: string; kind: "png" | "jpg" } | undefined> {
   try {
-    // The backend answers over Decky's socket, and a message that goes
-    // missing leaves this promise pending for ever -- which froze whole syncs
-    // with the backend sitting idle, because nothing ever asked it again.
-    const result = await withTimeout(fetchArtwork(url), undefined, RPC_TIMEOUT);
+    // Collected in slices, because one message cannot carry a whole image.
+    //
+    // Decky's RPC replies ride a websocket, and aiohttp CLOSES the connection
+    // on a message over 4 MB rather than erroring. Steam hero art is 6-7 MB,
+    // which is 9 MB of base64 -- so the first hero of every sync killed the
+    // socket, and every call after it waited for an answer that could never
+    // arrive. That is the freeze, and the reason it landed on a different
+    // game each run: whichever one happened to need artwork first.
+    let result = await withTimeout(fetchArtwork(url), undefined, RPC_TIMEOUT);
     if (!result?.ok || !result.base64) return undefined;
-    return { data: result.base64, kind: result.kind === "png" ? "png" : "jpg" };
+
+    let data = result.base64;
+    const kind = result.kind === "png" ? "png" : "jpg";
+    const total = result.total ?? data.length;
+    // Bounded by the data itself, not by trust: a backend that kept answering
+    // with an empty slice would otherwise spin here for ever.
+    while (data.length < total) {
+      const more = await withTimeout(
+        fetchArtwork(url, data.length), undefined, RPC_TIMEOUT);
+      if (!more?.ok || !more.base64) return undefined;
+      data += more.base64;
+    }
+    return { data, kind };
   } catch {
     return undefined;
   }

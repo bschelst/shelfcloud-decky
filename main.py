@@ -200,6 +200,22 @@ ARTWORK_USER_AGENT = (
     f"Shelfcloud/0.1 ({_hardware_label()}; +https://github.com/bschelst/shelfcloud)")
 ARTWORK_MAX_BYTES = 8 * 1024 * 1024
 
+# The most base64 one RPC reply may carry.
+#
+# This is the bug that stopped every sync today, and it is not about size in
+# the abstract -- it is aiohttp's. Decky carries RPC replies over a websocket,
+# and aiohttp's WebSocketResponse refuses a message over 4 MB by CLOSING the
+# connection. No error reaches either side: the socket simply goes, and every
+# call after it waits for an answer that can never come. That is why a sync
+# died at call 475 one run and call 77 the next -- the number never mattered,
+# the first oversized reply did.
+#
+# Steam hero art is 6-7 MB on this Deck, which is 9 MB of base64 in one
+# message. So an image is sent in slices now and the frontend puts it back
+# together. Two megabytes leaves room for the JSON around it and still moves a
+# 7 MB hero in five messages.
+ARTWORK_CHUNK_CHARS = 2 * 1024 * 1024
+
 # The most any gateway reply may be. Generous on purpose — the biggest is the
 # whole catalogue, a few megabytes — but not unbounded: a captive portal or a
 # broken proxy answering a stream of bytes should fail, not fill the Deck's
@@ -1095,8 +1111,12 @@ class Plugin:
         }
 
 
-    async def fetch_artwork(self, url: str) -> Dict[str, Any]:
-        """Download one artwork image and return it base64-encoded.
+    async def fetch_artwork(self, url: str, offset: int = 0) -> Dict[str, Any]:
+        """Download one artwork image and return it base64-encoded, in slices.
+
+        `offset` asks for the rest of an image already fetched. The reply says
+        `total`, so the caller knows when it has all of it -- see
+        ARTWORK_CHUNK_CHARS for why this cannot be one message.
 
         The frontend used to fetch these itself, which cannot work in general:
         that code runs inside Steam's client at https://steamloopback.host, so
@@ -1115,6 +1135,15 @@ class Plugin:
         # are written to disk and handed to Steam as a shortcut icon.
         if not isinstance(url, str) or not url.startswith("https://"):
             return {"ok": False, "error": "unsupported url"}
+
+        # A continuation of the image just sent. Answered from memory: asking
+        # the CDN again for six megabytes we already hold, four more times, is
+        # the sort of thing that turns a fix into a different problem.
+        if offset:
+            held = getattr(self, "_artwork_part", None)
+            if held and held[0] == url:
+                return self._artwork_slice(held[1], held[2], offset)
+            return {"ok": False, "error": "image no longer held; fetch again"}
 
         headers = {"User-Agent": ARTWORK_USER_AGENT}
         # Our own gateway needs the credential; a provider's CDN must never see
@@ -1142,10 +1171,24 @@ class Plugin:
             return {"ok": False, "error": f"not an image ({content_type})"}
         if len(raw) > ARTWORK_MAX_BYTES:
             return {"ok": False, "error": "image too large"}
+
+        encoded = base64.b64encode(raw).decode()
+        kind = "png" if content_type.endswith("png") else "jpg"
+        # Held so the follow-up slices do not re-download the same picture.
+        # One entry is enough: the caller asks for a whole image before it
+        # moves to the next.
+        self._artwork_part = (url, encoded, kind)
+        return self._artwork_slice(encoded, kind, 0)
+
+    @staticmethod
+    def _artwork_slice(encoded: str, kind: str, offset: int) -> Dict:
+        """One message worth of an encoded image, and how much there is."""
         return {
             "ok": True,
-            "base64": base64.b64encode(raw).decode(),
-            "kind": "png" if content_type.endswith("png") else "jpg",
+            "base64": encoded[offset:offset + ARTWORK_CHUNK_CHARS],
+            "kind": kind,
+            "offset": offset,
+            "total": len(encoded),
         }
 
     @staticmethod
