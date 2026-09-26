@@ -2276,6 +2276,10 @@ class Plugin:
             # they are two places, and wanting one without the other is a
             # perfectly ordinary thing to want.
             "badge_on_cards": self._settings.get("badge_on_cards") is not False,
+            "players_enabled": bool(self._settings.get("players_enabled")),
+            "players_position": (self._settings.get("players_position")
+                                 if self._settings.get("players_position")
+                                 in self.BADGE_POSITIONS else "tr"),
             "badge_position": (self._settings.get("badge_position")
                                if self._settings.get("badge_position")
                                in self.BADGE_POSITIONS else "bl"),
@@ -2426,7 +2430,8 @@ class Plugin:
     # If a new dropdown is added to the panel, its key must be listed here.
     ALLOWED_SETTINGS = {"browser", "sync_minutes", "sync_all_providers", "ui_scale",
                         "badge_enabled", "badge_on_cards", "badge_position",
-                        "extra_pad_layouts"}
+                        "extra_pad_layouts", "players_enabled",
+                        "players_position"}
 
     # Where the provider badge sits on a game's page. Validated as a set
     # rather than trusted: this value is written into a style, and a dropdown

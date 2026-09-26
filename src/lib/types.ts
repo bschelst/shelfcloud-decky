@@ -27,6 +27,9 @@ export interface DesiredGame {
    *  backend that does not send one still syncs. */
   key?: string;
   game_id: number;
+  /** The game's id on STEAM, where it has one. Absent for the ~17% that
+   *  are not on Steam at all. */
+  steam_app_id?: string | number | null;
   name: string;
   provider: string;
   exe: string;
@@ -127,6 +130,10 @@ export interface Status {
   badge_on_cards?: boolean;
   /** Where it sits: "tl", "tm", "tr", "bl", "bm" or "br". */
   badge_position?: string;
+  /** Show how many people are playing, from Steam. Off by default. */
+  players_enabled?: boolean;
+  /** Where that one sits. Same six positions. */
+  players_position?: string;
   by_provider: Record<string, number>;
   last_error?: string | null;
 }

@@ -16,6 +16,14 @@ import type {
 export const logNote = guarded<[message: string], { ok: boolean }>("log_note");
 
 export const getStatus = guarded<[], Status>("get_status");
+
+/** How many people are playing this game on Steam right now.
+ *
+ *  ok=false when the game is not on Steam at all -- one in six of the
+ *  catalogue -- which is a different thing from nobody playing it. */
+export const currentPlayers =
+  guarded<[steam_app_id: string],
+          { ok: boolean; players?: number; error?: string }>("current_players");
 export const setSetting = guarded<[key: string, value: unknown], Status>("set_setting");
 
 /** Start installing one of the offered browsers. Returns as soon as it has
@@ -101,6 +109,9 @@ export const forgetShortcut = guarded<[key: string], unknown>("forget_shortcut")
 export const trackedProviders = guarded<[], {
   ok: boolean;
   providers?: Record<string, string>;
+  /** app id -> the game's id on STEAM, absent for the one game in six that
+   *  is not on Steam and so can have no player count. */
+  steam_ids?: Record<string, string>;
 }>("tracked_providers");
 
 /** Every Shelfcloud tile Steam actually has, read from shortcuts.vdf.

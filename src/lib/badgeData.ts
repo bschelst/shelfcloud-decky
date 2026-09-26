@@ -14,7 +14,7 @@
 
 import { useEffect, useState } from "react";
 
-import { getStatus, trackedProviders } from "./api";
+import { currentPlayers, getStatus, trackedProviders } from "./api";
 
 /** How long an answer may be reused. Long enough that paging through a
  *  library costs one request, short enough that a sync finishing elsewhere
@@ -32,8 +32,13 @@ function emptyCache<T>(value: T): Cached<T> {
 }
 
 let providers = emptyCache<Record<string, string>>({});
-let badge = emptyCache<{ enabled: boolean; onCards: boolean; position: string }>(
-  { enabled: true, onCards: true, position: "bl" });
+/** app id -> the game's id on STEAM, for tiles whose game is on Steam. */
+let steamIds = emptyCache<Record<string, string>>({});
+let badge = emptyCache<{
+  enabled: boolean; onCards: boolean; position: string;
+  players: boolean; playersPosition: string;
+}>({ enabled: true, onCards: true, position: "bl",
+     players: false, playersPosition: "tr" });
 
 /** Throw both answers away, so the next badge asks again.
  *
@@ -41,6 +46,7 @@ let badge = emptyCache<{ enabled: boolean; onCards: boolean; position: string }>
  *  app-id map is stale by definition. */
 export function invalidateBadgeData(): void {
   providers = emptyCache(providers.value);
+  steamIds = emptyCache(steamIds.value);
   badge = emptyCache(badge.value);
 }
 
@@ -73,12 +79,20 @@ export function refreshBadgeData(): void {
     const result = await trackedProviders();
     return result?.ok && result.providers ? result.providers : {};
   });
+  void read(steamIds, async () => {
+    const result = await trackedProviders();
+    return result?.ok && result.steam_ids ? result.steam_ids : {};
+  });
   void read(badge, async () => {
     const status = await getStatus();
     return {
       enabled: status?.badge_enabled !== false,
       onCards: status?.badge_on_cards !== false,
       position: status?.badge_position ?? "bl",
+      // Off by default. It asks Steam a question per game page opened, and a
+      // count nobody wanted is not worth that.
+      players: status?.players_enabled === true,
+      playersPosition: status?.players_position ?? "tr",
     };
   });
 }
@@ -127,7 +141,10 @@ export function useProviderForApp(appId: string | undefined): string | undefined
 }
 
 /** Whether to show the badge, and where. */
-export function useBadgeSettings(): { enabled: boolean; onCards: boolean; position: string } {
+export function useBadgeSettings(): {
+  enabled: boolean; onCards: boolean; position: string;
+  players: boolean; playersPosition: string;
+} {
   const [value, setValue] = useState(badge.value);
 
   useEffect(() => {
@@ -138,10 +155,51 @@ export function useBadgeSettings(): { enabled: boolean; onCards: boolean; positi
         enabled: status?.badge_enabled !== false,
         onCards: status?.badge_on_cards !== false,
         position: status?.badge_position ?? "bl",
+        players: status?.players_enabled === true,
+        // Top right by default, so it does not land on the provider badge,
+        // which defaults to the bottom left.
+        playersPosition: status?.players_position ?? "tr",
       };
     }).then((next) => { if (!cancelled) setValue(next); });
     return () => { cancelled = true; };
   }, []);
 
   return value;
+}
+
+
+/** How many people are playing this tile's game on Steam, if anyone can say.
+ *
+ *  Undefined covers three different "no": the tile is not one of ours, its
+ *  game is not on Steam at all (about one in six), or Steam had no answer.
+ *  None of those is a zero, and showing "0 playing" for any of them would be
+ *  a statement we cannot support.
+ *
+ *  Not cached here: current_players caches on the backend, where the answer
+ *  is shared by every page that asks and a five minute life is right. A
+ *  second cache in front of it would only make the number staler.
+ */
+export function usePlayersForApp(appId: string | undefined): number | undefined {
+  const [players, setPlayers] = useState<number | undefined>(undefined);
+
+  useEffect(() => {
+    let cancelled = false;
+    setPlayers(undefined);
+    if (!appId) return;
+
+    void read(steamIds, async () => {
+      const result = await trackedProviders();
+      return result?.ok && result.steam_ids ? result.steam_ids : {};
+    }).then(async (map) => {
+      const steamId = map[appId];
+      if (!steamId || cancelled) return;
+      const answer = await currentPlayers(steamId).catch(() => undefined);
+      if (!cancelled && answer?.ok && typeof answer.players === "number") {
+        setPlayers(answer.players);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [appId]);
+
+  return players;
 }

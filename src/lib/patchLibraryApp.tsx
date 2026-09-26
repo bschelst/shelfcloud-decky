@@ -22,6 +22,7 @@ import {
 import { routerHook } from "@decky/api";
 import type { ReactElement } from "react";
 
+import PlayersBadge from "../components/playersBadge";
 import ProviderBadge from "../components/providerBadge";
 
 /* Steam's tree is untyped and its shape is not ours. `unknown` with casts at
@@ -51,7 +52,10 @@ export function patchLibraryApp(): LibraryPatch {
         // Returning it untouched loses the badge and nothing else.
         if (typeof container !== "object" || container === null) return ret;
 
+        // Two badges, each placed by its own setting, so they can sit in
+        // different corners without either knowing about the other.
         (container as any).props.children.splice(1, 0, <ProviderBadge />);
+        (container as any).props.children.splice(2, 0, <PlayersBadge />);
         return ret;
       },
     );

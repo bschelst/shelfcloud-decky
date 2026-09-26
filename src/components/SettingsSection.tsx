@@ -13,6 +13,7 @@ import {
   FaGamepad,
   FaSignOutAlt,
   FaTrashAlt,
+  FaUsers,
 } from "react-icons/fa";
 
 import { Collapsible, IconLabel } from "./Collapsible";
@@ -198,6 +199,51 @@ export const SettingsSection: FC<SettingsSectionProps> = ({
         />
       </div>
     </PanelSectionRow>
+
+    <PanelSectionRow>
+      <div style={{ width: "100%" }}>
+        <ToggleField
+          label={<IconLabel icon={<FaUsers size={12} />}>Players online</IconLabel>}
+          description={
+            "How many people are playing the game on Steam right now. Cloud "
+            + "tiles are not Steam games, so Steam cannot show this itself. "
+            + "Games that are not on Steam show nothing."
+          }
+          checked={status.players_enabled === true}
+          onChange={(value) => {
+            void onSetSetting("players_enabled", value).then((next) => {
+              setStatus(next);
+              invalidateBadgeData();
+            });
+          }}
+        />
+      </div>
+    </PanelSectionRow>
+
+    {status.players_enabled === true && (
+      <PanelSectionRow>
+        <Focusable style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          <div style={{ fontSize: "0.75em", opacity: 0.7 }}>Players corner</div>
+          <Dropdown
+            selectedOption={status.players_position ?? "tr"}
+            rgOptions={[
+              { data: "bl", label: "Bottom left" },
+              { data: "bm", label: "Bottom middle" },
+              { data: "br", label: "Bottom right" },
+              { data: "tl", label: "Top left" },
+              { data: "tm", label: "Top middle" },
+              { data: "tr", label: "Top right" },
+            ]}
+            onChange={(option) => {
+              void onSetSetting("players_position", option.data).then((next) => {
+                setStatus(next);
+                invalidateBadgeData();
+              });
+            }}
+          />
+        </Focusable>
+      </PanelSectionRow>
+    )}
 
     {(status.badge_enabled !== false || status.badge_on_cards !== false) && (
       <PanelSectionRow>

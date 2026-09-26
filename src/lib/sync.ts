@@ -648,8 +648,10 @@ async function adoptStrayShortcuts(
       // The empty url leaves any fallback already recorded untouched; the
       // next full sync fills it in from the gateway.
       await withTimeout(
+        // No DesiredGame here, so no Steam id to offer -- the backend keeps
+        // whatever the tile already had rather than blanking it.
         callbacks.record(key, entry.keep, adopted.name,
-                         adopted.launch, "", entry.provider ?? "", ""),
+                         adopted.launch, "", entry.provider ?? "", "", ""),
         undefined, RPC_TIMEOUT);
     } catch {
       /* the in-memory map is already right; the file catches up next time */
@@ -663,6 +665,9 @@ export interface SyncCallbacks {
     // still accepts a bare id from an older frontend and normalises it.
     key: string, appId: number, name: string, options: string, art: string,
     provider: string, url: string,
+    /** The game's id on STEAM, so the tile can later be asked how many
+     *  people are playing it. Empty for the games that are not on Steam. */
+    steamAppId: string,
   ) => Promise<unknown>;
   forget: (key: string) => Promise<unknown>;
   onProgress?: (message: string) => void;
@@ -936,7 +941,7 @@ export async function syncLibrary(
         await withTimeout(
           callbacks.record(trackingKey(game), appId, title, game.options,
                            appliedNew.visible ? art : "", game.provider,
-                           game.url ?? ""),
+                           game.url ?? "", String(game.steam_app_id ?? "")),
           undefined, RPC_TIMEOUT);
         file({ appId, provider: game.provider });
         result.added++;
@@ -995,7 +1000,8 @@ export async function syncLibrary(
           const recordedArt = tryArt && !appliedArt.visible ? (existing.art ?? "") : art;
           await withTimeout(
             callbacks.record(trackingKey(game), existing.app_id, title, game.options,
-                             recordedArt, game.provider, game.url ?? ""),
+                             recordedArt, game.provider, game.url ?? "",
+                             String(game.steam_app_id ?? "")),
             undefined, RPC_TIMEOUT);
           result.updated++;
         }
