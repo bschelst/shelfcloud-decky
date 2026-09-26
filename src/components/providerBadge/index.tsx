@@ -122,7 +122,17 @@ export default function ProviderBadge(): ReactElement {
       // The hero IMAGE rather than the capsule around it, too — measured on
       // hardware, the capsule reported 342px where the image inside it was
       // 360, so the capsule's edge is not the edge anyone sees.
-      const heroArt = (): Element => hero.querySelector('img[src*="_hero"]') ?? hero;
+      // Searched from the ANCHOR, not from inside the capsule.
+      //
+      // The hero image is not a descendant of the element findHeroCapsule
+      // returns — measured on hardware, the capsule is 342px tall and the
+      // image is 360, sitting in a different branch. Looking for it inside
+      // the capsule therefore always missed and always fell back to the
+      // capsule, which is the whole 18px the badge kept floating by.
+      const heroArt = (): Element => {
+        const scope = ref.current?.offsetParent ?? ref.current?.parentElement;
+        return scope?.querySelector('img[src*="_hero"]') ?? hero;
+      };
       const measure = () => {
         const anchor = ref.current?.offsetParent ?? ref.current?.parentElement;
         if (!anchor) return;
