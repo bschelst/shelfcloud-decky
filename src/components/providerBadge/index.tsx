@@ -134,70 +134,27 @@ export default function ProviderBadge(): ReactElement {
       // The hero IMAGE rather than the capsule around it, too — measured on
       // hardware, the capsule reported 342px where the image inside it was
       // 360, so the capsule's edge is not the edge anyone sees.
-      // Searched from the ANCHOR, not from inside the capsule.
+      // The CAPSULE, which is what the ProtonDB medal measures.
       //
-      // The hero image is not a descendant of the element findHeroCapsule
-      // returns — measured on hardware, the capsule is 342px tall and the
-      // image is 360, sitting in a different branch. Looking for it inside
-      // the capsule therefore always missed and always fell back to the
-      // capsule, which is the whole 18px the badge kept floating by.
-      const heroArt = (): Element => {
-        const scope = ref.current?.offsetParent ?? ref.current?.parentElement;
-        return scope?.querySelector('img[src*="_hero"]') ?? hero;
-      };
-      let watched: Element | null = null;
-      let previous: number | null = null;
-
+      // Its height is settled at first paint. The hero IMAGE is not: the
+      // <img> is in the tree long before it has loaded, and an unloaded one
+      // has no height — so measuring that drew the badge against nothing and
+      // hopped it down when the picture arrived. Three attempts at hiding
+      // the hop were three attempts at papering over a problem introduced by
+      // measuring the wrong thing. The capsule never moves, so there is
+      // nothing to hide.
       const measure = () => {
         const anchor = ref.current?.offsetParent ?? ref.current?.parentElement;
         if (!anchor) return;
-        const art = heroArt();
-        const value = art.getBoundingClientRect().bottom
+        const value = hero.getBoundingClientRect().bottom
                       - anchor.getBoundingClientRect().top;
+        if (value <= 0) return;
         setHeroHeight(value);
-
-        // Shown only once the answer STOPS CHANGING.
-        //
-        // The first attempt at this revealed the badge as soon as the hero
-        // <img> existed — but an img element exists long before it has
-        // loaded, and an unloaded one has no height. So the badge appeared
-        // against a zero-height image and hopped down the moment the picture
-        // arrived, on every game, which is exactly what it was meant to stop.
-        //
-        // Two readings that agree is the honest test of "settled". It costs
-        // one extra tick and makes no assumption about what Steam is loading
-        // or when.
-        if (value > 0 && previous !== null && Math.abs(value - previous) < 0.5) {
-          setPlaced(true);
-        }
-        previous = value;
-
-        // Watch the ART itself once it exists, not only the capsule, whose
-        // own box never changes — which is why nothing ever re-measured.
-        if (art !== watched && art !== hero) {
-          if (watched) resizes?.unobserve(watched);
-          resizes?.observe(art);
-          watched = art;
-          // And the moment the picture lands, rather than at the next poll.
-          if (art instanceof HTMLImageElement && !art.complete) {
-            art.addEventListener("load", measure, { once: true });
-          }
-        }
+        setPlaced(true);
       };
       resizes = new ResizeObserver(measure);
       resizes.observe(hero);
       measure();
-
-      // And a few more attempts, because artwork arrives when it arrives.
-      // Cheap, bounded, and it stops as soon as the answer stops changing —
-      // setHeroHeight with an unchanged number is not a re-render.
-      for (const delay of [150, 400, 1000, 2500]) {
-        retries.push(setTimeout(measure, delay));
-      }
-      // If the artwork never turns up, show it anyway rather than leaving a
-      // badge that is permanently invisible. The fallback position is only
-      // roughly right, but roughly right and visible beats correct and gone.
-      retries.push(setTimeout(() => setPlaced(true), 3000));
     };
 
     // After a tick, so the ref is attached.
