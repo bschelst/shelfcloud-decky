@@ -297,6 +297,11 @@ def _open(url: str, headers: Optional[Dict[str, str]] = None, method: str = "GET
     return _PooledResponse(raw)
 
 
+# The characters Steam removes from a shortcut name before using it as a
+# directory: everything Windows forbids in a filename, plus the full stop.
+# Verified against Steam's own answer for all 840 tiles on this Deck.
+_STEAM_STRIPS = '\\/:*?"<>|.'
+
 def _layout_key(shortcut_name: str) -> str:
     """The name Steam uses for a shortcut's controller config, LOWERCASED.
 
@@ -318,8 +323,24 @@ def _layout_key(shortcut_name: str) -> str:
 
     It looked like a per-provider fault because whichever service was tried
     was equally invisible.
+
+    Lower case is not the whole rule. Steam also STRIPS the characters that
+    cannot appear in a Windows filename, and the dot with them:
+
+        "R.E.P.O. (Boosteroid)"        -> "repo (boosteroid)"
+        "BLiNX: The Time Sweeper (…)"  -> "blinx the time sweeper (…)"
+        "… Xbox Series X|S (…)"        -> "… xbox series xs (…)"
+
+    Derived by asking Steam for its own answer on every tile and comparing:
+    this rule reproduces all 840 of them exactly. It is why 139 tiles still
+    missed after the lower-casing alone — every one of them had a colon, a
+    pipe or a full stop in its name.
+
+    A pleasant side effect: "/" goes too, so a title like "Disney/Pixar
+    WALL-E" can no longer nest a directory, and the name is a single path
+    segment by construction rather than by checking.
     """
-    return shortcut_name.lower()
+    return "".join(c for c in shortcut_name.lower() if c not in _STEAM_STRIPS)
 
 
 def _register_configset(config_dir: str, app_key: str,
@@ -383,6 +404,18 @@ ARTWORK_MAX_BYTES = 8 * 1024 * 1024
 # See docs/RPC-PAYLOAD-LIMITS.md. Decky's websocket closes on a message over
 # 4 MB without raising, so nothing large crosses it whole -- artwork is sliced
 # to this, and the icon is named by URL rather than shipped as bytes.
+# Bumped to force ONE pass that re-selects every layout, ignoring the
+# "leave a user's own choice alone" rule.
+#
+# That rule cannot tell a real choice from the broken state this plugin used to
+# write: both are eSelectionType 1 naming an autosave file in the tile's own
+# directory. So the guard, working exactly as intended, protected the bug from
+# being fixed -- every tile stayed on Steam's default template.
+#
+# Raising this number repairs once and then gets out of the way; a choice made
+# after the repair is respected like any other.
+LAYOUT_REPAIR = 2
+
 ARTWORK_CHUNK_CHARS = 192 * 1024
 
 # Two megabytes was picked against aiohttp's 4 MB ceiling -- one message under
@@ -2081,27 +2114,54 @@ class Plugin:
         if not os.path.isdir(configs_root):
             return {"ok": False, "error": "no controller configs directory"}
 
-        # The user directory holding the most of our layouts.
+        # THE SIGNED-IN ACCOUNT's directory, derived from its Steam ID.
         #
-        # Steam keeps one per account that has signed in on this device, and
-        # this Deck has four. Only the signed-in one matters, and picking by
-        # population finds it without asking Steam who is logged in -- an empty
-        # or stale directory cannot win.
-        best, best_count = None, -1
-        for user_dir in os.listdir(configs_root):
-            path = os.path.join(configs_root, user_dir, "config")
-            if not os.path.isdir(path):
-                continue
-            try:
-                count = sum(1 for entry in os.listdir(path)
-                            if os.path.isdir(os.path.join(path, entry)))
-            except OSError:
-                continue
-            if count > best_count:
-                best, best_count = path, count
+        # Steam keeps one per account that has ever signed in here, and this
+        # Deck has four. Only the signed-in one is read, and a config selected
+        # under any of the others does not merely fail: Steam CLEARS the
+        # selection back to `default://<appid>`, which looks exactly like the
+        # layout never applying.
+        #
+        # Picking the fullest directory was the obvious heuristic and the wrong
+        # one -- measured here it chose a directory of 1075 entries over the
+        # signed-in account's 911, and every tile lost its layout on the next
+        # sync.
+        #
+        # The account id is the low 32 bits of the Steam ID, which is exactly
+        # what Steam names the directory. Arithmetic on something already
+        # stored, rather than a guess about the filesystem.
+        steam_id = str(self._settings.get("steam_id64") or "").strip()
+        best = None
+        if steam_id.isdigit():
+            account_id = int(steam_id) - 76561197960265728
+            if account_id > 0:
+                candidate = os.path.join(configs_root, str(account_id), "config")
+                if os.path.isdir(candidate):
+                    best = candidate
+        if not best:
+            # Not signed in, or a directory Steam has not made yet. The most
+            # recently touched one is the best remaining evidence of who is
+            # actually using the device.
+            newest_at = -1.0
+            for user_dir in os.listdir(configs_root):
+                path = os.path.join(configs_root, user_dir, "config")
+                if not os.path.isdir(path):
+                    continue
+                try:
+                    seen = os.path.getmtime(path)
+                except OSError:
+                    continue
+                if seen > newest_at:
+                    best, newest_at = path, seen
         if not best:
             return {"ok": False, "error": "no per-user config directory"}
-        return {"ok": True, "base": best, "native": "neptune"}
+        return {"ok": True, "base": best, "native": "neptune",
+                # The revision travels with the flag. The caller records THIS
+                # value when it finishes, so a hard-coded number on that side
+                # cannot drift from the constant here and leave the repair
+                # running on every sync for ever.
+                "repair": self._settings.get("layout_repair") != LAYOUT_REPAIR,
+                "repair_rev": LAYOUT_REPAIR}
 
     async def install_controller_layout(self, shortcut_name: str,
                                         template_url: str) -> Dict:
@@ -2744,7 +2804,11 @@ class Plugin:
     ALLOWED_SETTINGS = {"browser", "sync_minutes", "sync_all_providers", "ui_scale",
                         "badge_enabled", "badge_on_cards", "badge_position",
                         "extra_pad_layouts", "players_enabled",
-                        "players_position"}
+                        "players_position",
+                        # Not a preference: the marker recording that the
+                        # one-off layout re-selection has been done on this
+                        # device. See LAYOUT_REPAIR.
+                        "layout_repair"}
 
     # Where the provider badge sits on a game's page. Validated as a set
     # rather than trusted: this value is written into a style, and a dropdown

@@ -5,9 +5,10 @@
 // This lives on the frontend because only here does SteamClient exist. The
 // backend decides *what* the library should contain; this makes it so.
 
-import { fetchArtwork, installControllerLayout, layoutSelectionBase, logNote, saveIcon, saveIconFromUrl, setSteamIds, strayShortcuts } from "./api";
+import { fetchArtwork, installControllerLayout, layoutSelectionBase, logNote, saveIcon, saveIconFromUrl, setSetting, setSteamIds, strayShortcuts } from "./api";
 import { addToProviderCollections, pruneProviderCollections,
          removeRetiredCollections, type CollectionMember } from "./collection";
+import { layoutKey } from "./layoutKey";
 import { renderPageCapsule } from "./pagecapsule";
 import { BRAND_MARK } from "./brandmark";
 import { PER_GAME_TIMEOUT, RPC_TIMEOUT, steamCall, withTimeout } from "./withTimeout";
@@ -370,6 +371,7 @@ function deckControllerIndex(): number | null {
  */
 function applyControllerConfig(
   appId: number, templateUrl: string, waitForStore: boolean,
+  force = false,
 ): Promise<void> {
   return new Promise<void>((resolve) => {
     const input = (SteamClient as unknown as { Input?: SteamInput }).Input;
@@ -399,7 +401,7 @@ function applyControllerConfig(
       void (async () => {
         try {
           const get = input?.GetConfigForAppAndController;
-          if (typeof get === "function") {
+          if (!force && typeof get === "function") {
             const current = await get.call(input, appId, idx);
             const url = String(current?.URL ?? "");
             if (current?.eSelectionType === 1 && url && url.toLowerCase() !== ours) {
@@ -992,7 +994,9 @@ export async function syncLibrary(
   const selectionBase = await withTimeout(
     layoutSelectionBase(), undefined, RPC_TIMEOUT)
     .then((r) => (r?.ok && r.base && r.native
-      ? { base: r.base, native: r.native } : undefined))
+      ? { base: r.base, native: r.native, repair: r.repair === true,
+          repairRev: r.repair_rev }
+      : undefined))
     .catch(() => undefined);
 
   await phase(`tiles (${ordered.length} desired)`);
@@ -1071,12 +1075,24 @@ export async function syncLibrary(
         // would miss it -- so that is what bumping ART_REVISION is for: it
         // makes artChanged true everywhere, every tile is touched once, and
         // the new layout goes on with the artwork.
-        if (game.controller_layout && (launchChanged || artChanged)) {
+        // `repair` forces the INSTALL too, not just the selection.
+        //
+        // The install is gated on a tile actually changing, which is right in
+        // the steady state and wrong the moment the NAMING RULE changes: the
+        // layouts still sit under the old directory names, the selection
+        // composes the new one, and Steam -- handed a path with nothing at it
+        // -- clears the tile back to default://<appid>. Worse than before.
+        //
+        // So a repair pass writes the files where the new rule says they go,
+        // and then selects them. One sync, then back to the cheap path.
+        if (game.controller_layout
+            && (launchChanged || artChanged || selectionBase?.repair)) {
           try {
             const layoutResult = await withTimeout(
               installControllerLayout(title, game.controller_layout), undefined, RPC_TIMEOUT);
             const liveUrl = layoutResult?.autosave_url ?? game.controller_layout;
-            await applyControllerConfig(existing.app_id, liveUrl, false);
+            await applyControllerConfig(existing.app_id, liveUrl, false,
+                                        selectionBase?.repair === true);
           } catch { /* best effort */ }
         } else if (game.controller_layout && selectionBase) {
           // SELECTING is not INSTALLING, and tying them together is what broke
@@ -1102,9 +1118,9 @@ export async function syncLibrary(
             // case-sensitive filesystem those are different directories.
             await applyControllerConfig(
               existing.app_id,
-              `autosave://${selectionBase.base}/${title.toLowerCase()}`
+              `autosave://${selectionBase.base}/${layoutKey(title)}`
                 + `/controller_${selectionBase.native}.vdf`,
-              false);
+              false, selectionBase.repair);
           } catch { /* best effort */ }
         }
 
@@ -1242,6 +1258,15 @@ export async function syncLibrary(
     // by the lines above, so what goes is an empty grouping nobody asked for.
     await phase("retire collections");
   await withTimeout(removeRetiredCollections(managed), undefined, RPC_TIMEOUT);
+
+  // The one-off layout repair is done; record it so the next sync goes back to
+  // leaving a user's own choice alone. Only after a run that was not cancelled,
+  // or a repair stopped halfway would be marked complete.
+  if (selectionBase?.repair && !result.cancelled) {
+    await withTimeout(setSetting("layout_repair", selectionBase.repairRev),
+                      undefined, RPC_TIMEOUT)
+      .catch(() => undefined);
+  }
   await phase("done");
   }
 

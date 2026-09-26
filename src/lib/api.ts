@@ -132,8 +132,8 @@ export const setShelf =
  *
  *  One call per sync; the caller composes a path per tile from the base. */
 export const layoutSelectionBase =
-  guarded<[], { ok: boolean; base?: string; native?: string; error?: string }>(
-    "layout_selection_base");
+  guarded<[], { ok: boolean; base?: string; native?: string; repair?: boolean;
+                repair_rev?: number; error?: string }>("layout_selection_base");
 
 export const installControllerLayout =
   guarded<[shortcut_name: string, template_url: string],
