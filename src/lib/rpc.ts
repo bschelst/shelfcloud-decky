@@ -170,14 +170,25 @@ const CALL_DEADLINE = 60000;
 const MAX_ARG_CHARS = 3 * 1024 * 1024;
 
 function tooBig(name: string, args: unknown[]): string | undefined {
-  for (const arg of args) {
-    if (typeof arg === "string" && arg.length > MAX_ARG_CHARS) {
-      return `${name}: refusing to send ${Math.round(arg.length / 1024)} KB `
-        + `in one message (limit ${Math.round(MAX_ARG_CHARS / 1024)} KB) — `
-        + "this would close Decky's socket silently";
-    }
+  // The whole argument list, not each string in it. What aiohttp measures is
+  // the MESSAGE, so a big value nested in an object counts exactly as much as
+  // a big top-level one — and several of these take objects: set_steam_ids
+  // sends a map of the entire library, record_shortcut seven fields. Checking
+  // only top-level strings would have let precisely those through, which is
+  // the same blind spot in a different place.
+  let size: number;
+  try {
+    size = JSON.stringify(args)?.length ?? 0;
+  } catch {
+    // Not serialisable — a cycle, or a BigInt. Decky cannot send it either, so
+    // let the call go and fail on its own terms rather than inventing a reason.
+    return undefined;
   }
-  return undefined;
+  if (size <= MAX_ARG_CHARS) return undefined;
+  return `${name}: refusing to send ${Math.round(size / 1024)} KB in one `
+    + `message (limit ${Math.round(MAX_ARG_CHARS / 1024)} KB) — this would `
+    + "close Decky's socket silently. Slice it, or pass a URL and fetch it "
+    + "in Python (see docs/RPC-PAYLOAD-LIMITS.md)";
 }
 
 /** Reject if `work` has not settled in `ms`, so its slot is always given up. */

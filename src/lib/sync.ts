@@ -600,9 +600,17 @@ async function applyArtwork(appId: number, game: DesiredGame): Promise<ArtworkOu
       if (saved?.ok && saved.path) {
         SteamClient.Apps.SetShortcutIcon(appId, saved.path);
         applied += 1;
+      } else if (saved && !saved.ok) {
+        // Said out loud, with the game's name on it. A cosmetic failure is
+        // still a failure, and an icon that never appears with nothing written
+        // anywhere is indistinguishable from one nobody tried to set.
+        void logNote(`icon for ${game.name}: ${saved.error ?? "refused"}`);
       }
-    } catch {
-      /* an icon is cosmetic; never let it cost the artwork that worked */
+    } catch (error) {
+      // Swallowed for the SYNC, not for the LOG. An icon must never cost the
+      // artwork that already went on — but a catch with nothing in it is how
+      // "the icons are missing" became unanswerable the last time.
+      void logNote(`icon for ${game.name} failed: ${String(error)}`);
     }
   }
 
