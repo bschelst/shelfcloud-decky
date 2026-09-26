@@ -5,7 +5,7 @@
 // This lives on the frontend because only here does SteamClient exist. The
 // backend decides *what* the library should contain; this makes it so.
 
-import { fetchArtwork, installControllerLayout, logNote, saveIcon, setSteamIds, strayShortcuts } from "./api";
+import { fetchArtwork, installControllerLayout, logNote, saveIcon, saveIconFromUrl, setSteamIds, strayShortcuts } from "./api";
 import { addToProviderCollections, pruneProviderCollections,
          removeRetiredCollections, type CollectionMember } from "./collection";
 import { renderPageCapsule } from "./pagecapsule";
@@ -141,7 +141,21 @@ async function phase(name: string): Promise<void> {
   await withTimeout(logNote(`phase: ${name}`), undefined, 5000);
 }
 
-async function fetchArtworkBase64(url: string): Promise<{ data: string; kind: "png" | "jpg" } | undefined> {
+/** An image the backend fetched, and the address it came from.
+ *
+ *  The URL is carried alongside the bytes so the ICON can be saved by
+ *  reference. Every other slot is applied through Steam and needs the bytes;
+ *  the icon has to become a FILE, and pushing the picture back over the socket
+ *  to do that is what froze the sync -- see saveIconFromUrl.
+ *
+ *  Optional because an image DRAWN here has no address to name. Those go back
+ *  as bytes, which is safe for the same reason it was never safe for artwork:
+ *  a drawn capsule is a few kilobytes of flat colour and text, not a 600x900
+ *  photograph off a CDN.
+ */
+type FetchedImage = { data: string; kind: "png" | "jpg"; url?: string };
+
+async function fetchArtworkBase64(url: string): Promise<FetchedImage | undefined> {
   try {
     // Collected in slices, because one message cannot carry a whole image.
     //
@@ -165,7 +179,7 @@ async function fetchArtworkBase64(url: string): Promise<{ data: string; kind: "p
       if (!more?.ok || !more.base64) return undefined;
       data += more.base64;
     }
-    return { data, kind };
+    return { data, kind, url };
   } catch {
     return undefined;
   }
@@ -560,8 +574,29 @@ async function applyArtwork(appId: number, game: DesiredGame): Promise<ArtworkOu
       // appId as well as game_id: the file is named after the SHORTCUT now,
       // because it lands in Steam's own grid folder where `<id>.png` is
       // already Steam's library art for the app with that id.
+      // By URL where there is one, which is every image that came off a CDN.
+      //
+      // Handing over the BYTES is what froze the sync. This was the only large
+      // message travelling frontend -> backend and the only one never sliced,
+      // while the same picture coming the other way has been chunked at 192 KB
+      // all along: aiohttp CLOSES a websocket on a message over 4 MB instead
+      // of raising, and a closed socket does not fail a call, it silences it.
+      // Nothing settles, so not even the timeout can report it -- the log ends
+      // mid-game with no error on either side.
+      //
+      // Nor was it a rare image that did it. The icon falls back to the
+      // CAPSULE for any game shipping no icon of its own, and a capsule is
+      // 600x900. Measured on hardware: the sync died on the FIRST game of
+      // every run, right here, having logged every step before it.
+      //
+      // The backend downloaded this picture already -- it is what served the
+      // slices -- so naming it costs a few hundred bytes and no second fetch.
+      // Only a DRAWN image has no address, and those are kilobytes.
       const saved = await withTimeout(
-        saveIcon(game.game_id, iconImage.data, iconImage.kind, appId), undefined);
+        iconImage.url
+          ? saveIconFromUrl(game.game_id, iconImage.url, appId)
+          : saveIcon(game.game_id, iconImage.data, iconImage.kind, appId),
+        undefined, RPC_TIMEOUT);
       if (saved?.ok && saved.path) {
         SteamClient.Apps.SetShortcutIcon(appId, saved.path);
         applied += 1;

@@ -1856,6 +1856,82 @@ class Plugin:
         if not raw or len(raw) > ARTWORK_MAX_BYTES:
             return {"ok": False, "error": "image missing or too large"}
 
+        return await self._store_icon(game_id, raw, kind, app_id)
+
+    async def save_icon_from_url(self, game_id: int, url: str,
+                                 app_id: Optional[int] = None) -> Dict:
+        """Write a shortcut icon from a URL, rather than from handed-over bytes.
+
+        save_icon takes the image as base64, which means the frontend pushes
+        the whole picture back across Decky's websocket. That was the last big
+        message going FRONTEND -> BACKEND and the only one never sliced, while
+        the same image travelling the other way has been chunked at
+        ARTWORK_CHUNK_CHARS for exactly this reason: aiohttp CLOSES a websocket
+        on a message over 4 MB instead of raising.
+
+        A closed socket does not fail a call, it SILENCES it. The promise never
+        settles, so the frontend's own timeout cannot fire either -- the log
+        stops mid-game with no error on either side. Six separate hunts for
+        "the call that hangs" ended here.
+
+        And it was reached on ordinary games. The icon falls back to the
+        CAPSULE for anything shipping no icon of its own, and a capsule is
+        600x900; measured on hardware, the sync died on the FIRST game of every
+        run having logged every step before this one.
+
+        The bytes never needed to travel. This process DOWNLOADED that image --
+        it is what served the slices -- so the frontend names it instead, in a
+        few hundred bytes, and the file is written from what is already here.
+        """
+        try:
+            game_id = int(game_id)
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "bad game id"}
+        # https only, same as fetch_artwork: these bytes are written to disk
+        # and handed to Steam as a shortcut icon, so nothing on the path gets
+        # to swap them.
+        if not isinstance(url, str) or not url.startswith("https://"):
+            return {"ok": False, "error": "unsupported url"}
+
+        # Usually already here. fetch_artwork holds the last image so its own
+        # follow-up slices do not re-download it, and the icon is normally that
+        # very image, collected slice by slice a moment ago. Going back to the
+        # CDN would be a second download of the same picture for every game.
+        held = getattr(self, "_artwork_part", None)
+        if held and held[0] == url:
+            try:
+                raw = base64.b64decode(held[1], validate=True)
+            except Exception:
+                raw = b""
+            if raw:
+                return await self._store_icon(game_id, raw, held[2], app_id)
+
+        headers = {"User-Agent": ARTWORK_USER_AGENT}
+        if url.startswith(self._gateway() + "/"):
+            token = self._token()
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+        try:
+            # On a thread: urlopen blocks, and this is the one event loop the
+            # whole plugin shares.
+            content_type, raw = await asyncio.to_thread(
+                self._fetch_image, url, headers)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        if not content_type.startswith("image/"):
+            return {"ok": False, "error": f"not an image ({content_type})"}
+        kind = "png" if content_type.endswith("png") else "jpg"
+        return await self._store_icon(game_id, raw, kind, app_id)
+
+    async def _store_icon(self, game_id: int, raw: bytes, kind: str,
+                          app_id: Optional[int]) -> Dict:
+        """The write both icon paths share, so the naming rule lives once."""
+        if kind not in ("png", "jpg"):
+            return {"ok": False, "error": f"unsupported kind {kind!r}"}
+        if not raw or len(raw) > ARTWORK_MAX_BYTES:
+            return {"ok": False, "error": "image missing or too large"}
+
         path = os.path.join(_icon_dir(), _icon_name(game_id, app_id, kind))
         try:
             # In a thread, like every other write here. This one was left on

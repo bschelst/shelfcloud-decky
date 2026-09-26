@@ -25,14 +25,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { syncLibrary } from "../../src/lib/sync";
 import type { DesiredGame } from "../../src/lib/types";
 
-vi.mock("../../src/lib/api", () => ({ logNote: vi.fn(async () => ({ ok: true })), fetchArtwork: vi.fn(), saveIcon: vi.fn() }));
+vi.mock("../../src/lib/api", () => ({ logNote: vi.fn(async () => ({ ok: true })), fetchArtwork: vi.fn(), saveIcon: vi.fn(), saveIconFromUrl: vi.fn() }));
 vi.mock("../../src/lib/collection", () => ({
   addToProviderCollections: vi.fn(),
   pruneProviderCollections: vi.fn(async () => []),
   removeRetiredCollections: vi.fn(async () => []),
 }));
 
-const { fetchArtwork, saveIcon } = await import("../../src/lib/api");
+const { fetchArtwork, saveIcon, saveIconFromUrl } = await import("../../src/lib/api");
 
 /** Steam's asset-type enum, as declared in sync.ts. */
 const CAPSULE = 0, HERO = 1, LOGO = 2, HEADER = 3, ICON = 4;
@@ -100,6 +100,7 @@ beforeEach(() => {
   installSteamClient();
   slowArtwork();
   vi.mocked(saveIcon).mockResolvedValue({ ok: true, path: "/icons/1.png" });
+  vi.mocked(saveIconFromUrl).mockResolvedValue({ ok: true, path: "/icons/1.png" });
 });
 
 describe("ordering", () => {
@@ -366,6 +367,7 @@ describe("the icon", () => {
 
   it("is written with the path the backend saved it to", async () => {
     vi.mocked(saveIcon).mockResolvedValue({ ok: true, path: "/icons/1.png" });
+  vi.mocked(saveIconFromUrl).mockResolvedValue({ ok: true, path: "/icons/1.png" });
     const apps = (globalThis as never as { SteamClient: { Apps: Record<string, unknown> } }).SteamClient.Apps;
 
     await syncLibrary([GAME], {}, callbacks());
@@ -380,15 +382,16 @@ describe("the icon", () => {
       return { ok: true, base64: "bG9nbw==", kind: "png" };
     });
     vi.mocked(saveIcon).mockResolvedValue({ ok: true, path: "/icons/1.png" });
+  vi.mocked(saveIconFromUrl).mockResolvedValue({ ok: true, path: "/icons/1.png" });
 
     await syncLibrary([GAME], {}, callbacks());
 
     expect(seen).toHaveLength(4);                       // four slots, no more
-    expect(vi.mocked(saveIcon).mock.calls[0][1]).toBe("bG9nbw==");
+    expect(vi.mocked(saveIconFromUrl).mock.calls[0][1]).toContain("logo");
   });
 
   it("a failed save never costs the artwork that worked", async () => {
-    vi.mocked(saveIcon).mockRejectedValue(new Error("disk full"));
+    vi.mocked(saveIconFromUrl).mockRejectedValue(new Error("disk full"));
     const result = await syncLibrary([GAME], {}, callbacks());
     expect(appliedOrder).toHaveLength(4);
     expect(result.added).toBe(1);
@@ -396,7 +399,7 @@ describe("the icon", () => {
   });
 
   it("is skipped when the backend refuses the image", async () => {
-    vi.mocked(saveIcon).mockResolvedValue({ ok: false, error: "bad image data" });
+    vi.mocked(saveIconFromUrl).mockResolvedValue({ ok: false, error: "bad image data" });
     const apps = (globalThis as never as { SteamClient: { Apps: Record<string, unknown> } }).SteamClient.Apps;
     await syncLibrary([GAME], {}, callbacks());
     expect(apps.SetShortcutIcon).not.toHaveBeenCalled();
@@ -550,7 +553,7 @@ describe("the icon has its own slot", () => {
 
     await syncLibrary([withIcon], {}, callbacks());
 
-    expect(vi.mocked(saveIcon).mock.calls[0][1]).toBe("aWNvbg==");
+    expect(vi.mocked(saveIconFromUrl).mock.calls[0][1]).toContain("icon");
   });
 
   it("never writes the icon as a library asset", async () => {
@@ -568,7 +571,7 @@ describe("the icon has its own slot", () => {
     await syncLibrary([withIcon], {}, callbacks());
 
     expect(clearedSlots).toEqual([LOGO]);
-    expect(vi.mocked(saveIcon)).toHaveBeenCalled();
+    expect(vi.mocked(saveIconFromUrl)).toHaveBeenCalled();
   });
 
   it("falls back to the capsule when there is neither", async () => {
@@ -579,7 +582,7 @@ describe("the icon has its own slot", () => {
 
     await syncLibrary([bare], {}, callbacks());
 
-    expect(vi.mocked(saveIcon).mock.calls[0][1]).toBe("Y2Fwc3VsZQ==");
+    expect(vi.mocked(saveIconFromUrl).mock.calls[0][1]).toContain("capsule");
   });
 });
 

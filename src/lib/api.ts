@@ -86,6 +86,23 @@ export const fetchArtwork =
 export const saveIcon =
   guarded<[game_id: number, data: string, kind: string, app_id: number],
            { ok: boolean; path?: string; error?: string }>("save_icon");
+/** Write an icon the backend fetches ITSELF, named by URL. The preferred one.
+ *
+ *  saveIcon takes the image as base64, which pushes the whole picture back
+ *  across Decky's websocket — the only large message travelling THIS direction
+ *  and the only one never sliced, while the same picture coming the other way
+ *  has been chunked at 192 KB all along. aiohttp closes a websocket on a
+ *  message over 4 MB rather than raising, and a closed socket does not fail a
+ *  call, it silences it: nothing settles, so not even the timeout can report
+ *  it. That is the sync freeze, and it was reached by any game whose icon fell
+ *  back to its 600x900 capsule.
+ *
+ *  The backend downloaded that image already — it is what served the slices —
+ *  so naming it costs a few hundred bytes and no second fetch. saveIcon stays
+ *  for images DRAWN here, which have no address and are kilobytes anyway. */
+export const saveIconFromUrl =
+  guarded<[game_id: number, url: string, app_id: number],
+           { ok: boolean; path?: string; error?: string }>("save_icon_from_url");
 /** The account's shelves, and which one this device is pointed at.
  *
  *  Asked of the gateway each time rather than cached: the shelf can be changed

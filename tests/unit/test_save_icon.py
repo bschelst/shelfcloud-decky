@@ -168,3 +168,111 @@ def test_forgetting_a_shortcut_with_no_icon_is_not_an_error(tmp_path):
     instance = plugin(tmp_path)
     instance._save_state = mock.AsyncMock()
     assert asyncio.run(instance.forget_shortcut(999))["ok"] is True
+
+
+# ------------------------------------------------- saving BY REFERENCE
+#
+# save_icon takes the image as base64, which means the frontend pushes the
+# whole picture back over Decky's websocket. That was the last big message
+# travelling frontend -> backend and the only one never sliced -- and aiohttp
+# CLOSES a websocket on a message over 4 MB rather than raising. A closed
+# socket does not fail a call, it silences it: the promise never settles, and
+# the timeout that would have reported it cannot be delivered either.
+#
+# It was reached on ordinary games, not odd ones. The icon falls back to the
+# CAPSULE when a game ships no icon of its own, and a capsule is 600x900.
+# Measured on hardware: the sync died on the FIRST game of every run, at
+# saveIcon, having logged every step before it and nothing after.
+#
+# The bytes never needed to travel. The backend downloaded that image -- it is
+# what served the slices -- so the icon is named rather than shipped.
+
+REAL_PNG = b"\x89PNG\r\n\x1a\n-pretend-this-is-an-image"
+
+
+def test_saving_by_url_writes_the_file_without_being_handed_the_bytes(tmp_path):
+    instance = plugin(tmp_path)
+    with mock.patch.object(main.Plugin, "_fetch_image",
+                           lambda self, url, headers: ("image/png", REAL_PNG)):
+        result = asyncio.run(
+            instance.save_icon_from_url(42, "https://cdn.example/x.png"))
+
+    assert result["ok"] is True
+    with open(result["path"], "rb") as handle:
+        assert handle.read() == REAL_PNG
+
+
+def test_saving_by_url_reuses_the_image_already_held(tmp_path):
+    """fetch_artwork keeps the last image so its own slices do not re-download
+    it. The icon is usually THAT image, fetched slice by slice a moment ago, so
+    going back to the CDN would be a second download per game for nothing."""
+    instance = plugin(tmp_path)
+    url = "https://cdn.example/held.png"
+    instance._artwork_part = (url, base64.b64encode(REAL_PNG).decode(), "png")
+
+    def refuse(self, *args, **kwargs):
+        raise AssertionError("re-downloaded an image it already held")
+
+    with mock.patch.object(main.Plugin, "_fetch_image", refuse):
+        result = asyncio.run(instance.save_icon_from_url(42, url))
+
+    assert result["ok"] is True
+    with open(result["path"], "rb") as handle:
+        assert handle.read() == REAL_PNG
+
+
+def test_a_held_image_for_a_different_url_is_not_used(tmp_path):
+    """One entry, keyed by url. Writing the WRONG picture is worse than
+    downloading the right one twice."""
+    instance = plugin(tmp_path)
+    instance._artwork_part = ("https://cdn.example/other.png",
+                              base64.b64encode(b"not-this-one").decode(), "png")
+
+    with mock.patch.object(main.Plugin, "_fetch_image",
+                           lambda self, url, headers: ("image/png", REAL_PNG)):
+        result = asyncio.run(
+            instance.save_icon_from_url(42, "https://cdn.example/x.png"))
+
+    with open(result["path"], "rb") as handle:
+        assert handle.read() == REAL_PNG
+
+
+def test_saving_by_url_refuses_plain_http(tmp_path):
+    """Same rule as fetch_artwork: these bytes are written to disk and handed
+    to Steam, so nothing on the path gets to swap them."""
+    result = asyncio.run(
+        plugin(tmp_path).save_icon_from_url(42, "http://cdn.example/x.png"))
+    assert result["ok"] is False
+
+
+def test_saving_by_url_refuses_something_that_is_not_an_image(tmp_path):
+    with mock.patch.object(main.Plugin, "_fetch_image",
+                           lambda self, url, headers: ("text/html", b"<html>")):
+        result = asyncio.run(
+            plugin(tmp_path).save_icon_from_url(42, "https://cdn.example/x"))
+    assert result["ok"] is False
+
+
+def test_a_download_that_fails_is_an_error_not_a_crash(tmp_path):
+    def boom(self, url, headers):
+        raise OSError("no route to host")
+
+    with mock.patch.object(main.Plugin, "_fetch_image", boom):
+        result = asyncio.run(
+            plugin(tmp_path).save_icon_from_url(42, "https://cdn.example/x.png"))
+
+    assert result["ok"] is False
+    assert "no route" in result["error"]
+
+
+def test_saving_by_url_names_the_file_after_the_shortcut(tmp_path):
+    """Unchanged from save_icon, and it still matters: the file lands in
+    Steam's own grid folder, where `<appid>.png` is already Steam's library art
+    for the app with that id."""
+    instance = plugin(tmp_path)
+    with mock.patch.object(main.Plugin, "_fetch_image",
+                           lambda self, url, headers: ("image/png", REAL_PNG)):
+        result = asyncio.run(
+            instance.save_icon_from_url(42, "https://cdn.example/x.png", 4242))
+
+    assert "4242" in os.path.basename(result["path"])

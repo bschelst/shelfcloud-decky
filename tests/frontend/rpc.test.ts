@@ -120,6 +120,84 @@ describe("a socket that has died", () => {
   });
 });
 
+describe("a call that never comes back", () => {
+  it("gives its slot back instead of holding it forever", async () => {
+    // The freeze, in one test. withTimeout at the call site gives up WAITING
+    // on a promise but cannot cancel it, so the abandoned call still sat in
+    // withSlot holding a permit. Four of those and every later call queued
+    // behind permits that were never coming back -- the plugin did not fail,
+    // it went quiet, which is what "stuck on Loading..." was.
+    vi.useFakeTimers();
+    try {
+      const { guarded, rpcLoad } = await freshRpc();
+      const silent = [];
+      for (let i = 0; i < 4; i++) silent.push(guarded("save_icon")().catch(() => "gave up"));
+      await settle();
+      expect(rpcLoad().active).toBe(4);           // all four permits spent
+
+      await vi.advanceTimersByTimeAsync(61000);
+      expect(await Promise.all(silent)).toEqual(Array(4).fill("gave up"));
+      expect(rpcLoad()).toEqual({ active: 0, waiting: 0 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("lets the next call through once the dead ones expire", async () => {
+    vi.useFakeTimers();
+    try {
+      const { guarded } = await freshRpc();
+      for (let i = 0; i < 4; i++) void guarded("save_icon")().catch(() => undefined);
+      await settle();
+      const queued = guarded("get_status")();
+      void queued.catch(() => undefined);
+      calls.length = 0;
+
+      await vi.advanceTimersByTimeAsync(61000);
+      expect(calls.map((c) => c.name)).toContain("get_status");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("a message too big for the socket", () => {
+  it("is refused rather than sent", async () => {
+    // aiohttp CLOSES a websocket on a message over 4 MB instead of raising.
+    // Nothing reports it: the socket stops, every outstanding promise stays
+    // pending forever, and the log ends mid-sentence. Two freezes were this --
+    // a hero image, then an icon -- and each cost a day, because the failure
+    // erases its own evidence.
+    const { guarded } = await freshRpc();
+    const huge = "x".repeat(4 * 1024 * 1024);
+    await expect(guarded("save_icon")(1, huge)).rejects.toThrow(/save_icon/);
+    expect(calls).toHaveLength(0);              // never reached the socket
+  });
+
+  it("says how big it was, so the log names the cause", async () => {
+    const { guarded } = await freshRpc();
+    const huge = "x".repeat(4 * 1024 * 1024);
+    const message = await guarded("save_icon")(1, huge).catch((e: Error) => e.message);
+    expect(message).toMatch(/KB/);
+  });
+
+  it("frees its slot when it refuses", async () => {
+    const { guarded, rpcLoad } = await freshRpc();
+    const huge = "x".repeat(4 * 1024 * 1024);
+    for (let i = 0; i < 8; i++) {
+      await guarded("save_icon")(1, huge).catch(() => undefined);
+    }
+    expect(rpcLoad()).toEqual({ active: 0, waiting: 0 });
+  });
+
+  it("still sends an ordinary payload", async () => {
+    const { guarded } = await freshRpc();
+    void guarded("save_icon_from_url")(1, "https://cdn.example/x.png", 42);
+    await settle();
+    expect(calls).toHaveLength(1);
+  });
+});
+
 describe("not posting faster than the socket can answer", () => {
   it("keeps only a few in flight and queues the rest", async () => {
     const { guarded, rpcLoad } = await freshRpc();

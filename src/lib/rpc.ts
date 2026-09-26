@@ -133,12 +133,71 @@ async function waitForSocket(): Promise<boolean> {
   return false;
 }
 
+/** How long any single backend call may stay outstanding.
+ *
+ *  Not a performance budget -- it is far longer than any call here takes. It
+ *  exists so that a call which never comes back cannot cost a SLOT forever.
+ *
+ *  That distinction is the whole freeze. withTimeout gives up WAITING on a
+ *  promise, but it cannot cancel it, so the abandoned call still sits inside
+ *  withSlot holding its permit. Four of those and every later call -- the
+ *  panel's get_status included -- queues behind permits that will never come
+ *  back. The plugin does not fail at that point, it goes quiet, which is
+ *  precisely what "stuck on Loading..." was.
+ *
+ *  So the slot is released on a deadline too, and the call is rejected rather
+ *  than left pending: the callers all treat a failed call as "skip it and
+ *  carry on", and an error names itself in the log where silence names
+ *  nothing. */
+const CALL_DEADLINE = 60000;
+
+/** The largest argument this will put on the wire.
+ *
+ *  Decky carries these over aiohttp, which CLOSES a websocket on a message
+ *  over 4 MB instead of raising. Nothing reports it: the socket simply stops,
+ *  every outstanding promise stays pending forever, and the log ends
+ *  mid-sentence. Two separate freezes were this, a hero image and then an
+ *  icon, and each cost a day because the failure erases its own evidence.
+ *
+ *  Refusing loudly under the cap turns a silenced plugin into one failed call
+ *  with a message that says which one and how big. Anything genuinely this
+ *  large belongs in slices -- see ARTWORK_CHUNK_CHARS -- or should be named by
+ *  URL and fetched on the Python side, which is what the icon does now. */
+const MAX_ARG_CHARS = 3 * 1024 * 1024;
+
+function tooBig(name: string, args: unknown[]): string | undefined {
+  for (const arg of args) {
+    if (typeof arg === "string" && arg.length > MAX_ARG_CHARS) {
+      return `${name}: refusing to send ${Math.round(arg.length / 1024)} KB `
+        + `in one message (limit ${Math.round(MAX_ARG_CHARS / 1024)} KB) — `
+        + "this would close Decky's socket silently";
+    }
+  }
+  return undefined;
+}
+
+/** Reject if `work` has not settled in `ms`, so its slot is always given up. */
+function onADeadline<T>(work: Promise<T>, ms: number, name: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`${name} did not answer in ${ms / 1000}s`)), ms);
+    const clear = () => clearTimeout(timer);
+    work.then((value) => { clear(); resolve(value); },
+              (error) => { clear(); reject(error); });
+  });
+}
+
 /** A backend method, rate-limited and ridden over a socket that keeps
  *  cycling. */
 export function guarded<A extends unknown[], R>(name: string): (...args: A) => Promise<R> {
   const call = callable<A, R>(name);
   return (...args: A): Promise<R> =>
     withSlot(async () => {
+      // Checked before the socket, because this is the one failure that takes
+      // the socket WITH it. A refusal here costs one call; sending it costs
+      // the connection and every call still waiting on it.
+      const oversized = tooBig(name, args);
+      if (oversized) return Promise.reject(new Error(oversized));
       if (!socketUsable() && !(await waitForSocket())) {
         // Thrown rather than left pending. The callers already treat a failed
         // call as "skip this and carry on", and an error that says why beats
@@ -154,7 +213,7 @@ export function guarded<A extends unknown[], R>(name: string): (...args: A) => P
           + `\u203a Settings \u203a Plugins. (${name})`));
       }
       try {
-        return await call(...args);
+        return await onADeadline(call(...args), CALL_DEADLINE, name);
       } catch (error) {
         // One retry, and only for a call that failed WITH the socket. Decky
         // drops the in-flight call when the connection goes, so this is the
@@ -163,7 +222,7 @@ export function guarded<A extends unknown[], R>(name: string): (...args: A) => P
         // retried -- the socket is still up, so the error is real.
         if (socketUsable()) throw error;
         if (!(await waitForSocket())) throw error;
-        return await call(...args);
+        return await onADeadline(call(...args), CALL_DEADLINE, name);
       }
     });
 }
