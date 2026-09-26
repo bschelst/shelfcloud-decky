@@ -10,6 +10,7 @@ import { addToProviderCollections, pruneProviderCollections,
          removeRetiredCollections, type CollectionMember } from "./collection";
 import { renderPageCapsule } from "./pagecapsule";
 import { BRAND_MARK } from "./brandmark";
+import { steamCall, withTimeout } from "./withTimeout";
 import { renderPageLogo } from "./pagelogo";
 import { providerLabel, WEBSITE_PROVIDERS, type DesiredGame, type SyncResult, type TrackedShortcut } from "./types";
 
@@ -239,7 +240,7 @@ interface ArtworkOutcome {
  */
 async function clearSlot(appId: number, assetType: number): Promise<void> {
   try {
-    await SteamClient.Apps.ClearCustomArtworkForApp(appId, assetType as never);
+    await steamCall(SteamClient.Apps.ClearCustomArtworkForApp(appId, assetType as never));
   } catch {
     /* already gone, or Steam refused this slot; the others still matter */
   }
@@ -359,7 +360,11 @@ async function applyArtwork(appId: number, game: DesiredGame): Promise<ArtworkOu
   ) => {
     if (!image) return false;
     try {
-      await SteamClient.Apps.SetCustomArtworkForApp(appId, image.data, image.kind, assetType as never);
+      // The call that froze two syncs. It is wrapped rather than merely
+      // caught because it did not fail -- it never came back, and the serial
+      // loop behind it stopped with it.
+      await steamCall(
+        SteamClient.Apps.SetCustomArtworkForApp(appId, image.data, image.kind, assetType as never));
       applied += 1;
       return true;
     } catch {
@@ -521,7 +526,8 @@ async function applyArtwork(appId: number, game: DesiredGame): Promise<ArtworkOu
       // appId as well as game_id: the file is named after the SHORTCUT now,
       // because it lands in Steam's own grid folder where `<id>.png` is
       // already Steam's library art for the app with that id.
-      const saved = await saveIcon(game.game_id, iconImage.data, iconImage.kind, appId);
+      const saved = await withTimeout(
+        saveIcon(game.game_id, iconImage.data, iconImage.kind, appId), undefined);
       if (saved?.ok && saved.path) {
         SteamClient.Apps.SetShortcutIcon(appId, saved.path);
         applied += 1;
@@ -583,7 +589,7 @@ async function adoptStrayShortcuts(
     for (const appId of extras) {
       try {
         await clearArtwork(appId);
-        await SteamClient.Apps.RemoveShortcut(appId);
+        await steamCall(SteamClient.Apps.RemoveShortcut(appId));
         console.warn(`[shelfcloud] removed a duplicate tile for game ${entry.game_id}`);
       } catch {
         /* Steam kept it; the next sync will try again */
@@ -835,9 +841,10 @@ export async function syncLibrary(
     try {
       if (!existing) {
         step("Adding", game.name);
-        const appId = await SteamClient.Apps.AddShortcut(
+        // 0 on timeout, which the check below already treats as a refusal.
+        const appId = await withTimeout(SteamClient.Apps.AddShortcut(
           title, game.exe, START_DIR, game.options,
-        );
+        ), 0);
         if (!appId) throw new Error("Steam refused the shortcut");
 
         // AddShortcut only reliably applies the exe — and it stores that
