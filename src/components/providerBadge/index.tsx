@@ -16,34 +16,16 @@
 // "this one is a cloud game".
 
 import { appDetailsClasses, appDetailsHeaderClasses } from "@decky/ui";
-import { useEffect, useRef, useState, type CSSProperties, type ReactElement } from "react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 import { FaAmazon, FaCloud, FaXbox } from "react-icons/fa";
 import { SiNvidia } from "react-icons/si";
 
 import { LogoMono } from "../Logo";
 import { providerInfo } from "../../lib/theme";
+import { badgePosition } from "../../lib/badgePosition";
 import { useParams } from "../../lib/useParams";
 import { useBadgeSettings, useProviderForApp } from "../../lib/badgeData";
 
-/** Distance from the bottom of the hero image, for the bottom positions. */
-const BOTTOM_OFFSET = 40;
-
-/** Used when the hero has not been measured yet. The same number the
- *  ProtonDB medal falls back to, for the same reason: it is roughly where the
- *  hero ends at the Deck's own resolution, so a badge placed with it lands
- *  close enough not to jump visibly once the real height arrives. */
-const FALLBACK_HERO_HEIGHT = 290;
-
-const TOP_POSITIONS: Record<string, CSSProperties> = {
-  tl: { top: "40px", left: "20px" },
-  tr: { top: "60px", right: "20px" },
-};
-
-function positionStyle(position: string, heroHeight: number | null): CSSProperties {
-  if (position in TOP_POSITIONS) return TOP_POSITIONS[position];
-  const top = `${(heroHeight ?? FALLBACK_HERO_HEIGHT) - BOTTOM_OFFSET}px`;
-  return position === "br" ? { top, right: "20px" } : { top, left: "20px" };
-}
 
 /** The mark for each service.
  *
@@ -128,7 +110,16 @@ export default function ProviderBadge(): ReactElement {
       });
       mutations.observe(hero, { attributes: true, attributeFilter: ["class"] });
 
-      const measure = () => setHeroHeight(hero.getBoundingClientRect().height);
+      // The hero IMAGE, not the capsule around it.
+      //
+      // Measured on hardware: the capsule reported 342px where the hero image
+      // inside it was 360 — so a badge placed against the capsule floated 18px
+      // above the edge a person actually sees, on top of whatever inset was
+      // asked for. The image is the visible bottom edge, so it is the one to
+      // measure. The capsule stays as the fallback and as what the observers
+      // watch, since it is the element whose class changes on the transition.
+      const heroArt = (): Element => hero.querySelector('img[src*="_hero"]') ?? hero;
+      const measure = () => setHeroHeight(heroArt().getBoundingClientRect().height);
       measure();
       resizes = new ResizeObserver(measure);
       resizes.observe(hero);
@@ -155,7 +146,7 @@ export default function ProviderBadge(): ReactElement {
       style={{
         position: "absolute",
         zIndex: 10,
-        ...positionStyle(position, heroHeight),
+        ...badgePosition(position, heroHeight),
         display: show ? "flex" : "none",
         alignItems: "center",
         gap: 6,
