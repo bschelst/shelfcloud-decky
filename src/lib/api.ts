@@ -74,7 +74,14 @@ export const restoreToLibrary =
   guarded<[game_ids: number[]], { ok: boolean; restored?: number; error?: string }>(
     "restore_to_library");
 export const syncSteamLibrary = guarded<[], SteamLibraryResult>("sync_steam_library");
-export const getDesiredLibrary = guarded<[], LibraryResponse>("get_desired_library", true);
+/** What the library should contain.
+ *
+ *  Takes the version last received. When nothing has changed the backend says
+ *  so in a few hundred bytes instead of resending the lot — this reply is 1.6
+ *  MB on a large library, and it crossed the socket every few minutes to
+ *  report that nothing had changed. */
+export const getDesiredLibrary =
+  guarded<[known?: string], LibraryResponse>("get_desired_library", true);
 /** Artwork is downloaded by the Python backend, not the browser: inside Steam's
  *  client every image URL is cross-origin, and our own gateway is plain HTTP
  *  (mixed content). Python has neither restriction. */

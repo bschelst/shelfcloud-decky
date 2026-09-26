@@ -18,6 +18,7 @@ Stdlib only: Decky's Python environment does not guarantee third-party packages.
 import asyncio
 import base64
 import functools
+import hashlib
 import json
 import os
 import random
@@ -1585,8 +1586,18 @@ class Plugin:
             return {"ok": False, "error": str(exc)}
 
     @_sized
-    async def get_desired_library(self) -> Dict[str, Any]:
-        """What the Steam library should contain, ready to act on."""
+    async def get_desired_library(self, known: str = "") -> Dict[str, Any]:
+        """What the Steam library should contain, ready to act on.
+
+        `known` is the version the caller already holds. When the answer has
+        not changed since, it is not sent again.
+
+        The HTTP fetch from the gateway has been conditional for a while, so an
+        unchanged library costs a couple of hundred bytes on that hop. This
+        reply was not: the same 1.6 MB crossed Decky\'s websocket every sync,
+        every few minutes, to say nothing had changed -- measured at 1.61 MB a
+        run against a library reporting `+0 -0 ~0`.
+        """
         try:
             result = await asyncio.to_thread(self._request, "/api/me/library")
         except PermissionError:
@@ -1628,12 +1639,25 @@ class Plugin:
         await self._forget_vanished_tiles()
 
         self._last_error = None
+
+        # Versioned over what the caller ACTS on -- the desired tiles and the
+        # tracking record -- rather than over the whole reply, so adding a
+        # field here later cannot quietly stop this from ever matching.
+        version = hashlib.sha256(
+            json.dumps([desired, self._synced], sort_keys=True,
+                       default=str).encode()
+        ).hexdigest()[:16]
+        if known and known == version:
+            # Everything the caller needs, minus the megabyte it already holds.
+            return {"ok": True, "signed_in": True, "unchanged": True,
+                    "version": version, "skipped": skipped}
         return {
             "ok": True,
             "signed_in": True,
             "desired": desired,
             "skipped": skipped,
             "tracked": self._synced,
+            "version": version,
         }
 
     async def _forget_vanished_tiles(self) -> int:

@@ -49,7 +49,7 @@ import { isSafeExternalUrl } from "./lib/url";
 import { badgeDataNow, invalidateBadgeData, refreshBadgeData } from "./lib/badgeData";
 import { startFocusBadge, stopFocusBadge } from "./lib/focusBadge";
 import { patchLibraryApp } from "./lib/patchLibraryApp";
-import type { DesiredGame, InstallState, Status, SyncResult } from "./lib/types";
+import type { DesiredGame, InstallState, LibraryResponse, Status, SyncResult } from "./lib/types";
 
 const SYNC_EVENT = "shelfcloud/library";
 const LOGIN_POLL_MS = 2500;
@@ -208,10 +208,29 @@ function isUsableGame(game: unknown): game is DesiredGame {
     && typeof g.options === "string" && g.options !== "";
 }
 
+/** The last library the backend sent, and the version it called it.
+ *
+ *  Kept so an unchanged library need not be sent again: this payload is 1.6 MB
+ *  on a large account and it crossed Decky\'s socket on every sync — every few
+ *  minutes — only to say that nothing had changed. */
+let lastLibrary: { version: string; body: LibraryResponse } | null = null;
+
 async function performSync(onProgress?: (message: string) => void): Promise<SyncOutcome> {
-  const library = await getDesiredLibrary();
+  let library = await getDesiredLibrary(lastLibrary?.version);
+  if (library.ok && library.unchanged) {
+    if (lastLibrary) {
+      library = lastLibrary.body;
+    } else {
+      // We claimed to hold a version we do not. Ask again without one rather
+      // than sync against nothing.
+      library = await getDesiredLibrary();
+    }
+  }
   if (!library.ok) {
     throw new Error(library.error || "Could not read your library");
+  }
+  if (library.version && Array.isArray(library.desired)) {
+    lastLibrary = { version: library.version, body: library };
   }
 
   // Never hand SteamClient something malformed, whatever the gateway said.

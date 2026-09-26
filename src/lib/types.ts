@@ -67,6 +67,10 @@ export interface LibraryResponse {
   tracked?: Record<string, TrackedShortcut>;
   skipped?: number;
   error?: string;
+  /** A hash of `desired` + `tracked`. Hand it back next time. */
+  version?: string;
+  /** The answer is the one you already hold, so it was not sent again. */
+  unchanged?: boolean;
 }
 
 export interface Browser {
