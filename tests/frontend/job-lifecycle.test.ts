@@ -18,7 +18,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  cancelJob, cancelRequested, getJob, resetJob, runJob, setJob,
+  cancelJob, cancelRequested, finishJob, getJob, resetJob, runJob, setJob,
 } from "../../src/lib/job";
 
 beforeEach(() => resetJob());
@@ -152,5 +152,53 @@ describe("the panel keeps seeing a run it did not start", () => {
     });
     expect(sawBusy).toBe(true);
     expect(woken).toHaveBeenCalled();
+  });
+});
+
+
+describe("a run that stops responding", () => {
+  it("still gives the panel back when Cancel is not honoured", () => {
+    // The failure this exists for: the body never settles, so neither its
+    // success nor its failure path runs, so nothing ever clears `busy`. The
+    // store is module scope, so closing the panel does not help -- every
+    // button stays disabled for the rest of the Steam session with nothing
+    // running to cancel. A sync blocked writing thousands of controller
+    // layouts did exactly this.
+    vi.useFakeTimers();
+    try {
+      setJob({ busy: true, message: "Syncing…" });
+      void new Promise<void>(() => {});     // a body that never settles
+
+      cancelJob();
+      expect(cancelRequested()).toBe(true);
+      expect(getJob().busy).toBe(true);     // asked politely, still waiting
+
+      vi.advanceTimersByTime(9000);
+      expect(getJob().busy).toBe(true);     // the deadline has not passed yet
+
+      vi.advanceTimersByTime(2000);
+      expect(getJob().busy).toBe(false);    // taken back regardless
+      expect(getJob().message).toMatch(/stopped responding/i);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not reset a job that stopped on its own in time", () => {
+    // The other half: honouring Cancel must not then be undone by a deadline
+    // firing later and clearing a DIFFERENT run that has since started.
+    vi.useFakeTimers();
+    try {
+      setJob({ busy: true, message: "Syncing…" });
+      cancelJob();
+      finishJob("Stopped.");               // the run noticed, as it should
+      expect(getJob().busy).toBe(false);
+
+      setJob({ busy: true, message: "Second run" });
+      vi.advanceTimersByTime(30000);
+      expect(getJob().busy).toBe(true);    // untouched by the old deadline
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

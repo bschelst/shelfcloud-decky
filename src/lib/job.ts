@@ -61,6 +61,8 @@ let clearTimer: ReturnType<typeof setTimeout> | null = null;
 
 export function finishJob(message?: string): void {
   if (clearTimer) clearTimeout(clearTimer);
+  // A run that ended on its own must not be reset again ten seconds later.
+  if (forceTimer) { clearTimeout(forceTimer); forceTimer = null; }
   setJob({
     busy: false,
     progress: null,
@@ -77,6 +79,7 @@ export function finishJob(message?: string): void {
 
 /** Reset to idle. Tests only — the plugin never goes back to a clean slate. */
 export function resetJob(): void {
+  if (forceTimer) { clearTimeout(forceTimer); forceTimer = null; }
   job = IDLE;
   cancelling = false;
   listeners.clear();
@@ -91,11 +94,41 @@ export function resetJob(): void {
 // not help because the run deliberately survives that.
 let cancelling = false;
 
-/** Ask the running job to stop at its next clean point. */
+/** How long Cancel waits to be honoured before it resets the panel anyway. */
+const FORCE_IDLE_AFTER = 10000;
+let forceTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Ask the running job to stop at its next clean point.
+ *
+ *  ...and if nobody is listening, stop waiting for them.
+ *
+ *  Asking politely is right while something is actually running: it stops at a
+ *  tile boundary and leaves the library consistent. But it assumes a loop is
+ *  going round to notice, and that assumption fails exactly when it matters.
+ *  A backend call that never returns leaves `await` suspended forever, so the
+ *  run's own success AND failure paths are both unreachable, `busy` is never
+ *  cleared, and every button in the panel stays disabled. The store is at
+ *  module scope so closing the panel does not help either: it is stranded for
+ *  the life of the Steam session, with nothing running to cancel.
+ *
+ *  That happened -- a sync blocked writing thousands of controller layouts,
+ *  and Cancel could not free it because Cancel was a flag the blocked code
+ *  was never going to read. So Cancel now has a deadline: honoured normally,
+ *  and after ten seconds it takes the panel back regardless. Worst case a
+ *  dead run is still writing somewhere; the single-flight guards stop a
+ *  second one starting on top of it, and a usable panel beats a truthful one.
+ */
 export function cancelJob(): void {
   if (!job.busy) return;
   cancelling = true;
   setJob({ message: "Stopping…" });
+  if (forceTimer) clearTimeout(forceTimer);
+  forceTimer = setTimeout(() => {
+    forceTimer = null;
+    if (job.busy && cancelling) {
+      finishJob("Stopped responding, so the panel was reset.");
+    }
+  }, FORCE_IDLE_AFTER);
 }
 
 /** Whether a stop has been asked for. Read by the loops that can honour it. */
