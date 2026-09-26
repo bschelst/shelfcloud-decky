@@ -469,12 +469,38 @@ function Content() {
   const { busy, message, progress, completed } =
     useSyncExternalStore(subscribeJob, getJob);
 
+  // Set when the backend cannot be reached, so the panel can say so instead
+  // of pretending it is still loading.
+  const [unreachable, setUnreachable] = useState<string | null>(null);
+
   const refresh = useCallback(async () => {
-    setStatus(await getStatus());
+    // Each call stands alone, and a failure is REPORTED rather than thrown.
+    //
+    // This used to be a bare `setStatus(await getStatus())`. When that call
+    // fails -- and it does: Decky's socket drops, and every call after it is
+    // refused -- the await threw, refresh gave up, `status` stayed null, and
+    // the panel sat on "Loading..." with no way forward. A backend that is
+    // briefly unreachable made the whole plugin look broken, and there was
+    // nothing on screen saying which of the two it was.
+    try {
+      const next = await getStatus();
+      if (next) {
+        setStatus(next);
+        setUnreachable(null);
+      }
+    } catch (error) {
+      setUnreachable(String((error as Error)?.message || error));
+    }
+
     // How many owned games could still be added, so the button can say the
-    // number rather than making the user press it to find out.
-    const preview = await previewOwned();
-    setOwned(preview.ok ? (preview.not_added ?? 0) : null);
+    // number rather than making the user press it to find out. Its own try:
+    // a count we cannot read must not cost us the settings as well.
+    try {
+      const preview = await previewOwned();
+      setOwned(preview.ok ? (preview.not_added ?? 0) : null);
+    } catch {
+      setOwned(null);
+    }
   }, []);
 
   // On mount, and again whenever a job finishes while the panel is open, so
@@ -647,7 +673,30 @@ function Content() {
   }, [confirmSignOut, refresh]);
 
   if (!status) {
-    return <PanelSection title="Shelfcloud"><PanelSectionRow>Loading…</PanelSectionRow></PanelSection>;
+    // Nothing read yet. Two very different reasons, and the panel used to
+    // show the same word for both -- so a backend that was never coming back
+    // looked exactly like one that was about to answer.
+    return (
+      <PanelSection title="Shelfcloud">
+        {unreachable ? (
+          <>
+            <PanelSectionRow>
+              <div style={{ fontSize: "0.85em", lineHeight: 1.45 }}>
+                Cannot reach the plugin&rsquo;s backend.
+                <div style={{ opacity: 0.7, marginTop: 4 }}>{unreachable}</div>
+              </div>
+            </PanelSectionRow>
+            <PanelSectionRow>
+              <ButtonItem layout="below" onClick={() => void refresh()}>
+                Try again
+              </ButtonItem>
+            </PanelSectionRow>
+          </>
+        ) : (
+          <PanelSectionRow>Loading…</PanelSectionRow>
+        )}
+      </PanelSection>
+    );
   }
 
 
