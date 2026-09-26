@@ -162,13 +162,21 @@ function update(doc: Document, providers: Record<string, string>,
   if (!provider) return;
 
   const badge = buildBadge(doc, provider);
-  if (position === "tl" || position === "tr") {
+  if (position === "tl" || position === "tr" || position === "tm") {
     badge.style.bottom = "";
     badge.style.top = "8px";
   }
   if (position === "tr" || position === "br") {
     badge.style.left = "";
     badge.style.right = "8px";
+  }
+  // Centred last, so it overrides whichever side the corner rules just set.
+  // 8px from the card's edge is the inset everywhere here -- a card is not a
+  // hero and has no furniture to clear, so the middle needs no special drop.
+  if (position === "tm" || position === "bm") {
+    badge.style.right = "";
+    badge.style.left = "50%";
+    badge.style.transform = "translateX(-50%)";
   }
 
   // The card has to be a containing block, or an absolutely positioned child

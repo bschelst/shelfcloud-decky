@@ -125,7 +125,7 @@ export interface Status {
    *  grid. Its own switch: two places, and wanting one without the other is
    *  an ordinary thing to want. */
   badge_on_cards?: boolean;
-  /** Which corner it sits in: "tl", "tr", "bl" or "br". */
+  /** Where it sits: "tl", "tm", "tr", "bl", "bm" or "br". */
   badge_position?: string;
   by_provider: Record<string, number>;
   last_error?: string | null;

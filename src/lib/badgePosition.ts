@@ -23,7 +23,15 @@ export const INSET = 20;
  *  symmetric. Overriding numbers that were arrived at against the real UI is
  *  the same mistake as measuring the capsule instead of the hero art, and it
  *  produced the same kind of wrong. */
-export const TOP_INSET = { tl: 40, tr: 60 } as const;
+export const TOP_INSET = { tl: 40, tr: 60, tm: 60 } as const;
+
+/** Horizontally centred: half the hero across, then back by half the badge.
+ *
+ *  A transform rather than a computed left, because the badge's own width is
+ *  not known here and changes with the provider's name -- "GeForce NOW" is
+ *  wider than "Luna". translateX(-50%) is resolved against the element's own
+ *  box at paint time, so it stays centred whatever ends up inside it. */
+const CENTRED = { left: "50%", transform: "translateX(-50%)" } as const;
 
 /** Assumed badge height, used only until the real one can be measured.
  *
@@ -65,6 +73,10 @@ export function badgePosition(
 
   if (position === "tl") return { top: `${TOP_INSET.tl}px`, left: inset };
   if (position === "tr") return { top: `${TOP_INSET.tr}px`, right: inset };
+  // Level with the top-RIGHT, not the top-left. The page's own furniture runs
+  // across the top, so the middle has the same clearance to make as the right
+  // does -- which is why ProtonDB's medal uses 60 for both of them.
+  if (position === "tm") return { top: `${TOP_INSET.tm}px`, ...CENTRED };
 
   // Its BOTTOM edge INSET above the hero's — which is the gap the eye
   // compares against the side inset, not the distance to its top edge.
@@ -72,6 +84,8 @@ export function badgePosition(
   // further down than the capsule we measured.
   const artBottom = (capsuleBottom ?? FALLBACK_HERO_HEIGHT) + ART_OVERHANG;
   const top = `${artBottom - INSET - badgeHeight}px`;
+  if (position === "br") return { top, right: inset };
+  if (position === "bm") return { top, ...CENTRED };
   // Anything unrecognised lands bottom-left, which is the default.
-  return position === "br" ? { top, right: inset } : { top, left: inset };
+  return { top, left: inset };
 }

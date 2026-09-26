@@ -207,8 +207,10 @@ export const SettingsSection: FC<SettingsSectionProps> = ({
             selectedOption={status.badge_position ?? "bl"}
             rgOptions={[
               { data: "bl", label: "Bottom left" },
+              { data: "bm", label: "Bottom middle" },
               { data: "br", label: "Bottom right" },
               { data: "tl", label: "Top left" },
+              { data: "tm", label: "Top middle" },
               { data: "tr", label: "Top right" },
             ]}
             onChange={(option) => {

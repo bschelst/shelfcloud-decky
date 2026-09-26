@@ -86,6 +86,42 @@ describe("before the hero has been measured", () => {
   });
 });
 
+describe("the middle positions", () => {
+  it("centres with a transform, not a computed left", () => {
+    // The badge's width changes with the provider's name -- "GeForce NOW" is
+    // wider than "Luna" -- and is not known here. left:50% puts its LEFT EDGE
+    // at the middle; the transform pulls it back by half its own box, which
+    // is resolved at paint time against whatever ended up inside it.
+    for (const middle of ["tm", "bm"] as const) {
+      const style = badgePosition(middle, CAPSULE);
+      expect(style.left).toBe("50%");
+      expect(style.transform).toBe("translateX(-50%)");
+      expect(style.right).toBeUndefined();
+    }
+  });
+
+  it("hangs the top-middle level with the top-RIGHT", () => {
+    // Not with the top-left. The page's furniture runs across the top, so the
+    // middle has the same clearance to make as the right does. ProtonDB's
+    // medal uses 60 for both, and that is where this comes from.
+    expect(badgePosition("tm", CAPSULE).top).toBe(badgePosition("tr", CAPSULE).top);
+    expect(badgePosition("tm", CAPSULE).top).not.toBe(badgePosition("tl", CAPSULE).top);
+  });
+
+  it("sits the bottom-middle at the same height as the bottom corners", () => {
+    // Only the horizontal placement differs; the distance up from the
+    // artwork's bottom edge is the one the eye compares across all three.
+    expect(badgePosition("bm", CAPSULE).top).toBe(badgePosition("bl", CAPSULE).top);
+    expect(badgePosition("bm", CAPSULE).top).toBe(badgePosition("br", CAPSULE).top);
+  });
+
+  it("moves the bottom-middle with the hero, like the corners", () => {
+    const shallow = badgePosition("bm", 200).top as string;
+    const deep = badgePosition("bm", 400).top as string;
+    expect(parseInt(deep, 10)).toBeGreaterThan(parseInt(shallow, 10));
+  });
+});
+
 describe("an unknown corner", () => {
   it("falls back to the bottom left, which is the default", () => {
     expect(badgePosition("nonsense", CAPSULE)).toEqual(badgePosition("bl", CAPSULE));

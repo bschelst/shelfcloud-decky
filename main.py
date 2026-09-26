@@ -2183,7 +2183,7 @@ class Plugin:
     # Where the provider badge sits on a game's page. Validated as a set
     # rather than trusted: this value is written into a style, and a dropdown
     # is not the only thing that can call set_setting.
-    BADGE_POSITIONS = ("tl", "tr", "bl", "br")
+    BADGE_POSITIONS = ("tl", "tm", "tr", "bl", "bm", "br")
 
     async def set_setting(self, key: str, value: Any) -> Dict[str, Any]:
         if key not in self.ALLOWED_SETTINGS:
