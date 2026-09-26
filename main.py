@@ -459,38 +459,10 @@ class Plugin:
                           self._gateway(), len(self._synced))
         await self.apply_overrides()
         self._poll_task = asyncio.create_task(self._poll_loop())
-        self._beat_task = asyncio.create_task(self._heartbeat())
-
-    async def _heartbeat(self) -> None:
-        """Say, every few seconds, that this process can still run a callback.
-
-        Diagnostic, and it earns its place. A sync stalls with the backend at
-        0.1% CPU, no traceback, and RPCs unanswered -- which looks identical
-        whether the event loop here is blocked by synchronous work, or the
-        loop is fine and the frontend has stopped asking. Those need opposite
-        fixes, and seven attempts went past without distinguishing them.
-
-        If these lines stop when a sync stalls, the block is HERE. If they
-        keep coming, this process is healthy and the fault is on the other
-        side of the socket.
-        """
-        beat = 0
-        while True:
-            try:
-                await asyncio.sleep(5)
-                beat += 1
-                decky.logger.info("heartbeat %d", beat)
-            except asyncio.CancelledError:
-                return
-            except Exception:
-                return
 
     async def _unload(self):
         if self._poll_task:
             self._poll_task.cancel()
-        beat = getattr(self, "_beat_task", None)
-        if beat:
-            beat.cancel()
         if self._login_task:
             self._login_task.cancel()
         decky.logger.info("Shelfcloud unloaded")
@@ -2122,6 +2094,39 @@ class Plugin:
         if inner.get("result") != 1 or "player_count" not in inner:
             return {"ok": False, "error": "no player count for this app"}
         return {"ok": True, "players": int(inner["player_count"])}
+
+    async def set_steam_ids(self, ids: Dict[str, Any]) -> Dict[str, Any]:
+        """Fill in the Steam appid for tiles that already exist.
+
+        The appid is written by record_shortcut -- but a sync only records a
+        tile that CHANGED, so on a settled library nothing is recorded and the
+        field stayed empty on all 890 tiles. The player badge then had nothing
+        to ask Steam about and never drew, which is the feature being inert by
+        construction rather than merely unfinished.
+
+        Bumping ART_REVISION would have reached every tile, at the price of
+        re-applying artwork across the whole library to backfill one string.
+        This is the same reach for a single call: the sync already holds every
+        desired game, so it sends the whole map once and the tiles it does not
+        mention are left alone.
+        """
+        if not isinstance(ids, dict):
+            return {"ok": False, "error": "bad ids"}
+
+        changed = 0
+        for key, steam_app_id in ids.items():
+            entry = self._synced.get(str(key))
+            if not isinstance(entry, dict):
+                continue
+            value = str(steam_app_id or "")
+            if entry.get("steam_app_id", "") == value:
+                continue
+            entry["steam_app_id"] = value
+            changed += 1
+
+        if changed:
+            await self._save_state()
+        return {"ok": True, "updated": changed}
 
     @_sized
     async def tracked_providers(self) -> Dict[str, Any]:

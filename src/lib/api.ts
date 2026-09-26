@@ -21,6 +21,16 @@ export const getStatus = guarded<[], Status>("get_status");
  *
  *  ok=false when the game is not on Steam at all -- one in six of the
  *  catalogue -- which is a different thing from nobody playing it. */
+/** Fill in the Steam appid on tiles that already exist.
+ *
+ *  One call for the whole library. record_shortcut writes this field too, but
+ *  only for tiles a sync actually touches -- which on a settled library is
+ *  none of them, so the field stayed empty on all 890 and the player badge
+ *  had nothing to ask about. */
+export const setSteamIds =
+  guarded<[ids: Record<string, string>], { ok: boolean; updated?: number }>(
+    "set_steam_ids");
+
 export const currentPlayers =
   guarded<[steam_app_id: string],
           { ok: boolean; players?: number; error?: string }>("current_players");

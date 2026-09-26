@@ -5,7 +5,7 @@
 // This lives on the frontend because only here does SteamClient exist. The
 // backend decides *what* the library should contain; this makes it so.
 
-import { fetchArtwork, installControllerLayout, logNote, saveIcon, strayShortcuts } from "./api";
+import { fetchArtwork, installControllerLayout, logNote, saveIcon, setSteamIds, strayShortcuts } from "./api";
 import { addToProviderCollections, pruneProviderCollections,
          removeRetiredCollections, type CollectionMember } from "./collection";
 import { renderPageCapsule } from "./pagecapsule";
@@ -1061,6 +1061,25 @@ export async function syncLibrary(
   }
 
   // Whatever did not fill a batch. Best effort — unsorted tiles still play.
+  // Backfill the Steam appids, once, for every tile the library knows.
+  //
+  // record_shortcut carries this too, but only for tiles a sync TOUCHES --
+  // and on a settled library that is none of them, so the field stayed empty
+  // on all 890 and the player badge had nothing to ask Steam about. One call
+  // with the whole map reaches them all without re-applying any artwork.
+  const steamIds: Record<string, string> = {};
+  for (const game of ordered) {
+    const id = game.steam_app_id;
+    // Only games that ARE on Steam. About one in six is not, and those get
+    // no entry rather than an empty one.
+    if (id !== undefined && id !== null && String(id)) {
+      steamIds[trackingKey(game)] = String(id);
+    }
+  }
+  if (Object.keys(steamIds).length) {
+    await withTimeout(setSteamIds(steamIds), undefined, RPC_TIMEOUT);
+  }
+
   await phase("flush collections");
   await withTimeout(flushCollections(), undefined, RPC_TIMEOUT);
 
