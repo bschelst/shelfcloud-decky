@@ -198,6 +198,39 @@ describe("a message too big for the socket", () => {
   });
 });
 
+describe("the panel never queues behind a sync", () => {
+  it("keeps a slot free for an interactive call", async () => {
+    // The sync issues thousands of calls and holds every permit for the fifty
+    // seconds it runs, so opening Quick Access mid-sync left get_status behind
+    // all of it -- the panel sat on "Loading…" for half a minute.
+    const { guarded, rpcLoad } = await freshRpc();
+    const background = guarded("fetch_artwork", true);
+    for (let i = 0; i < 20; i++) void background();
+    await settle();
+
+    // Background work saturates what it is allowed, and no more.
+    expect(rpcLoad().active).toBe(3);
+    expect(rpcLoad().waiting).toBeGreaterThan(0);
+
+    const panel = guarded("get_status");
+    void panel();
+    await settle();
+
+    // The panel's call went out rather than joining the queue.
+    expect(calls.some((c) => c.name === "get_status")).toBe(true);
+    expect(rpcLoad().active).toBe(4);
+  });
+
+  it("still lets background work use the free slot when nothing else wants it", async () => {
+    const { guarded, rpcLoad } = await freshRpc();
+    const background = guarded("fetch_artwork", true);
+    for (let i = 0; i < 10; i++) void background();
+    await settle();
+    // Three, not four: the reserve is only worth having if it is kept.
+    expect(rpcLoad().active).toBe(3);
+  });
+});
+
 describe("not posting faster than the socket can answer", () => {
   it("keeps only a few in flight and queues the rest", async () => {
     const { guarded, rpcLoad } = await freshRpc();

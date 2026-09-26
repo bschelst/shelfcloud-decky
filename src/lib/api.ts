@@ -17,7 +17,7 @@ import type {
  *
  *  The sync runs where console output goes to a CEF console nobody reads, and
  *  the interesting question is always asked after the fact. */
-export const logNote = guarded<[message: string], { ok: boolean }>("log_note");
+export const logNote = guarded<[message: string], { ok: boolean }>("log_note", true);
 
 export const getStatus = guarded<[], Status>("get_status");
 
@@ -29,7 +29,7 @@ export const getStatus = guarded<[], Status>("get_status");
  *  nothing to ask about. */
 export const setSteamIds =
   guarded<[ids: Record<string, string>], { ok: boolean; updated?: number }>(
-    "set_steam_ids");
+    "set_steam_ids", true);
 
 /** How many people are playing this game on Steam right now.
  *
@@ -74,14 +74,14 @@ export const restoreToLibrary =
   guarded<[game_ids: number[]], { ok: boolean; restored?: number; error?: string }>(
     "restore_to_library");
 export const syncSteamLibrary = guarded<[], SteamLibraryResult>("sync_steam_library");
-export const getDesiredLibrary = guarded<[], LibraryResponse>("get_desired_library");
+export const getDesiredLibrary = guarded<[], LibraryResponse>("get_desired_library", true);
 /** Artwork is downloaded by the Python backend, not the browser: inside Steam's
  *  client every image URL is cross-origin, and our own gateway is plain HTTP
  *  (mixed content). Python has neither restriction. */
 export const fetchArtwork =
   guarded<[url: string, offset?: number],
           { ok: boolean; base64?: string; kind?: string; error?: string;
-            offset?: number; total?: number }>("fetch_artwork");
+            offset?: number; total?: number }>("fetch_artwork", true);
 /** Write an icon to disk and get its path back.
  *
  *  Steam takes the four library slots as bytes, but takes a shortcut icon as a
@@ -89,7 +89,7 @@ export const fetchArtwork =
  *  one slot has to become a real file, which only the Python side can do. */
 export const saveIcon =
   guarded<[game_id: number, data: string, kind: string, app_id: number],
-           { ok: boolean; path?: string; error?: string }>("save_icon");
+           { ok: boolean; path?: string; error?: string }>("save_icon", true);
 /** Write an icon the backend fetches ITSELF, named by URL. The preferred one.
  *
  *  saveIcon takes the image as base64, which pushes the whole picture back
@@ -106,7 +106,7 @@ export const saveIcon =
  *  for images DRAWN here, which have no address and are kilobytes anyway. */
 export const saveIconFromUrl =
   guarded<[game_id: number, url: string, app_id: number],
-           { ok: boolean; path?: string; error?: string }>("save_icon_from_url");
+           { ok: boolean; path?: string; error?: string }>("save_icon_from_url", true);
 /** The account's shelves, and which one this device is pointed at.
  *
  *  Asked of the gateway each time rather than cached: the shelf can be changed
@@ -133,19 +133,19 @@ export const setShelf =
  *  One call per sync; the caller composes a path per tile from the base. */
 export const layoutSelectionBase =
   guarded<[], { ok: boolean; base?: string; native?: string; repair?: boolean;
-                repair_rev?: number; error?: string }>("layout_selection_base");
+                repair_rev?: number; error?: string }>("layout_selection_base", true);
 
 export const installControllerLayout =
   guarded<[shortcut_name: string, template_url: string],
-           { ok: boolean; installed?: number; autosave_url?: string; error?: string }>("install_controller_layout");
+           { ok: boolean; installed?: number; autosave_url?: string; error?: string }>("install_controller_layout", true);
 
 // Keyed by "<game id>:<provider>", not by game id: one game can be several
 // tiles. The backend still accepts a bare id and normalises it, so these two
 // are safe against a plugin whose halves are briefly different versions.
 export const recordShortcut =
   guarded<[key: string, app_id: number, name: string, options: string, art: string,
-           provider: string, url: string], unknown>("record_shortcut");
-export const forgetShortcut = guarded<[key: string], unknown>("forget_shortcut");
+           provider: string, url: string], unknown>("record_shortcut", true);
+export const forgetShortcut = guarded<[key: string], unknown>("forget_shortcut", true);
 
 /** app id -> which service that tile launches, for the library badge.
  *
@@ -180,7 +180,7 @@ export const strayShortcuts = guarded<[], {
     keep: number;
     tracked?: number | null;
   }>;
-}>("stray_shortcuts");
+}>("stray_shortcuts", true);
 
 export const syncFinished =
   guarded<[added: number, removed: number, updated: number], unknown>("sync_finished");

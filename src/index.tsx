@@ -442,8 +442,30 @@ async function doRemoveAll(): Promise<void> {
   });
 }
 
+/** The last status the panel saw, kept outside React.
+ *
+ *  Closing Quick Access unmounts the panel, so component state is destroyed
+ *  every time. Starting from null meant every open re-fetched before it could
+ *  draw anything -- and a fetch that lands while a sync is running waits for a
+ *  slot, so the panel showed "Loading…" for as long as half a minute.
+ *
+ *  Nothing here is worth blocking a repaint for: it is a count, a few
+ *  switches and a shelf name, all of which were true a moment ago. Show them
+ *  at once and correct them when the answer arrives.
+ */
+let lastStatus: Status | null = null;
+
 function Content() {
-  const [status, setStatus] = useState<Status | null>(null);
+  const [status, setStatusState] = useState<Status | null>(lastStatus);
+  // Every write goes through here so the cache cannot drift from the view.
+  const setStatus = useCallback(
+    (next: Status | ((prev: Status | null) => Status | null)) => {
+      setStatusState((prev) => {
+        const value = typeof next === "function" ? next(prev) : next;
+        lastStatus = value;
+        return value;
+      });
+    }, []);
   const [owned, setOwned] = useState<number | null>(null);
   // Which shelf this device shows, and what it could show. Loaded from the
   // gateway rather than from settings: the shelf can be changed on the website

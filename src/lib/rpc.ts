@@ -34,6 +34,18 @@ import { callable } from "@decky/api";
  *  exists to prevent came from having hundreds outstanding at once. */
 const MAX_IN_FLIGHT = 4;
 
+/** How many of those a BACKGROUND caller may hold.
+ *
+ *  One slot is always kept for the panel. The sync issues thousands of calls
+ *  and holds every permit for the fifty seconds it runs, so opening Quick
+ *  Access mid-sync left get_status queued behind all of it -- the panel sat on
+ *  "Loading…" for half a minute through no fault of its own, and a sync runs
+ *  every few minutes so it was easy to hit.
+ *
+ *  The reserve is what fixes it: background work saturates what it is given,
+ *  and the one thing a person is actually waiting for goes first. */
+const MAX_BACKGROUND = MAX_IN_FLIGHT - 1;
+
 let active = 0;
 const waiting: Array<() => void> = [];
 
@@ -89,13 +101,15 @@ export function rpcLoad(): { active: number; waiting: number } {
   return { active, waiting: waiting.length };
 }
 
-async function withSlot<T>(run: () => Promise<T>): Promise<T> {
+async function withSlot<T>(run: () => Promise<T>,
+                           background = false): Promise<T> {
+  const ceiling = background ? MAX_BACKGROUND : MAX_IN_FLIGHT;
   // `while`, not `if`. Waking a waiter and its taking the permit are a
   // microtask apart, and a caller arriving in that gap takes the free slot
   // synchronously -- so both proceed and more than MAX_IN_FLIGHT calls are in
   // flight, which is the one thing this exists to prevent. Re-checking on
   // wake costs a spurious loop and closes it.
-  while (active >= MAX_IN_FLIGHT) {
+  while (active >= ceiling) {
     await new Promise<void>((resolve) => waiting.push(resolve));
   }
   active += 1;
@@ -214,7 +228,9 @@ function onADeadline<T>(work: Promise<T>, ms: number, name: string): Promise<T> 
 
 /** A backend method, rate-limited and ridden over a socket that keeps
  *  cycling. */
-export function guarded<A extends unknown[], R>(name: string): (...args: A) => Promise<R> {
+export function guarded<A extends unknown[], R>(
+  name: string, background = false,
+): (...args: A) => Promise<R> {
   const call = callable<A, R>(name);
   return (...args: A): Promise<R> =>
     withSlot(async () => {
@@ -251,5 +267,5 @@ export function guarded<A extends unknown[], R>(name: string): (...args: A) => P
         if (!(await waitForSocket())) throw error;
         return await onADeadline(call(...args), left(), name);
       }
-    });
+    }, background);
 }
