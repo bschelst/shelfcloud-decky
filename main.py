@@ -62,6 +62,17 @@ SYNC_EVENT = "shelfcloud/library"
 _LAYOUT_CACHE: Dict[str, Any] = {}
 _LAYOUT_CACHE_TTL = 600
 
+# path -> (etag, raw json text). See _request.
+#
+# The gateway tags every library answer, and the library is polled on a timer
+# while changing hardly at all -- so without this the same few hundred
+# kilobytes came down again on every sync to say nothing had happened. The
+# RAW TEXT is kept rather than the parsed object: handing the same dict back
+# to two callers means the second one sees whatever the first did to it, and
+# re-parsing is still far cheaper than the transfer it replaces.
+_ETAG_CACHE: Dict[str, Any] = {}
+_ETAG_CACHE_MAX = 8
+
 # Must match backend/providers.py LAYOUT_GAMEPAD and LAYOUT_WEB_BROWSER.
 _LAYOUT_GAMEPAD = "template://controller_neptune_gamepad_fps.vdf"
 _LAYOUT_WEB_BROWSER = "template://controller_neptune_webbrowser.vdf"
@@ -607,6 +618,15 @@ class Plugin:
         request.add_header("Accept", "application/json")
         if data:
             request.add_header("Content-Type", "application/json")
+
+        # Only a plain GET is safe to revalidate: a POST has a side effect and
+        # must never be answered from anything held here. Keyed on the full
+        # path so ?shelf=... is a different entry, because it is a different
+        # answer.
+        conditional = method == "GET" and data is None
+        cached = _ETAG_CACHE.get(path) if conditional else None
+        if cached:
+            request.add_header("If-None-Match", cached[0])
         if authenticated:
             token = self._token()
             if not token:
@@ -626,8 +646,25 @@ class Plugin:
                         f"gateway sent more than {RESPONSE_MAX_BYTES} bytes")
                 payload = raw.decode()
                 self._auth_ok = True
+                if conditional:
+                    etag = response.headers.get("ETag")
+                    if etag:
+                        # Bounded, and cleared wholesale rather than evicted
+                        # one by one: there are a handful of GET paths, so if
+                        # this is ever full something is generating keys and
+                        # the useful response is to stop holding any of them.
+                        if (len(_ETAG_CACHE) >= _ETAG_CACHE_MAX
+                                and path not in _ETAG_CACHE):
+                            _ETAG_CACHE.clear()
+                        _ETAG_CACHE[path] = (etag, payload)
                 return json.loads(payload) if payload else None
         except urllib.error.HTTPError as exc:
+            # 304 is the gateway agreeing that what we already hold is current.
+            # urllib raises for it because it is not a 2xx, so it arrives here
+            # rather than above.
+            if exc.code == 304 and cached:
+                self._auth_ok = True
+                return json.loads(cached[1]) if cached[1] else None
             if exc.code == 401 and authenticated:
                 self._forget_credentials()
                 raise PermissionError("signed out — sign in again") from exc
@@ -735,6 +772,11 @@ class Plugin:
         self._settings.pop("steam_id64", None)
         self._auth_ok = False
         self._auth_checked = 0.0
+        # Whoever signs in next must not find the last account's library still
+        # sitting here. A 304 could not leak it -- the gateway tags per user,
+        # so another account's request simply would not match -- but there is
+        # no reason to keep somebody's game list in memory once they are out.
+        _ETAG_CACHE.clear()
         try:
             self._write_json(_settings_file(), self._settings)
         except OSError:
@@ -1570,10 +1612,19 @@ class Plugin:
         gateway = self._gateway()
         url = f"{gateway}/api/controller-layout/{urllib.parse.quote(name)}"
         token = self._settings.get("api_token", "")
-        req = urllib.request.Request(url, headers={
+        headers = {
             "Authorization": f"Bearer {token}",
             "User-Agent": ARTWORK_USER_AGENT,
-        })
+        }
+        # Once the ten minutes are up the question is only "has it changed",
+        # and the gateway has tagged the answer since it started serving these.
+        # Asking conditionally turns the recheck from seventeen kilobytes into
+        # a couple of hundred bytes, which matters on a first sync where every
+        # new tile can reach this.
+        etag = cached[2] if cached and len(cached) > 2 else None
+        if etag:
+            headers["If-None-Match"] = etag
+        req = urllib.request.Request(url, headers=headers)
         try:
             with urllib.request.urlopen(req, context=SSL_CTX, timeout=REQUEST_TIMEOUT) as resp:
                 # Bounded, like _request and fetch_artwork already are. This
@@ -1586,12 +1637,21 @@ class Plugin:
                     raise ValueError(
                         f"layout {name!r} is larger than {LAYOUT_MAX_BYTES} bytes")
                 text = raw.decode("utf-8", errors="replace")
+                new_etag = resp.headers.get("ETag")
+        except urllib.error.HTTPError as exc:
+            if exc.code == 304 and cached:
+                # Unchanged. Restart the clock so the next ten minutes are free
+                # rather than asking again on the very next tile.
+                _LAYOUT_CACHE[name] = (time.time(), cached[1], etag)
+                return cached[1]
+            decky.logger.warning("custom layout download failed: %s", exc)
+            return cached[1] if cached else None
         except Exception as exc:
             decky.logger.warning("custom layout download failed: %s", exc)
             # A stale copy beats no layout at all: the gateway being briefly
             # unreachable should not strip a layout off every tile.
             return cached[1] if cached else None
-        _LAYOUT_CACHE[name] = (time.time(), text)
+        _LAYOUT_CACHE[name] = (time.time(), text, new_etag)
         return text
 
     async def install_controller_layout(self, shortcut_name: str,
