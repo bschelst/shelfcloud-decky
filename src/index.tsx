@@ -830,17 +830,12 @@ function Content() {
 
         <PanelSectionRow>
           <ButtonItem layout="below" disabled={busy || signedOut} onClick={() => void addOwned()}>
-            {/* "my Steam games", not "my games". The count is the Steam
-                library -- what you own, plus the free-to-play titles -- and
-                calling it "my games" invited the reading that it covered
-                everything playable, which made a jump in the number look like
-                a bug in the button rather than a change in what fed it. */}
-            {owned ? `Add all my Steam games (${owned})` : "Add all my Steam games"}
+            {owned ? `Add all my games (${owned})` : "Add all my games"}
           </ButtonItem>
         </PanelSectionRow>
 
         {/* While something is running this row becomes the way OUT of it.
-            "Add all my Steam games" walks a whole Steam library — thousands of tiles
+            "Add all my games" walks a whole Steam library — thousands of tiles
             and many minutes on a large account — and until now the only ways
             to stop were to let it finish or to kill Steam. The button is only
             replaced while busy, so there is never a Cancel with nothing to
