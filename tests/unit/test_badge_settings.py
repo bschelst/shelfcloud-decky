@@ -88,7 +88,10 @@ def test_a_malformed_entry_does_not_raise():
 
 def test_an_empty_library_answers_empty_rather_than_failing():
     out = asyncio.run(_plugin({}).tracked_providers())
-    assert out == {"ok": True, "providers": {}}
+    # steam_ids rides alongside providers: the badge needs a game's Steam
+    # appid to ask how many people are playing it, and a cloud tile is a
+    # non-Steam shortcut so Steam cannot be asked about the tile itself.
+    assert out == {"ok": True, "providers": {}, "steam_ids": {}}
 
 
 # ----------------------------------------------------------- the position

@@ -430,6 +430,7 @@ class Plugin:
         self._vanish_suspects: set = set()
         # (when, answer) for the display probe, which shells out to xrandr and
         # is asked for by a panel that polls status every 1.5 seconds.
+        self._players_cache: Dict[str, Any] = {}
         self._display_cache: tuple = (0.0, "")
         self._poll_task: Optional[asyncio.Task] = None
         self._login_task: Optional[asyncio.Task] = None
@@ -1594,7 +1595,7 @@ class Plugin:
 
     async def record_shortcut(self, game_id: Any, app_id: int, name: str,
                               options: str, art: str = "", provider: str = "",
-                              url: str = "") -> Dict:
+                              url: str = "", steam_app_id: str = "") -> Dict:
         """Remember a tile, and where its game launches if the gateway is down.
 
         `url` is the offline fallback. It used to be an argument in the Steam
@@ -1616,6 +1617,16 @@ class Plugin:
             # omits one — an older frontend that does not send `url` yet must
             # not silently strip the offline route from every tile it touches.
             "url": keep or previous.get("url", ""),
+            # The game's id on STEAM, where it has one -- 83% of the catalogue
+            # does. Only used to ask Steam how many people are playing it: a
+            # cloud tile is a non-Steam shortcut, so Steam will not answer that
+            # about the tile itself.
+            #
+            # Kept from the previous record when a caller omits it, for the
+            # same reason as `url` -- an older frontend must not quietly strip
+            # it off every tile it touches.
+            "steam_app_id": (str(steam_app_id) if steam_app_id
+                             else previous.get("steam_app_id", "")),
         }
         await self._save_state()
         return {"ok": True}
@@ -2051,6 +2062,67 @@ class Plugin:
         decky.logger.warning("frontend: %s", message[:300])
         return {"ok": True}
 
+    # How long a player count may be reused, and how long a failure is
+    # remembered. Steam's own store refreshes this on the order of minutes,
+    # and a badge on a game page is opened over and over on a Deck -- so a
+    # short cache is the difference between one request per game and one per
+    # press of the A button.
+    PLAYERS_CACHE_SECONDS = 300.0
+    PLAYERS_URL = ("https://api.steampowered.com/ISteamUserStats/"
+                   "GetNumberOfCurrentPlayers/v1/?appid=%s")
+
+    async def current_players(self, steam_app_id: str) -> Dict[str, Any]:
+        """How many people are playing this game on Steam right now.
+
+        The same public endpoint the PlayCount plugin uses. No key, no
+        account: it answers for any appid.
+
+        This exists because Steam will not answer it for OUR tiles. A cloud
+        game is a non-Steam shortcut, so the client has no appid to ask about
+        and every player-count plugin shows nothing on those pages -- even
+        though the game itself is usually on Steam and the number is public.
+
+        Returns ok=False rather than a zero when there is nothing to say. A
+        game that is not on Steam and a game nobody is playing are different
+        facts, and showing "0 playing" for the first is simply wrong.
+        """
+        if not isinstance(steam_app_id, str) or not steam_app_id.isdigit():
+            return {"ok": False, "error": "not on steam"}
+
+        now = time.time()
+        cached = self._players_cache.get(steam_app_id)
+        if cached and (now - cached[0]) < self.PLAYERS_CACHE_SECONDS:
+            return cached[1]
+
+        try:
+            payload = await asyncio.to_thread(self._fetch_players, steam_app_id)
+        except Exception as exc:
+            # Remembered too. An appid Steam refuses -- delisted, region-locked
+            # -- would otherwise be re-asked on every page open, for ever.
+            result = {"ok": False, "error": str(exc)}
+            self._players_cache[steam_app_id] = (now, result)
+            return result
+
+        self._players_cache[steam_app_id] = (now, payload)
+        return payload
+
+    @classmethod
+    def _fetch_players(cls, steam_app_id: str) -> Dict[str, Any]:
+        """Blocking half of current_players, for asyncio.to_thread."""
+        request = urllib.request.Request(
+            cls.PLAYERS_URL % steam_app_id,
+            headers={"User-Agent": ARTWORK_USER_AGENT})
+        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT,
+                                    context=SSL_CTX) as response:
+            raw = response.read(64 * 1024)
+        body = json.loads(raw.decode("utf-8", errors="replace"))
+        inner = body.get("response") or {}
+        # result 1 is Steam's own "this appid is fine". Anything else means it
+        # has no answer, which is not the same as nobody playing.
+        if inner.get("result") != 1 or "player_count" not in inner:
+            return {"ok": False, "error": "no player count for this app"}
+        return {"ok": True, "players": int(inner["player_count"])}
+
     @_sized
     async def tracked_providers(self) -> Dict[str, Any]:
         """app id -> which service that tile launches, for the library badge.
@@ -2065,6 +2137,7 @@ class Plugin:
         ints would make the frontend convert them back on every lookup.
         """
         out: Dict[str, str] = {}
+        steam_ids: Dict[str, str] = {}
         for entry in self._synced.values():
             if not isinstance(entry, dict):
                 continue
@@ -2072,7 +2145,14 @@ class Plugin:
             provider = entry.get("provider")
             if isinstance(app_id, int) and isinstance(provider, str) and provider:
                 out[str(app_id)] = provider
-        return {"ok": True, "providers": out}
+                # Absent for the one game in six that is not on Steam, and for
+                # tiles recorded before this was kept. Absent means "no player
+                # count for this one", which is the honest answer rather than
+                # a zero.
+                steam = entry.get("steam_app_id")
+                if steam:
+                    steam_ids[str(app_id)] = str(steam)
+        return {"ok": True, "providers": out, "steam_ids": steam_ids}
 
     async def sync_finished(self, added: int, removed: int, updated: int) -> Dict:
         self._last_sync = asyncio.get_event_loop().time()
