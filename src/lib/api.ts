@@ -9,6 +9,12 @@ import type {
   SteamLibraryResult, Status,
 } from "./types";
 
+/** Put a line in the plugin's log file.
+ *
+ *  The sync runs where console output goes to a CEF console nobody reads, and
+ *  the interesting question is always asked after the fact. */
+export const logNote = callable<[message: string], { ok: boolean }>("log_note");
+
 export const getStatus = callable<[], Status>("get_status");
 export const setSetting = callable<[key: string, value: unknown], Status>("set_setting");
 

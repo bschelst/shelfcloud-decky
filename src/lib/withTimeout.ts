@@ -38,6 +38,20 @@ export const STEAM_CALL_TIMEOUT = 15000;
  *  nothing was wrong with it, the frontend had simply stopped asking. */
 export const RPC_TIMEOUT = 45000;
 
+/** How long ONE game may take before the sync abandons it and moves on.
+ *
+ *  A backstop, not a budget. Every individual call in a game's turn already
+ *  has its own deadline, so reaching this one means something is hanging that
+ *  none of those cover -- and rather than work out what, in advance, the loop
+ *  refuses to be held by any of it.
+ *
+ *  Three separate fixes went in by bounding one layer at a time -- the Steam
+ *  calls, then the backend RPCs -- and the sync froze again after each,
+ *  because the next await down was still unbounded. Bounding the ITERATION is
+ *  the version that does not depend on guessing right: whatever hangs, the
+ *  library still finishes and the log names the game it happened on. */
+export const PER_GAME_TIMEOUT = 90000;
+
 /** Resolve with `whenLate` if `work` has not settled in `ms`.
  *
  *  Resolves rather than rejects: the callers here treat a failed slot as "skip

@@ -5,12 +5,12 @@
 // This lives on the frontend because only here does SteamClient exist. The
 // backend decides *what* the library should contain; this makes it so.
 
-import { fetchArtwork, installControllerLayout, saveIcon, strayShortcuts } from "./api";
+import { fetchArtwork, installControllerLayout, logNote, saveIcon, strayShortcuts } from "./api";
 import { addToProviderCollections, pruneProviderCollections,
          removeRetiredCollections, type CollectionMember } from "./collection";
 import { renderPageCapsule } from "./pagecapsule";
 import { BRAND_MARK } from "./brandmark";
-import { RPC_TIMEOUT, steamCall, withTimeout } from "./withTimeout";
+import { PER_GAME_TIMEOUT, RPC_TIMEOUT, steamCall, withTimeout } from "./withTimeout";
 import { renderPageLogo } from "./pagelogo";
 import { providerLabel, WEBSITE_PROVIDERS, type DesiredGame, type SyncResult, type TrackedShortcut } from "./types";
 
@@ -844,6 +844,10 @@ export async function syncLibrary(
     const title = shortcutTitle(game);
     const art = artworkFingerprint(game);
     try {
+      // The whole turn, under one deadline. See PER_GAME_TIMEOUT: the inner
+      // calls are each bounded already, and the sync still froze, so this
+      // stops depending on having guessed the right inner call.
+      const finished = await withTimeout((async () => {
       if (!existing) {
         step("Adding", game.name);
         // 0 on timeout, which the check below already treats as a refusal.
@@ -932,6 +936,21 @@ export async function syncLibrary(
         }
         file({ appId: existing.app_id, provider: game.provider });
         if (pending.length >= COLLECTION_BATCH) await flushCollections();
+      }
+      return true;
+      })(), false, PER_GAME_TIMEOUT);
+      if (!finished) {
+        // Named, because this is the only evidence of WHAT hangs. A run that
+        // logs the same title every time is a bad tile; a run that names a
+        // different one each time is something about the client, not the game.
+        console.warn("[shelfcloud] gave up on", game.name, "after",
+                     PER_GAME_TIMEOUT, "ms — moving on");
+        // Into the plugin's log file, not just the console: this is the
+        // only trace that outlives the sync it describes. Bounded itself --
+        // reporting a hang must not hang.
+        await withTimeout(logNote(`gave up on ${game.name} after ${PER_GAME_TIMEOUT}ms`),
+                          undefined, 5000);
+        result.failed++;
       }
     } catch (error) {
       console.error("[shelfcloud] sync failed for", game.name, error);

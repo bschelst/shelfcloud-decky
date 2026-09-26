@@ -1920,6 +1920,22 @@ class Plugin:
         return {"ok": installed > 0, "installed": installed,
                 "autosave_url": autosave_url if installed else None}
 
+    async def log_note(self, message: str) -> Dict[str, Any]:
+        """Put a line from the frontend into the plugin's log.
+
+        The sync runs in Steam's browser context, where console.warn goes to a
+        CEF console nobody is looking at -- least of all afterwards, when the
+        question is "what was it doing when it stopped". This log is a file on
+        disk, which is the only record that survives the thing it describes.
+
+        Deliberately dull: a capped string and nothing else. It is called from
+        code the plugin does not control the inputs of.
+        """
+        if not isinstance(message, str):
+            return {"ok": False}
+        decky.logger.warning("frontend: %s", message[:300])
+        return {"ok": True}
+
     async def tracked_providers(self) -> Dict[str, Any]:
         """app id -> which service that tile launches, for the library badge.
 
