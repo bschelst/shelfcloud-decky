@@ -32,8 +32,8 @@ function emptyCache<T>(value: T): Cached<T> {
 }
 
 let providers = emptyCache<Record<string, string>>({});
-let badge = emptyCache<{ enabled: boolean; position: string }>(
-  { enabled: true, position: "bl" });
+let badge = emptyCache<{ enabled: boolean; onCards: boolean; position: string }>(
+  { enabled: true, onCards: true, position: "bl" });
 
 /** Throw both answers away, so the next badge asks again.
  *
@@ -42,6 +42,45 @@ let badge = emptyCache<{ enabled: boolean; position: string }>(
 export function invalidateBadgeData(): void {
   providers = emptyCache(providers.value);
   badge = emptyCache(badge.value);
+}
+
+/** The last answers, without waiting for anything.
+ *
+ *  For the focused-card badge, which runs inside a mutation observer: that
+ *  fires while the user is moving the highlight and has to decide what to
+ *  draw immediately. An await there would draw the badge a frame or two after
+ *  the card it belongs to, which looks like a bug.
+ *
+ *  Starts as "nothing is ours", so the first card focused before the first
+ *  fetch returns gets no badge rather than a wrong one. `refreshBadgeData`
+ *  fills it in and the observer's next tick picks it up. */
+export function badgeDataNow(): {
+  providers: Record<string, string>; enabled: boolean; position: string;
+} {
+  return {
+    providers: providers.value,
+    // The CARD badge has its own switch. Turning the game-page one off should
+    // not silently take this with it, and the reverse: they are two places,
+    // and somebody may well want one and not the other.
+    enabled: badge.value.onCards,
+    position: badge.value.position,
+  };
+}
+
+/** Fetch both answers if they are stale, for a caller that cannot await. */
+export function refreshBadgeData(): void {
+  void read(providers, async () => {
+    const result = await trackedProviders();
+    return result?.ok && result.providers ? result.providers : {};
+  });
+  void read(badge, async () => {
+    const status = await getStatus();
+    return {
+      enabled: status?.badge_enabled !== false,
+      onCards: status?.badge_on_cards !== false,
+      position: status?.badge_position ?? "bl",
+    };
+  });
 }
 
 async function read<T>(cache: Cached<T>, fetcher: () => Promise<T>): Promise<T> {
@@ -88,7 +127,7 @@ export function useProviderForApp(appId: string | undefined): string | undefined
 }
 
 /** Whether to show the badge, and where. */
-export function useBadgeSettings(): { enabled: boolean; position: string } {
+export function useBadgeSettings(): { enabled: boolean; onCards: boolean; position: string } {
   const [value, setValue] = useState(badge.value);
 
   useEffect(() => {
@@ -97,6 +136,7 @@ export function useBadgeSettings(): { enabled: boolean; position: string } {
       const status = await getStatus();
       return {
         enabled: status?.badge_enabled !== false,
+        onCards: status?.badge_on_cards !== false,
         position: status?.badge_position ?? "bl",
       };
     }).then((next) => { if (!cancelled) setValue(next); });

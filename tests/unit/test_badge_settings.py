@@ -120,6 +120,21 @@ def test_the_badge_can_be_switched_off():
     assert plugin._settings["badge_enabled"] is False
 
 
+def test_the_card_badge_has_its_own_switch():
+    """Two places, and wanting one without the other is ordinary.
+
+    Turning the game-page badge off must not silently take the card badge
+    with it, nor the other way round.
+    """
+    plugin = _plugin()
+    asyncio.run(plugin.set_setting("badge_enabled", False))
+    assert "badge_on_cards" not in plugin._settings
+
+    asyncio.run(plugin.set_setting("badge_on_cards", False))
+    assert plugin._settings["badge_on_cards"] is False
+    assert plugin._settings["badge_enabled"] is False
+
+
 def test_an_unknown_setting_is_still_refused():
     plugin = _plugin()
     asyncio.run(plugin.set_setting("badge_colour", "#ff0000"))

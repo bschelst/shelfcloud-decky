@@ -118,6 +118,10 @@ export interface Status {
   /** Show a mark on a cloud game's page saying which service streams it.
    *  On unless turned off. */
   badge_enabled?: boolean;
+  /** The same mark on the highlighted card in the home carousel and the
+   *  grid. Its own switch: two places, and wanting one without the other is
+   *  an ordinary thing to want. */
+  badge_on_cards?: boolean;
   /** Which corner it sits in: "tl", "tr", "bl" or "br". */
   badge_position?: string;
   by_provider: Record<string, number>;

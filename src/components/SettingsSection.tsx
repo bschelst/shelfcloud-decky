@@ -171,7 +171,27 @@ export const SettingsSection: FC<SettingsSectionProps> = ({
       </div>
     </PanelSectionRow>
 
-    {status.badge_enabled !== false && (
+    <PanelSectionRow>
+      <div style={{ padding: "0 0 10px" }}>
+        <ToggleField
+          label="Badge on the highlighted card"
+          description={
+            "The same mark on the card you have selected, on the home page "
+            + "and in the library grid. Only the highlighted one carries it — "
+            + "a mark on every card would be noise."
+          }
+          checked={status.badge_on_cards !== false}
+          onChange={(value) => {
+            void onSetSetting("badge_on_cards", value).then((next) => {
+              setStatus(next);
+              invalidateBadgeData();
+            });
+          }}
+        />
+      </div>
+    </PanelSectionRow>
+
+    {(status.badge_enabled !== false || status.badge_on_cards !== false) && (
       <PanelSectionRow>
         <Focusable style={{ display: "flex", flexDirection: "column", gap: 2 }}>
           <div style={{ fontSize: "0.75em", opacity: 0.7 }}>Badge corner</div>

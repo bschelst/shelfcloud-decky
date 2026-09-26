@@ -1783,6 +1783,11 @@ class Plugin:
             # On unless turned off: a badge that says where a tile streams
             # from is the point of having the tiles look different at all.
             "badge_enabled": self._settings.get("badge_enabled") is not False,
+            # The mark on the highlighted card in the home carousel and the
+            # grid. Its own switch rather than sharing one with the game page:
+            # they are two places, and wanting one without the other is a
+            # perfectly ordinary thing to want.
+            "badge_on_cards": self._settings.get("badge_on_cards") is not False,
             "badge_position": (self._settings.get("badge_position")
                                if self._settings.get("badge_position")
                                in self.BADGE_POSITIONS else "bl"),
@@ -1932,7 +1937,7 @@ class Plugin:
     # rejected. Shelf selection goes through set_shelf, not here.
     # If a new dropdown is added to the panel, its key must be listed here.
     ALLOWED_SETTINGS = {"browser", "sync_minutes", "sync_all_providers", "ui_scale",
-                        "badge_enabled", "badge_position"}
+                        "badge_enabled", "badge_on_cards", "badge_position"}
 
     # Where the provider badge sits on a game's page. Validated as a set
     # rather than trusted: this value is written into a style, and a dropdown

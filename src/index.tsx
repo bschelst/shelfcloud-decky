@@ -46,7 +46,8 @@ import { AboutSection } from "./components/AboutSection";
 import { cancelJob, cancelRequested, finishJob, getJob, runJob, setJob, subscribeJob } from "./lib/job";
 import { theme } from "./lib/theme";
 import { isSafeExternalUrl } from "./lib/url";
-import { invalidateBadgeData } from "./lib/badgeData";
+import { badgeDataNow, invalidateBadgeData, refreshBadgeData } from "./lib/badgeData";
+import { startFocusBadge, stopFocusBadge } from "./lib/focusBadge";
 import { patchLibraryApp } from "./lib/patchLibraryApp";
 import type { DesiredGame, InstallState, Status, SyncResult } from "./lib/types";
 
@@ -984,6 +985,17 @@ export default definePlugin(() => {
   // be there whenever a game page is.
   const libraryPatch = patchLibraryApp();
 
+  // And the same mark on the highlighted card in the home carousel and the
+  // grid. Not a React patch: those cards are recycled by a virtualised list,
+  // so there is nothing stable to hang a child off — see focusBadge.
+  refreshBadgeData();
+  startFocusBadge(() => {
+    // Kept fresh from here rather than from inside the observer, which runs
+    // while the highlight is moving and must not wait on anything.
+    refreshBadgeData();
+    return badgeDataNow();
+  });
+
 
 
   return {
@@ -1010,6 +1022,10 @@ export default definePlugin(() => {
       } catch (error) {
         console.error("[shelfcloud] could not remove the library patch", error);
       }
+      // Disconnects the observer AND takes the badge off whatever card it is
+      // sitting on. A node left in another window's document outlives the
+      // plugin that put it there.
+      stopFocusBadge();
     },
   };
 });
