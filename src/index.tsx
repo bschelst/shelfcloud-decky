@@ -43,7 +43,7 @@ import { NoBrowser } from "./components/NoBrowser";
 import { SettingsSection } from "./components/SettingsSection";
 import { LinksSection } from "./components/LinksSection";
 import { AboutSection } from "./components/AboutSection";
-import { cancelJob, cancelRequested, finishJob, getJob, runJob, setJob, subscribeJob } from "./lib/job";
+import { cancelJob, cancelRequested, finishJob, getJob, runJob, setAbandonHandler, setJob, subscribeJob } from "./lib/job";
 import { theme } from "./lib/theme";
 import { isSafeExternalUrl } from "./lib/url";
 import { badgeDataNow, invalidateBadgeData, refreshBadgeData } from "./lib/badgeData";
@@ -184,7 +184,11 @@ async function runSync(
   try {
     return { ...(await started), owned: true };
   } finally {
-    syncInFlight = null;
+    // Only if it is still OURS. Cancel's force-idle releases the in-flight
+    // promise so the next sync starts fresh instead of adopting a run nobody
+    // can reach -- and that next run must not then have its own promise
+    // cleared out from under it when this abandoned one finally settles.
+    if (syncInFlight === started) syncInFlight = null;
   }
 }
 
@@ -1031,6 +1035,12 @@ export default definePlugin(() => {
         console.error("[shelfcloud] background sync failed", error);
       });
   };
+  // Cancel gives up after ten seconds and resets the panel while the run is
+  // still going. Let go of it here, or the next sync waits on that unreachable
+  // promise and reports its outcome as its own -- a cancelled run coming back
+  // to life and announcing itself as a fresh one.
+  setAbandonHandler(() => { syncInFlight = null; });
+
   addEventListener(SYNC_EVENT, onLibraryChanged);
 
   // The provider badge on Steam's own game page. Patched here rather than in

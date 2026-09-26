@@ -90,7 +90,12 @@ export function rpcLoad(): { active: number; waiting: number } {
 }
 
 async function withSlot<T>(run: () => Promise<T>): Promise<T> {
-  if (active >= MAX_IN_FLIGHT) {
+  // `while`, not `if`. Waking a waiter and its taking the permit are a
+  // microtask apart, and a caller arriving in that gap takes the free slot
+  // synchronously -- so both proceed and more than MAX_IN_FLIGHT calls are in
+  // flight, which is the one thing this exists to prevent. Re-checking on
+  // wake costs a spurious loop and closes it.
+  while (active >= MAX_IN_FLIGHT) {
     await new Promise<void>((resolve) => waiting.push(resolve));
   }
   active += 1;
@@ -152,7 +157,12 @@ async function waitForSocket(): Promise<boolean> {
  *  So the slot is released on a deadline too, and the call is rejected rather
  *  than left pending: the callers all treat a failed call as "skip it and
  *  carry on", and an error names itself in the log where silence names
- *  nothing. */
+ *  nothing.
+ *
+ *  It bounds the WHOLE guarded operation, not each attempt. Applied per call
+ *  it was not the 60 s it claimed: a socket wait, the call, another socket
+ *  wait and a retry could hold one slot for about 160 s -- nearly three
+ *  minutes of a permit that four callers are sharing. */
 const CALL_DEADLINE = 60000;
 
 /** The largest argument this will put on the wire.
@@ -227,8 +237,10 @@ export function guarded<A extends unknown[], R>(name: string): (...args: A) => P
           + `${RECONNECT_WAIT / 1000}s \u2014 reload Shelfcloud in Decky `
           + `\u203a Settings \u203a Plugins. (${name})`));
       }
+      const until = Date.now() + CALL_DEADLINE;
+      const left = () => Math.max(1000, until - Date.now());
       try {
-        return await onADeadline(call(...args), CALL_DEADLINE, name);
+        return await onADeadline(call(...args), left(), name);
       } catch (error) {
         // One retry, and only for a call that failed WITH the socket. Decky
         // drops the in-flight call when the connection goes, so this is the
@@ -237,7 +249,7 @@ export function guarded<A extends unknown[], R>(name: string): (...args: A) => P
         // retried -- the socket is still up, so the error is real.
         if (socketUsable()) throw error;
         if (!(await waitForSocket())) throw error;
-        return await onADeadline(call(...args), CALL_DEADLINE, name);
+        return await onADeadline(call(...args), left(), name);
       }
     });
 }

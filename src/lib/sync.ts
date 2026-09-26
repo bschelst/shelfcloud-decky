@@ -453,7 +453,10 @@ function applyControllerConfig(
   });
 }
 
-async function applyArtwork(appId: number, game: DesiredGame): Promise<ArtworkOutcome> {
+async function applyArtwork(
+  appId: number, game: DesiredGame,
+  turn: { abandoned: boolean } = { abandoned: false },
+): Promise<ArtworkOutcome> {
   let applied = 0;
 
   const applySlot = async (
@@ -541,9 +544,14 @@ async function applyArtwork(appId: number, game: DesiredGame): Promise<ArtworkOu
   const visible = capsuleWentOn || !game.artwork?.[visibleSlot];
 
   const images = await background;
+  // Half a dozen slices per slot, each an RPC. If this turn was abandoned
+  // while they were in flight, stop here rather than spending the live game's
+  // slots applying pictures to a tile nobody is waiting for.
+  if (turn.abandoned) return { applied, visible: false };
   for (let i = 0; i < BACKGROUND_SLOTS.length; i++) {
     const [slot, assetType] = BACKGROUND_SLOTS[i];
     if (images[i]) {
+      if (turn.abandoned) break;
       await applySlot(images[i], assetType);
       continue;
     }
@@ -690,6 +698,17 @@ async function applyArtwork(appId: number, game: DesiredGame): Promise<ArtworkOu
 async function adoptStrayShortcuts(
   tracked: Record<string, TrackedShortcut>,
   callbacks: SyncCallbacks,
+  // Tripped when the caller stops waiting. This walks the WHOLE library under
+  // a single 20 s deadline, so being abandoned partway through is ordinary,
+  // not exceptional -- and being abandoned does not stop it. It kept adopting
+  // and deleting tiles, writing into `tracked` while the tile loop was already
+  // reading it and the removal loop was iterating it: a tile could be adopted
+  // after the loop had decided it did not exist, or vanish from under an
+  // iteration that had just read it.
+  //
+  // The repair is worth doing and worth abandoning; what it must not do is
+  // keep changing shared state once nobody is waiting for the answer.
+  abandoned: { abandoned: boolean } = { abandoned: false },
 ): Promise<void> {
   let report;
   try {
@@ -719,6 +738,7 @@ async function adoptStrayShortcuts(
       .filter((id) => typeof id === "number" && id !== entry.keep);
 
     for (const appId of extras) {
+      if (abandoned.abandoned) return;
       try {
         await clearArtwork(appId);
         await steamCall(SteamClient.Apps.RemoveShortcut(appId));
@@ -728,6 +748,7 @@ async function adoptStrayShortcuts(
       }
     }
 
+    if (abandoned.abandoned) return;
     const known = tracked[key];
     if (known && known.app_id === entry.keep) continue;     // already agreed
 
@@ -891,7 +912,14 @@ export async function syncLibrary(
   // game. Nothing ever removes either, because neither is tracked. shortcuts.vdf
   // is the only place that knows, and every tile of ours carries --game-id, so
   // it can say which game each belongs to.
-  await withTimeout(adoptStrayShortcuts(tracked, callbacks), undefined, RPC_TIMEOUT);
+  // Told when the wait is over, so it stops touching `tracked` rather than
+  // carrying on beside the loop that is about to read it.
+  const strays = { abandoned: false };
+  const strayTimer = setTimeout(() => { strays.abandoned = true; }, RPC_TIMEOUT);
+  await withTimeout(adoptStrayShortcuts(tracked, callbacks, strays),
+                    undefined, RPC_TIMEOUT);
+  strays.abandoned = true;
+  clearTimeout(strayTimer);
 
   // Tiles are sorted into their provider's collection as the sync runs, in
   // batches, rather than all at once when it finishes.
@@ -1014,6 +1042,17 @@ export async function syncLibrary(
       // The whole turn, under one deadline. See PER_GAME_TIMEOUT: the inner
       // calls are each bounded already, and the sync still froze, so this
       // stops depending on having guessed the right inner call.
+      // An abandoned turn must STOP, not merely be stopped waiting for.
+      //
+      // withTimeout gives up on the promise; it cannot cancel it, so the turn
+      // carried on issuing backend calls while the sync moved to the next
+      // game. Those orphans spend the same four RPC slots as the live game, so
+      // giving up on one game slows the next one -- which then times out too,
+      // and orphans itself. Self-reinforcing, and it looks like the sync
+      // getting slower for no reason.
+      const turn = { abandoned: false };
+      const turnTimer = setTimeout(() => { turn.abandoned = true; },
+                                   PER_GAME_TIMEOUT);
       const finished = await withTimeout((async () => {
       if (!existing) {
         step("Adding", game.name);
@@ -1022,6 +1061,7 @@ export async function syncLibrary(
           title, game.exe, START_DIR, game.options,
         ), 0);
         if (!appId) throw new Error("Steam refused the shortcut");
+        if (turn.abandoned) return false;
 
         // AddShortcut only reliably applies the exe — and it stores that
         // quote-wrapped as "/usr/bin/python3". The name and launchOptions
@@ -1046,7 +1086,8 @@ export async function syncLibrary(
         // be stored whenever any slot did, so a game whose capsule failed but
         // whose hero and logo succeeded counted as done — a blank tile with a
         // fully dressed detail page, never retried.
-        const appliedNew = await applyArtwork(appId, game);
+        if (turn.abandoned) return false;
+        const appliedNew = await applyArtwork(appId, game, turn);
         if (appliedNew.applied === 0) artUnavailable.add(game.game_id);
         await withTimeout(
           callbacks.record(trackingKey(game), appId, title, game.options,
@@ -1085,6 +1126,7 @@ export async function syncLibrary(
         //
         // So a repair pass writes the files where the new rule says they go,
         // and then selects them. One sync, then back to the cheap path.
+        if (turn.abandoned) return false;
         if (game.controller_layout
             && (launchChanged || artChanged || selectionBase?.repair)) {
           try {
@@ -1141,7 +1183,8 @@ export async function syncLibrary(
         let appliedArt: ArtworkOutcome = { applied: 0, visible: false };
         if (tryArt) {
           if (!launchChanged) step("Artwork", game.name);
-          appliedArt = await applyArtwork(existing.app_id, game);
+          if (turn.abandoned) return false;
+          appliedArt = await applyArtwork(existing.app_id, game, turn);
           if (appliedArt.applied === 0) artUnavailable.add(game.game_id);
         }
         if (launchChanged || tryArt) {
@@ -1160,6 +1203,7 @@ export async function syncLibrary(
       }
       return true;
       })(), false, PER_GAME_TIMEOUT);
+      clearTimeout(turnTimer);
       if (!finished) {
         // Named, because this is the only evidence of WHAT hangs. A run that
         // logs the same title every time is a bad tile; a run that names a

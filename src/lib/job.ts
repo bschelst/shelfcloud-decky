@@ -60,6 +60,14 @@ export function getJob(): Job {
 let clearTimer: ReturnType<typeof setTimeout> | null = null;
 
 export function finishJob(message?: string): void {
+  // The cancellation belonged to the run that just ended, so it ends with it.
+  //
+  // It used to be cleared only by runJob, and by setJob on a false->true busy
+  // transition. The BACKGROUND sync goes through neither: the poll calls
+  // runSync directly. So one press of Cancel left the flag set for the life of
+  // the Steam session, and every background sync afterwards stopped at its
+  // first tile -- silently, because stopping early is a normal outcome.
+  cancelling = false;
   if (clearTimer) clearTimeout(clearTimer);
   // A run that ended on its own must not be reset again ten seconds later.
   if (forceTimer) { clearTimeout(forceTimer); forceTimer = null; }
@@ -80,6 +88,7 @@ export function finishJob(message?: string): void {
 /** Reset to idle. Tests only — the plugin never goes back to a clean slate. */
 export function resetJob(): void {
   if (forceTimer) { clearTimeout(forceTimer); forceTimer = null; }
+  onAbandoned = null;
   job = IDLE;
   cancelling = false;
   listeners.clear();
@@ -93,6 +102,22 @@ export function resetJob(): void {
 // exits were letting it finish or killing Steam, and closing the panel does
 // not help because the run deliberately survives that.
 let cancelling = false;
+
+/** Told when Cancel gives up waiting and resets the panel regardless.
+ *
+ *  The run itself is still going at that point -- it is unreachable, not
+ *  stopped -- so whoever holds it has to let go of it. Without that, the next
+ *  sync ADOPTS the abandoned run through the shared in-flight promise and
+ *  reports its outcome as its own, which is how a cancelled run came back to
+ *  life and announced itself as a fresh one.
+ *
+ *  A callback rather than an import, because the holder is index.tsx and this
+ *  module is imported BY it. */
+let onAbandoned: (() => void) | null = null;
+
+export function setAbandonHandler(handler: (() => void) | null): void {
+  onAbandoned = handler;
+}
 
 /** How long Cancel waits to be honoured before it resets the panel anyway. */
 const FORCE_IDLE_AFTER = 10000;
@@ -126,6 +151,10 @@ export function cancelJob(): void {
   forceTimer = setTimeout(() => {
     forceTimer = null;
     if (job.busy && cancelling) {
+      // Let go of the run FIRST. finishJob clears `cancelling`, and a new sync
+      // starting after that must build its own promise rather than wait on the
+      // one nobody can reach.
+      try { onAbandoned?.(); } catch { /* never block the reset */ }
       finishJob("Stopped responding, so the panel was reset.");
     }
   }, FORCE_IDLE_AFTER);
