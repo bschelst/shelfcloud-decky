@@ -917,14 +917,20 @@ export async function syncLibrary(
         // while the rest of the sync is still running.
         if (pending.length >= COLLECTION_BATCH) await flushCollections();
       } else {
+        // Step markers, on the path only the handful of CHANGED games take.
+        // Five fixes have been aimed at this branch from the outside by
+        // reading a log that stops; these say which statement it stopped on.
+        await phase("  > layout");
         if (game.controller_layout) {
           try {
             const layoutResult = await withTimeout(
               installControllerLayout(title, game.controller_layout), undefined, RPC_TIMEOUT);
             const liveUrl = layoutResult?.autosave_url ?? game.controller_layout;
+            await phase("  > applyControllerConfig");
             await applyControllerConfig(existing.app_id, liveUrl, false);
           } catch { /* best effort */ }
         }
+        await phase("  > compare");
 
         const launchChanged = existing.launch !== game.options || existing.name !== title;
         // Artwork is compared separately: the gateway resolves better art over
@@ -943,19 +949,23 @@ export async function syncLibrary(
         const tryArt = artChanged && !artUnavailable.has(game.game_id);
 
         let appliedArt: ArtworkOutcome = { applied: 0, visible: false };
+        await phase(`  > art? ${tryArt} launch? ${launchChanged}`);
         if (tryArt) {
           if (!launchChanged) step("Artwork", game.name);
           appliedArt = await applyArtwork(existing.app_id, game);
+          await phase("  > artwork done");
           if (appliedArt.applied === 0) artUnavailable.add(game.game_id);
         }
         if (launchChanged || tryArt) {
           // Keep the old fingerprint until the visible slot goes on, so a later
           // session tries again rather than marking a blank tile as finished.
           const recordedArt = tryArt && !appliedArt.visible ? (existing.art ?? "") : art;
+          await phase("  > record");
           await withTimeout(
             callbacks.record(trackingKey(game), existing.app_id, title, game.options,
                              recordedArt, game.provider, game.url ?? ""),
             undefined, RPC_TIMEOUT);
+          await phase("  > recorded");
           result.updated++;
         }
         file({ appId: existing.app_id, provider: game.provider });
