@@ -71,12 +71,40 @@ async function withSlot<T>(run: () => Promise<T>): Promise<T> {
   }
 }
 
-/** A backend method, rate-limited and refused outright on a dead socket. */
+/** How long to wait for a closed socket to come back before giving up. */
+const RECONNECT_WAIT = 20000;
+/** How often to look while waiting. */
+const RECONNECT_POLL = 250;
+
+/** Wait for Decky's socket to come back, or give up after RECONNECT_WAIT.
+ *
+ *  Measured on hardware: the socket does not stay down, it CYCLES -- ready,
+ *  closed, ready again, dozens of times a minute, because several of Steam's
+ *  renderer contexts each hold a connection and the router keeps one. Any
+ *  single call has a good chance of landing in a closed moment.
+ *
+ *  Refusing on the spot was honest and useless: it turned a gap of a few
+ *  seconds into a failed sync and a panel that could not load. Waiting rides
+ *  straight over the gap, which is the difference between a plugin that works
+ *  and a plugin that correctly explains why it does not.
+ */
+async function waitForSocket(): Promise<boolean> {
+  if (socketUsable()) return true;
+  const until = Date.now() + RECONNECT_WAIT;
+  while (Date.now() < until) {
+    await new Promise((resolve) => setTimeout(resolve, RECONNECT_POLL));
+    if (socketUsable()) return true;
+  }
+  return false;
+}
+
+/** A backend method, rate-limited and ridden over a socket that keeps
+ *  cycling. */
 export function guarded<A extends unknown[], R>(name: string): (...args: A) => Promise<R> {
   const call = callable<A, R>(name);
   return (...args: A): Promise<R> =>
-    withSlot(() => {
-      if (!socketUsable()) {
+    withSlot(async () => {
+      if (!socketUsable() && !(await waitForSocket())) {
         // Thrown rather than left pending. The callers already treat a failed
         // call as "skip this and carry on", and an error that says why beats
         // a sync that stops with no reason recorded anywhere.
@@ -86,10 +114,21 @@ export function guarded<A extends unknown[], R>(name: string): (...args: A) => P
         // error that only says "unreachable" leaves you pressing Sync at
         // something that can never answer.
         return Promise.reject(new Error(
-          "Decky's connection to the plugin has dropped and does not come "
-          + "back on its own \u2014 reload Shelfcloud in Decky \u203a Settings "
-          + `\u203a Plugins. (${name})`));
+          "Decky's connection to the plugin has been down for "
+          + `${RECONNECT_WAIT / 1000}s \u2014 reload Shelfcloud in Decky `
+          + `\u203a Settings \u203a Plugins. (${name})`));
       }
-      return call(...args);
+      try {
+        return await call(...args);
+      } catch (error) {
+        // One retry, and only for a call that failed WITH the socket. Decky
+        // drops the in-flight call when the connection goes, so this is the
+        // difference between a sync surviving a five second gap and a sync
+        // ending on one. A call that failed for its own reasons is not
+        // retried -- the socket is still up, so the error is real.
+        if (socketUsable()) throw error;
+        if (!(await waitForSocket())) throw error;
+        return await call(...args);
+      }
     });
 }

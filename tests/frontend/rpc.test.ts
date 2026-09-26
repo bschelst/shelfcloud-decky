@@ -46,17 +46,46 @@ beforeEach(() => {
 });
 
 describe("a socket that has died", () => {
-  it("fails the call instead of leaving it pending forever", async () => {
-    const { guarded } = await freshRpc();
-    socket(3);
-    await expect(guarded("get_status")()).rejects.toThrow(/connection to the plugin has dropped/);
-    expect(calls).toHaveLength(0);          // nothing was posted into it
+  it("waits for the socket to come back rather than failing at once", async () => {
+    // Measured on hardware: the socket CYCLES -- ready, closed, ready --
+    // dozens of times a minute, because several Steam renderer contexts each
+    // hold a connection and Decky's router keeps one. Refusing on the spot
+    // turned a gap of a few seconds into a failed sync.
+    vi.useFakeTimers();
+    try {
+      const { guarded } = await freshRpc();
+      socket(3);
+      const pending = guarded("get_status")();
+      let settled = false;
+      void pending.then(() => { settled = true; }, () => { settled = true; });
+
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(settled).toBe(false);          // still waiting, not refused
+      expect(calls).toHaveLength(0);        // and nothing posted into a dead one
+
+      socket(1);                            // it comes back
+      await vi.advanceTimersByTimeAsync(500);
+      expect(calls).toHaveLength(1);        // the call went out
+      calls[0].resolve({ ok: true });
+      await expect(pending).resolves.toEqual({ ok: true });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it("names the method, so the log says which call was refused", async () => {
-    const { guarded } = await freshRpc();
-    socket(3);
-    await expect(guarded("fetch_artwork")()).rejects.toThrow(/fetch_artwork/);
+  it("gives up with a named error if it never comes back", async () => {
+    vi.useFakeTimers();
+    try {
+      const { guarded } = await freshRpc();
+      socket(3);
+      const pending = guarded("fetch_artwork")();
+      const caught = pending.catch((error: Error) => error.message);
+      await vi.advanceTimersByTimeAsync(25000);
+      expect(await caught).toMatch(/fetch_artwork/);
+      expect(calls).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("still calls when Decky exposes no socket to inspect", async () => {
@@ -74,12 +103,20 @@ describe("a socket that has died", () => {
   it("frees its slot even when the call is refused", async () => {
     // A run of failures must not permanently cost slots, or it wedges the
     // plugin as surely as the dead socket did.
-    const { guarded, rpcLoad } = await freshRpc();
-    socket(3);
-    for (let i = 0; i < 10; i++) {
-      await expect(guarded("x")()).rejects.toThrow();
+    vi.useFakeTimers();
+    try {
+      const { guarded, rpcLoad } = await freshRpc();
+      socket(3);
+      // Four at a time, each waiting out the full window before giving up,
+      // so ten of them take three waves rather than one.
+      const failures = [];
+      for (let i = 0; i < 10; i++) failures.push(guarded("x")().catch(() => "refused"));
+      await vi.advanceTimersByTimeAsync(90000);
+      expect(await Promise.all(failures)).toEqual(Array(10).fill("refused"));
+      expect(rpcLoad()).toEqual({ active: 0, waiting: 0 });
+    } finally {
+      vi.useRealTimers();
     }
-    expect(rpcLoad()).toEqual({ active: 0, waiting: 0 });
   });
 });
 
