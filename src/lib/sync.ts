@@ -859,6 +859,14 @@ export async function syncLibrary(
     const existing = trackedFor(tracked, game);
     const title = shortcutTitle(game);
     const art = artworkFingerprint(game);
+    // Per game, deliberately.
+    //
+    // Chatty, and worth it. Four fixes have been aimed at this loop from the
+    // outside by reading a log that simply stopped, and each one was aimed at
+    // the wrong await. A line per game costs about a millisecond on a local
+    // socket and turns "it froze somewhere in here" into the title it froze
+    // on, plus how many it got through first.
+    await phase(`game ${done + 1}/${total}: ${game.name}${existing ? "" : " (new)"}`);
     try {
       // The whole turn, under one deadline. See PER_GAME_TIMEOUT: the inner
       // calls are each bounded already, and the sync still froze, so this
