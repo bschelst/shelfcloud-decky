@@ -19,6 +19,7 @@ import {
 import { Collapsible, IconLabel } from "./Collapsible";
 import { NotificationLogo } from "./Logo";
 import { applyTilePerService } from "../lib/settings";
+import { cornersExcept } from "../lib/badgePosition";
 import { invalidateBadgeData } from "../lib/badgeData";
 import { theme } from "../lib/theme";
 import type { Status } from "../lib/types";
@@ -226,14 +227,9 @@ export const SettingsSection: FC<SettingsSectionProps> = ({
           <div style={{ fontSize: "0.75em", opacity: 0.7 }}>Players corner</div>
           <Dropdown
             selectedOption={status.players_position ?? "tr"}
-            rgOptions={[
-              { data: "bl", label: "Bottom left" },
-              { data: "bm", label: "Bottom middle" },
-              { data: "br", label: "Bottom right" },
-              { data: "tl", label: "Top left" },
-              { data: "tm", label: "Top middle" },
-              { data: "tr", label: "Top right" },
-            ]}
+            rgOptions={cornersExcept(
+              status.badge_enabled !== false ? status.badge_position ?? "bl" : undefined,
+              status.players_position ?? "tr")}
             onChange={(option) => {
               void onSetSetting("players_position", option.data).then((next) => {
                 setStatus(next);
@@ -251,14 +247,9 @@ export const SettingsSection: FC<SettingsSectionProps> = ({
           <div style={{ fontSize: "0.75em", opacity: 0.7 }}>Badge corner</div>
           <Dropdown
             selectedOption={status.badge_position ?? "bl"}
-            rgOptions={[
-              { data: "bl", label: "Bottom left" },
-              { data: "bm", label: "Bottom middle" },
-              { data: "br", label: "Bottom right" },
-              { data: "tl", label: "Top left" },
-              { data: "tm", label: "Top middle" },
-              { data: "tr", label: "Top right" },
-            ]}
+            rgOptions={cornersExcept(
+              status.players_enabled === true ? status.players_position ?? "tr" : undefined,
+              status.badge_position ?? "bl")}
             onChange={(option) => {
               void onSetSetting("badge_position", option.data).then((next) => {
                 setStatus(next);

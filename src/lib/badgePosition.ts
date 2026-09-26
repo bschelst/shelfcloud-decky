@@ -89,3 +89,31 @@ export function badgePosition(
   // Anything unrecognised lands bottom-left, which is the default.
   return { top, left: inset };
 }
+
+/** Where a badge can sit on a game's hero image. */
+const CORNERS = [
+  { data: "bl", label: "Bottom left" },
+  { data: "bm", label: "Bottom middle" },
+  { data: "br", label: "Bottom right" },
+  { data: "tl", label: "Top left" },
+  { data: "tm", label: "Top middle" },
+  { data: "tr", label: "Top right" },
+];
+
+/** The corners still free, given the one the OTHER badge is sitting in.
+ *
+ *  Two badges in the same corner draw on top of each other, so a corner that
+ *  is taken is not offered. Decky's Dropdown has no per-option `disabled` —
+ *  SingleDropdownOption is `{ data, label }` and nothing else — so a corner
+ *  that cannot be chosen has to be left out rather than greyed out.
+ *
+ *  `mine` is kept whatever happens. A Dropdown whose selectedOption is not in
+ *  its own list renders blank, so a saved setting that already collides (or a
+ *  pair that arrives that way from another device) must still show what it is
+ *  set to, otherwise the fix for an overlap would be a control that looks
+ *  broken.
+ */
+export function cornersExcept(taken: string | undefined, mine: string) {
+  if (!taken || taken === mine) return CORNERS;
+  return CORNERS.filter((corner) => corner.data !== taken);
+}
