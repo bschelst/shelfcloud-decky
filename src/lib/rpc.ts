@@ -40,16 +40,43 @@ const waiting: Array<() => void> = [];
  *  or a test -- the answer is "yes": refusing to call on the strength of a
  *  missing internal would break the plugin for a detail it cannot see.
  */
-export function socketUsable(): boolean {
+interface DeckySocket {
+  ws?: { readyState?: number };
+  connect?: () => void;
+}
+
+function backend(): DeckySocket | undefined {
   try {
-    const backend = (window as unknown as {
-      DeckyBackend?: { ws?: { readyState?: number } };
-    }).DeckyBackend;
-    const state = backend?.ws?.readyState;
-    if (typeof state !== "number") return true;
-    return state === 1;                     // 1 = OPEN
+    return (window as unknown as { DeckyBackend?: DeckySocket }).DeckyBackend;
   } catch {
-    return true;
+    return undefined;
+  }
+}
+
+export function socketUsable(): boolean {
+  const state = backend()?.ws?.readyState;
+  if (typeof state !== "number") return true;
+  return state === 1;                       // 1 = OPEN
+}
+
+/** Ask Decky to open its socket again.
+ *
+ *  Waiting was not enough, and the measurement says why: this context's
+ *  `ws` does not cycle, it stays CLOSED. The reconnects visible in the
+ *  loader's journal belong to Steam's OTHER renderer contexts, each holding
+ *  its own connection -- ours, once dropped, is simply never rebuilt, and
+ *  every call after it waits for a socket that is not coming back.
+ *
+ *  DeckyBackend.connect() rebuilds it. Verified on hardware: CLOSED before
+ *  the call, OPEN after. It is Decky's own method, the one its bootstrap
+ *  uses, so this is asking for the reconnect Decky would have done rather
+ *  than reaching around it.
+ */
+function reconnect(): void {
+  try {
+    backend()?.connect?.();
+  } catch {
+    /* it either comes back or the wait below gives up */
   }
 }
 
@@ -91,7 +118,15 @@ const RECONNECT_POLL = 250;
 async function waitForSocket(): Promise<boolean> {
   if (socketUsable()) return true;
   const until = Date.now() + RECONNECT_WAIT;
+  let asked = 0;
   while (Date.now() < until) {
+    // Ask, then wait; and ask again every couple of seconds, because the
+    // first attempt can land while the loader is still tearing the old
+    // connection down.
+    if (Date.now() >= asked) {
+      reconnect();
+      asked = Date.now() + 2000;
+    }
     await new Promise((resolve) => setTimeout(resolve, RECONNECT_POLL));
     if (socketUsable()) return true;
   }
