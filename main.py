@@ -2069,7 +2069,19 @@ class Plugin:
             if vdf_text is None:
                 return {"ok": False, "error": "could not download custom layout"}
         elif template_url.startswith("template://"):
-            filename = template_url.removeprefix("template://")
+            # basename, because this name comes off the NETWORK.
+            #
+            # The gateway chooses it, and it lands in os.path.join: both
+            # "../../.." and a leading "/" escape the templates directory,
+            # because os.path.join discards everything before an absolute
+            # path. That is an arbitrary read as the `deck` user, a
+            # file-existence oracle, and -- when the file happens to match the
+            # patterns below -- a copy of its contents into the Steam
+            # Controller Configs tree.
+            #
+            # The flavour match further down constrains the SHAPE of a name it
+            # recognises, but it runs after the open, so it guards nothing.
+            filename = os.path.basename(template_url.removeprefix("template://"))
             source = os.path.join(steam_root, "controller_base", "templates", filename)
             if not os.path.isfile(source):
                 return {"ok": False, "error": f"template not found: {filename}"}
