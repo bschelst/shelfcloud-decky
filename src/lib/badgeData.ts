@@ -144,8 +144,19 @@ export function useProviderForApp(appId: string | undefined): string | undefined
 export function useBadgeSettings(): {
   enabled: boolean; onCards: boolean; position: string;
   players: boolean; playersPosition: string;
+  /** False until the real settings have been read.
+   *
+   *  The defaults below are a GUESS, and a badge drawn on a guess is a badge
+   *  that appears and then vanishes when the answer arrives -- which is what
+   *  a switched-off badge did on every page open. Nothing draws until this
+   *  is true, so the only badge ever shown is one that was actually asked
+   *  for. */
+  loaded: boolean;
 } {
   const [value, setValue] = useState(badge.value);
+  // `at` is 0 until a fetch has landed. Module scope, so a second page open
+  // in the same session already knows and does not flash.
+  const [loaded, setLoaded] = useState(badge.at !== 0);
 
   useEffect(() => {
     let cancelled = false;
@@ -160,11 +171,15 @@ export function useBadgeSettings(): {
         // which defaults to the bottom left.
         playersPosition: status?.players_position ?? "tr",
       };
-    }).then((next) => { if (!cancelled) setValue(next); });
+    }).then((next) => {
+      if (cancelled) return;
+      setValue(next);
+      setLoaded(true);
+    });
     return () => { cancelled = true; };
   }, []);
 
-  return value;
+  return { ...value, loaded };
 }
 
 

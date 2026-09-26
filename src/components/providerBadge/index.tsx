@@ -52,11 +52,14 @@ function ProviderIcon({ provider, size }: { provider: string; size: number }) {
 export default function ProviderBadge(): ReactElement {
   const { appid } = useParams<{ appid: string }>();
   const provider = useProviderForApp(appid);
-  const { enabled, position } = useBadgeSettings();
+  const { enabled, position, loaded } = useBadgeSettings();
 
   // Nothing at all unless this is one of ours. A badge on every game would
   // say nothing; the whole meaning is "this tile streams".
-  if (!enabled || !provider) return <></>;
+  // Nothing until the settings are READ. Drawing on the default and
+  // correcting a moment later is how a switched-off badge still flashed up
+  // on every page open.
+  if (!loaded || !enabled || !provider) return <></>;
 
   const { label, color: accent } = providerInfo(provider);
   return (

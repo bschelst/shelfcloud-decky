@@ -37,18 +37,29 @@ function pretty(count: number): string {
 export default function PlayersBadge(): ReactElement {
   const { appid } = useParams<{ appid: string }>();
   const provider = useProviderForApp(appid);
-  const { players: enabled, playersPosition } = useBadgeSettings();
+  const { players: enabled, playersPosition, loaded } = useBadgeSettings();
   const players = usePlayersForApp(enabled ? appid : undefined);
 
-  // Our tiles only, and only with a number. See the header for why a missing
-  // number is never drawn as zero.
-  if (!enabled || !provider || players === undefined) return <></>;
+  // Switched on, and one of our tiles. Never drawn on an ASSUMED setting --
+  // see providerBadge: that is how a badge that was switched off still
+  // flashed up on every page open and then vanished.
+  if (!loaded || !enabled || !provider) return <></>;
+
+  // Once it is switched on, it always shows. A number when there is one, and
+  // a dash when there is not -- because "nothing on screen" is the same thing
+  // the bug looked like, and there is no way to tell a badge that is thinking
+  // from a badge that is broken.
+  //
+  // A dash rather than a zero. No count comes back for a game that is not on
+  // Steam at all (about one in six here), and "0 playing" would be a claim
+  // about a game Steam has never heard of rather than a measurement.
+  const known = players !== undefined;
 
   return (
-    <HeroBadge position={playersPosition} accent="#6cc04a">
+    <HeroBadge position={playersPosition} accent={known ? "#6cc04a" : "#7a8290"}>
       <FaUsers size={13} />
       <span style={{ color: "#e8ecf2" }}>
-        {pretty(players)} playing
+        {known ? `${pretty(players)} playing` : "\u2013"}
       </span>
     </HeroBadge>
   );
