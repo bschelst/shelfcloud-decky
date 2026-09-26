@@ -1737,17 +1737,29 @@ class Plugin:
         native = declared.group(1) if declared else "neptune"
 
         by_type = {native: vdf_text}
-        for other in CONTROLLER_TYPES:
-            if other in by_type:
-                continue
-            path = _best_template(steam_root, other, flavour)
-            if not path:
-                continue
-            try:
-                with open(path, "r", encoding="utf-8", errors="replace") as f:
-                    by_type[other] = f.read()
-            except OSError:
-                pass
+        # Other pad types only when asked for.
+        #
+        # Writing all seven for every game looked free and was not: seven
+        # files per game per Steam user directory is twenty-eight, and on this
+        # Deck that became 24,813 files and 436 MB. Steam indexes that folder
+        # at startup, and the sync that produced it blocked long enough that
+        # the panel never finished loading.
+        #
+        # Almost all of it is for hardware nobody has attached. The Deck's own
+        # controller is the one certainty, so that is the default, and the
+        # rest are a setting for people who actually play on a PS5 or Xbox pad.
+        if self._settings.get("extra_pad_layouts"):
+            for other in CONTROLLER_TYPES:
+                if other in by_type:
+                    continue
+                path = _best_template(steam_root, other, flavour)
+                if not path:
+                    continue
+                try:
+                    with open(path, "r", encoding="utf-8", errors="replace") as f:
+                        by_type[other] = f.read()
+                except OSError:
+                    pass
 
         # Rewrite the url field to point to the actual destination. Custom VDFs
         # arrive with whatever url the author set (often a path from a different
@@ -1793,6 +1805,21 @@ class Plugin:
 
 
 
+        # Off the event loop, always.
+        #
+        # This is plain synchronous file work -- a read and a write per layout,
+        # plus a read and a rewrite of the configset it belongs to -- and it
+        # sat directly in an async method. One game is a handful of files and
+        # nobody noticed; a full re-sync is thousands, and for the whole of it
+        # this coroutine never yielded. Decky's RPC runs on the same loop, so
+        # the panel asking "are you signed in" simply waited, and the plugin
+        # showed "Loading..." until the sync finished.
+        return await asyncio.to_thread(
+            self._write_layouts, steam_root, shortcut_name, by_type, native)
+
+    def _write_layouts(self, steam_root: str, shortcut_name: str,
+                       by_type: Dict[str, str], native: str) -> Dict:
+        """Put each controller type's layout on disk. Runs in a thread."""
         installed = 0
         autosave_url = None
         configs_root = os.path.join(
@@ -2150,7 +2177,8 @@ class Plugin:
     # rejected. Shelf selection goes through set_shelf, not here.
     # If a new dropdown is added to the panel, its key must be listed here.
     ALLOWED_SETTINGS = {"browser", "sync_minutes", "sync_all_providers", "ui_scale",
-                        "badge_enabled", "badge_on_cards", "badge_position"}
+                        "badge_enabled", "badge_on_cards", "badge_position",
+                        "extra_pad_layouts"}
 
     # Where the provider badge sits on a game's page. Validated as a set
     # rather than trusted: this value is written into a style, and a dropdown
