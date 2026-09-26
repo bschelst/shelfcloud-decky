@@ -739,6 +739,17 @@ class Plugin:
 
         return {
             "capsule": url("capsule_url"),
+            # The game's own picture, for when there is no capsule.
+            #
+            # 79 catalogue games have a cover and no capsule — Amazon Luna's
+            # smaller titles and a few Boosteroid demos. Steam's capsule slot
+            # then stayed empty and the tile fell back to the gateway's
+            # website picture, so eighteen games in one library were the same
+            # blue cloud and a search for any of them looked like duplicates.
+            # The frontend draws a capsule from this instead. Not offered AS
+            # the capsule: these are wide logos, and Steam's capsule is a tall
+            # portrait, so it has to be composed rather than stretched.
+            "cover": url("cover_url", "banner_url"),
             "header": url("header_url"),
             "hero": url("hero_url", "banner_url"),
             "logo": url("logo_url"),

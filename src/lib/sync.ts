@@ -135,7 +135,7 @@ async function fetchArtworkBase64(url: string): Promise<{ data: string; kind: "p
   }
 }
 
-type ArtSlot = "capsule" | "header" | "hero" | "logo" | "icon";
+type ArtSlot = "capsule" | "header" | "hero" | "logo" | "icon" | "cover";
 
 /** The slot shown on the tile itself, and the ones behind it.
  *
@@ -400,6 +400,24 @@ async function applyArtwork(appId: number, game: DesiredGame): Promise<ArtworkOu
     const mark = await iconFetch;
     if (mark) {
       const drawn = await renderPageCapsule(game.name, mark);
+      if (drawn) visibleImage = drawn;
+    }
+  } else if (!capsule) {
+    // A GAME with no capsule, drawn from its own picture.
+    //
+    // 79 catalogue games have a cover and no capsule — Luna's smaller titles,
+    // a few Boosteroid demos. The slot stayed empty, so the tile kept the
+    // gateway's website picture and eighteen different games in one library
+    // were the same blue cloud. Searching for any of them looked like the
+    // same game listed over and over.
+    //
+    // The same drawing a website tile gets, for the same reason and with the
+    // same result: the game's own art, centred, with its name underneath. The
+    // cover is wide and the capsule is a tall portrait, so composing it beats
+    // stretching it — and a real picture with a real name beats a cloud.
+    const cover = await fetchSlot(game, "cover");
+    if (cover) {
+      const drawn = await renderPageCapsule(game.name, cover);
       if (drawn) visibleImage = drawn;
     }
   }

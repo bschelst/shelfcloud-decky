@@ -8,6 +8,9 @@ export interface Artwork {
   header?: string | null;    // 460x215 — the wide banner of the SELECTED game
   hero?: string | null;      // 1920x620 background on the game page
   logo?: string | null;      // transparent logo overlaid on the hero
+  /** The game's own picture, used to DRAW a capsule when it has none.
+   *  Wide, so it is composed onto a portrait rather than stretched into one. */
+  cover?: string | null;
   // Not a library slot: Steam stores an icon as a path in shortcuts.vdf and
   // draws it in collections and list views. Square, and deliberately not the
   // logo — a logo replaces the title, an icon replaces nothing.
