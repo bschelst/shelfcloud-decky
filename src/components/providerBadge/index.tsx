@@ -110,16 +110,26 @@ export default function ProviderBadge(): ReactElement {
       });
       mutations.observe(hero, { attributes: true, attributeFilter: ["class"] });
 
-      // The hero IMAGE, not the capsule around it.
+      // How far the hero's BOTTOM is from the top of whatever `top` is
+      // measured against — not the hero's height.
       //
-      // Measured on hardware: the capsule reported 342px where the hero image
-      // inside it was 360 — so a badge placed against the capsule floated 18px
-      // above the edge a person actually sees, on top of whatever inset was
-      // asked for. The image is the visible bottom edge, so it is the one to
-      // measure. The capsule stays as the fallback and as what the observers
-      // watch, since it is the element whose class changes on the transition.
+      // Those are the same number only when the badge's offset parent starts
+      // exactly where the hero does, and twice now they have not: the badge
+      // floated far above the edge with no obvious reason, because a height
+      // was being used as a position. Both boxes are measured and subtracted,
+      // which is true wherever either one happens to start.
+      //
+      // The hero IMAGE rather than the capsule around it, too — measured on
+      // hardware, the capsule reported 342px where the image inside it was
+      // 360, so the capsule's edge is not the edge anyone sees.
       const heroArt = (): Element => hero.querySelector('img[src*="_hero"]') ?? hero;
-      const measure = () => setHeroHeight(heroArt().getBoundingClientRect().height);
+      const measure = () => {
+        const anchor = ref.current?.offsetParent ?? ref.current?.parentElement;
+        if (!anchor) return;
+        const heroBottom = heroArt().getBoundingClientRect().bottom;
+        const anchorTop = anchor.getBoundingClientRect().top;
+        setHeroHeight(heroBottom - anchorTop);
+      };
       measure();
       resizes = new ResizeObserver(measure);
       resizes.observe(hero);

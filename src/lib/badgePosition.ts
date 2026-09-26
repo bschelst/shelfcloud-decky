@@ -17,12 +17,13 @@ import type { CSSProperties } from "react";
  *  obvious why. One number, used everywhere. */
 export const INSET = 20;
 
-/** The badge's own height, for placing it by its BOTTOM edge.
+/** Assumed badge height, used only until the real one can be measured.
  *
  *  It is positioned with `top`, because it is injected as a sibling of the
  *  header rather than a child of the hero — so the distance up from the
- *  hero's bottom has to be worked out rather than simply expressed. Matches
- *  the padding and font size in the component; 26px, measured on hardware. */
+ *  hero's bottom has to be worked out rather than simply expressed. The
+ *  component measures its own box and passes it in; this is the first-render
+ *  stand-in, matching the padding and font size there. */
 export const BADGE_HEIGHT = 26;
 
 /** Used until the hero has been measured.
@@ -34,13 +35,14 @@ export const FALLBACK_HERO_HEIGHT = 290;
 /**
  * The style that places the badge in one corner of the hero.
  *
- * `heroHeight` is the height of the hero IMAGE, not the capsule around it:
- * measured on hardware the capsule reported 342px where the image inside it
- * was 360, and a badge placed against the capsule floats 18px above the edge
- * anybody actually sees.
+ * `heroBottom` is the distance from the top of whatever `top` is measured
+ * against down to the hero's bottom edge — NOT the hero's height. Those are
+ * the same number only when the badge's offset parent starts exactly where
+ * the hero does, and treating one as the other is what put the badge a long
+ * way above the edge twice.
  */
 export function badgePosition(
-  position: string, heroHeight: number | null,
+  position: string, heroBottom: number | null, badgeHeight = BADGE_HEIGHT,
 ): CSSProperties {
   const inset = `${INSET}px`;
 
@@ -49,8 +51,8 @@ export function badgePosition(
 
   // Its BOTTOM edge INSET above the hero's — which is the gap the eye
   // compares against the side inset, not the distance to its top edge.
-  const height = heroHeight ?? FALLBACK_HERO_HEIGHT;
-  const top = `${height - INSET - BADGE_HEIGHT}px`;
+  const bottom = heroBottom ?? FALLBACK_HERO_HEIGHT;
+  const top = `${bottom - INSET - badgeHeight}px`;
   // Anything unrecognised lands bottom-left, which is the default.
   return position === "br" ? { top, right: inset } : { top, left: inset };
 }
