@@ -94,6 +94,9 @@ _LAYOUT_WEB_BROWSER = "template://controller_neptune_webbrowser.vdf"
 # controller_xbox360, and then the one controller this plugin exists for is
 # the only one that gets no config at all. Cheap to include, and the loop
 # skips it anyway whenever it IS the authored type.
+# A provider key that survives a shell-quoted command line unchanged.
+_PLAIN_KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+
 CONTROLLER_TYPES = ("neptune", "ps5", "ps4", "xbox360", "xboxone",
                     "switch_pro", "generic")
 
@@ -249,6 +252,18 @@ class _PooledResponse:
         self.close()
 
 
+class _NoRedirects(urllib.request.HTTPRedirectHandler):
+    """Refuse redirects outright on the urllib fallback path.
+
+    urllib re-sends every header to the new location, Authorization included,
+    so one redirect off the gateway would hand our API token to whatever
+    answered. Returning None makes urllib raise instead of following.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 def _open(url: str, headers: Optional[Dict[str, str]] = None, method: str = "GET",
           body: Optional[bytes] = None, timeout: Optional[float] = None):
     """A pooled request that FAILS the way urlopen does.
@@ -261,8 +276,14 @@ def _open(url: str, headers: Optional[Dict[str, str]] = None, method: str = "GET
     if _urllib3 is None:                # pragma: no cover
         request = urllib.request.Request(url, data=body, method=method,
                                          headers=headers or {})
-        return urllib.request.urlopen(request, timeout=timeout or REQUEST_TIMEOUT,
-                                      context=SSL_CTX)
+        # No redirects on this path. urllib re-sends every header to the new
+        # location, so a redirect off the gateway would hand our API token to
+        # whatever answered -- and this fallback exists precisely for the case
+        # where urllib3 is missing, which is not the moment to be lenient. The
+        # pooled path above does not follow redirects at all.
+        opener = urllib.request.build_opener(
+            urllib.request.HTTPSHandler(context=SSL_CTX), _NoRedirects)
+        return opener.open(request, timeout=timeout or REQUEST_TIMEOUT)
 
     try:
             # NEVER None. urllib3 reads an explicit timeout=None as "wait for
@@ -361,6 +382,16 @@ def _register_configset(config_dir: str, app_key: str,
         return
     with open(configset, "r", encoding="utf-8", errors="replace") as f:
         text = f.read()
+    # A quote or a brace in the key would END the entry and open a new block:
+    # the key comes from a catalogue game NAME, which is scraped from each
+    # provider's API and is not ours to trust. _layout_key already strips the
+    # quote (it is one of the characters Steam removes), but braces survive it,
+    # and this file is account-wide -- a malformed entry does not break one
+    # game's layout, it breaks the parse for every entry after it.
+    if any(ch in app_key for ch in '"{}\n\r\x00'):
+        decky.logger.warning("refusing a configset key containing markup: %r",
+                             app_key)
+        return
     entry = f'"{app_key}"'
     if entry in text:
         return
@@ -1185,7 +1216,15 @@ class Plugin:
         # become a shortcut that then refuses to launch.
         providers = [
             p for p in providers
+            # A PLAIN TOKEN, because this value has to survive a round trip
+            # through a shell-quoted command line and back out of
+            # shortcuts.vdf. The writer quotes with shlex; the reader matches
+            # \S+ and would stop at the opening quote, so a key containing a
+            # space came back as something else -- and a provider key that does
+            # not match what synced.json recorded makes the sync delete the
+            # tile and build it again, every time, for ever.
             if isinstance(p.get("provider"), str) and p["provider"]
+            and _PLAIN_KEY.match(p["provider"])
             and isinstance(p.get("launch_url"), str)
             and (weburl.is_allowed_website_url(p["launch_url"])
                  if p["provider"] in weburl.WEBSITE_PROVIDERS
@@ -2262,7 +2301,11 @@ class Plugin:
                 try:
                     with open(path, "r", encoding="utf-8", errors="replace") as f:
                         by_type[other] = f.read()
-                except OSError:
+                except (OSError, ValueError):
+                    # ValueError as well as OSError: a path carrying a NUL
+                    # raises ValueError from open(), which is not an OSError,
+                    # so it escaped this guard entirely and took the whole
+                    # layout install with it.
                     pass
 
         # Rewrite the url field to point to the actual destination. Custom VDFs

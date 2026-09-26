@@ -36,7 +36,14 @@ _GAME_ID = re.compile(rb"--game-id\s+(\d+)")
 # Optional on purpose: a tile written by an older build has no --provider, and
 # such a tile must still be recognised as ours rather than read as an orphan
 # and removed.
-_PROVIDER = re.compile(rb"--provider\s+(\S+)")
+# Accepts a bare token, and a single- or double-quoted value.
+#
+# The writer quotes with shlex, so a key that ever needed quoting used to come
+# back truncated at the opening quote -- a value that matches nothing in
+# synced.json, which reads as an untracked tile and gets removed and rebuilt on
+# every sync. The writer now refuses such a key outright; this half means an
+# older tile carrying one is still read correctly rather than churned.
+_PROVIDER = re.compile(rb"--provider\s+(?:'([^']*)'|\"([^\"]*)\"|(\S+))")
 
 _APPID = re.compile(rb"\x02appid\x00(....)", re.IGNORECASE | re.DOTALL)
 _OPTIONS = re.compile(rb"\x01LaunchOptions\x00([^\x00]*)\x00", re.IGNORECASE)
@@ -97,10 +104,12 @@ def parse(blob: bytes) -> List[Dict]:
 
         name = _NAME.search(chunk)
         provider = _PROVIDER.search(options.group(1))
+        provider_value = next(
+            (g for g in provider.groups() if g is not None), b"") if provider else b""
         out.append({
             "app_id": app_id,
             "game_id": int(game.group(1)),
-            "provider": provider.group(1).decode("utf-8", "replace") if provider else "",
+            "provider": provider_value.decode("utf-8", "replace"),
             "name": name.group(1).decode("utf-8", "replace") if name else "",
         })
     return out
