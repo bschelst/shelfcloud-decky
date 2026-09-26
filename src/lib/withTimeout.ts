@@ -36,7 +36,7 @@ export const STEAM_CALL_TIMEOUT = 15000;
  *  message that never arrives leaves one pending for the life of the session.
  *  The backend sat idle through two frozen syncs for exactly this reason --
  *  nothing was wrong with it, the frontend had simply stopped asking. */
-export const RPC_TIMEOUT = 45000;
+export const RPC_TIMEOUT = 20000;
 
 /** How long ONE game may take before the sync abandons it and moves on.
  *
@@ -50,7 +50,7 @@ export const RPC_TIMEOUT = 45000;
  *  because the next await down was still unbounded. Bounding the ITERATION is
  *  the version that does not depend on guessing right: whatever hangs, the
  *  library still finishes and the log names the game it happened on. */
-export const PER_GAME_TIMEOUT = 90000;
+export const PER_GAME_TIMEOUT = 40000;
 
 /** Resolve with `whenLate` if `work` has not settled in `ms`.
  *

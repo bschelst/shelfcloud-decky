@@ -127,6 +127,20 @@ const artUnavailable = new Set<number>();
  *  CORS header, and the gateway is plain HTTP which the client blocks as mixed
  *  content. Both failed silently, leaving blank tiles with nothing logged.
  *  Python is subject to neither rule. */
+/** Say which phase the sync is in, in the log file on disk.
+ *
+ *  Every freeze here has been diagnosed by inference: the log went quiet and
+ *  the last line was whatever happened to be logged for some other reason.
+ *  Three fixes were aimed at the wrong await that way. The phases are named
+ *  now, so a stall says where it is instead of leaving it to be guessed.
+ *
+ *  Bounded itself: reporting progress must not become another thing that can
+ *  hang the sync.
+ */
+async function phase(name: string): Promise<void> {
+  await withTimeout(logNote(`phase: ${name}`), undefined, 5000);
+}
+
 async function fetchArtworkBase64(url: string): Promise<{ data: string; kind: "png" | "jpg" } | undefined> {
   try {
     // The backend answers over Decky's socket, and a message that goes
@@ -565,7 +579,8 @@ async function adoptStrayShortcuts(
 ): Promise<void> {
   let report;
   try {
-    report = await withTimeout(strayShortcuts(), undefined, RPC_TIMEOUT);
+    await phase("scan stray shortcuts");
+  report = await withTimeout(strayShortcuts(), undefined, RPC_TIMEOUT);
   } catch {
     return;
   }
@@ -757,7 +772,7 @@ export async function syncLibrary(
   // game. Nothing ever removes either, because neither is tracked. shortcuts.vdf
   // is the only place that knows, and every tile of ours carries --game-id, so
   // it can say which game each belongs to.
-  await adoptStrayShortcuts(tracked, callbacks);
+  await withTimeout(adoptStrayShortcuts(tracked, callbacks), undefined, RPC_TIMEOUT);
 
   // Tiles are sorted into their provider's collection as the sync runs, in
   // batches, rather than all at once when it finishes.
@@ -782,7 +797,7 @@ export async function syncLibrary(
     if (!pending.length) return;
     const batch = pending;
     pending = [];
-    await addToProviderCollections(batch);
+    await withTimeout(addToProviderCollections(batch), undefined, RPC_TIMEOUT);
   };
 
   const file = (member: CollectionMember) => {
@@ -834,6 +849,7 @@ export async function syncLibrary(
     ...desired.filter((g) => !WEBSITE_PROVIDERS.has(g.provider)),
   ];
 
+  await phase(`tiles (${ordered.length} desired)`);
   for (const game of ordered) {
     const mandatory = WEBSITE_PROVIDERS.has(game.provider);
     if (!mandatory && callbacks.shouldStop?.()) {
@@ -958,6 +974,7 @@ export async function syncLibrary(
     }
   }
 
+  await phase("remove unwanted tiles");
   for (const [key, entry] of Object.entries(tracked)) {
     if (desiredKeys.has(key)) continue;
     // A pre-split entry is keyed by game id alone and matches no desired key,
@@ -977,10 +994,10 @@ export async function syncLibrary(
     try {
       step("Removing", entry.name);
       try {
-        await clearArtwork(entry.app_id);
+        await withTimeout(clearArtwork(entry.app_id), undefined, RPC_TIMEOUT);
       } catch { /* best effort — the shortcut must still go */ }
       SteamClient.Apps.RemoveShortcut(entry.app_id);
-      await callbacks.forget(key);
+      await withTimeout(callbacks.forget(key), undefined, RPC_TIMEOUT);
       result.removed++;
     } catch (error) {
       console.error("[shelfcloud] could not remove", entry.name, error);
@@ -989,7 +1006,8 @@ export async function syncLibrary(
   }
 
   // Whatever did not fill a batch. Best effort — unsorted tiles still play.
-  await flushCollections();
+  await phase("flush collections");
+  await withTimeout(flushCollections(), undefined, RPC_TIMEOUT);
 
   // And take out what no longer belongs — but NOT after a cancel.
   //
@@ -1007,13 +1025,16 @@ export async function syncLibrary(
     // forever. Apps outside that set are the user's own doing, untouched.
     const managed = new Set<number>(filed.map((m) => m.appId));
     for (const entry of Object.values(tracked)) managed.add(entry.app_id);
-    await pruneProviderCollections(filed, managed);
+    await phase("prune collections");
+  await withTimeout(pruneProviderCollections(filed, managed), undefined, RPC_TIMEOUT);
     // Last, and only on a complete run for the same reason the prune is: a
     // collection this plugin made under a label it no longer uses, such as
     // "custom (Shelfcloud)" from before website tiles were labelled
     // "Websites". The games in it have just been filed under the current name
     // by the lines above, so what goes is an empty grouping nobody asked for.
-    await removeRetiredCollections(managed);
+    await phase("retire collections");
+  await withTimeout(removeRetiredCollections(managed), undefined, RPC_TIMEOUT);
+  await phase("done");
   }
 
   return result;

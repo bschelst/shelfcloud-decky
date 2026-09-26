@@ -20,7 +20,7 @@ import { describe, expect, it, vi } from "vitest";
 // sync.ts reaches @decky/api through lib/api, which does not resolve outside
 // the Steam client. Only the names are under test here, so the boundary is
 // stubbed rather than the whole module tree pulled in.
-vi.mock("../../src/lib/api", () => ({
+vi.mock("../../src/lib/api", () => ({ logNote: vi.fn(async () => ({ ok: true })),
   fetchArtwork: vi.fn(async () => ({ ok: false })),
   saveIcon: vi.fn(async () => ({ ok: false })),
   strayShortcuts: vi.fn(async () => []),
