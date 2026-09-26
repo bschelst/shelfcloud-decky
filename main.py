@@ -355,7 +355,18 @@ ARTWORK_MAX_BYTES = 8 * 1024 * 1024
 # message. So an image is sent in slices now and the frontend puts it back
 # together. Two megabytes leaves room for the JSON around it and still moves a
 # 7 MB hero in five messages.
-ARTWORK_CHUNK_CHARS = 2 * 1024 * 1024
+ARTWORK_CHUNK_CHARS = 192 * 1024
+
+# Two megabytes was picked against aiohttp's 4 MB ceiling -- one message under
+# the limit, as few messages as possible. That reasoning was about a single
+# message and the freezes are not: every one of them followed a BURST, five
+# replies of 1-2 MB inside one second, after which the backend answered
+# nothing at all while its socket stayed open and its process stayed idle.
+#
+# So the number is chosen for the burst instead. A 7 MB hero is 52 small
+# messages rather than 5 enormous ones -- more round trips over a local
+# socket, which costs almost nothing, in exchange for never handing the
+# router megabytes faster than it can move them.
 
 # The most any gateway reply may be. Generous on purpose — the biggest is the
 # whole catalogue, a few megabytes — but not unbounded: a captive portal or a
