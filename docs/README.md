@@ -1,3 +1,4 @@
+<!-- Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org -->
 # Developer notes
 
 Hard-won details about this plugin that are not obvious from the code, and in

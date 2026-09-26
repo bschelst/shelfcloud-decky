@@ -1,3 +1,4 @@
+<!-- Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org -->
 # Controller Layouts
 
 How Shelfcloud applies Steam Input controller layouts to non-Steam shortcuts.

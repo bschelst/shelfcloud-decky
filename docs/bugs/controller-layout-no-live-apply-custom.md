@@ -1,3 +1,4 @@
+<!-- Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org -->
 # Custom controller layout does not apply without Steam restart
 
 ## Status

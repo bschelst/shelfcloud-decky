@@ -1,3 +1,4 @@
+<!-- Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org -->
 # Decky RPC payload limits — the 4 MB rule
 
 ## Status
