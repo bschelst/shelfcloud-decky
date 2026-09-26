@@ -85,7 +85,16 @@ _LAYOUT_WEB_BROWSER = "template://controller_neptune_webbrowser.vdf"
 # nobody owns costs a few KB and is ignored; a MISSING config means Steam
 # falls back to its own default and the service's shortcuts are unreachable,
 # which is the state every non-Deck pad was in.
-OTHER_CONTROLLER_TYPES = ("ps5", "ps4", "xbox360", "xboxone", "switch_pro", "generic")
+# neptune is FIRST and deliberately included rather than assumed.
+#
+# The authored layout supplies its own type and the rest fall back to Valve's
+# templates -- so listing only the others quietly relied on every layout we
+# ship being a Deck one. A custom VDF exported from an Xbox pad declares
+# controller_xbox360, and then the one controller this plugin exists for is
+# the only one that gets no config at all. Cheap to include, and the loop
+# skips it anyway whenever it IS the authored type.
+CONTROLLER_TYPES = ("neptune", "ps5", "ps4", "xbox360", "xboxone",
+                    "switch_pro", "generic")
 
 # controller_neptune_gamepad_fps.vdf -> ("neptune", "gamepad_fps"). Anchored on
 # the known type names because several of them contain an underscore too, so
@@ -766,17 +775,27 @@ class Plugin:
         waiting = self._login_task is not None and not self._login_task.done()
         return {"ok": True, "status": "pending" if waiting else "idle"}
 
-    def _forget_credentials(self) -> None:
-        """Drop a credential the gateway no longer accepts."""
+    def _clear_session_state(self) -> None:
+        """Drop everything tied to the account that was signed in.
+
+        There are two ways to stop being signed in -- the gateway rejecting
+        the token, and the user pressing Sign out -- and each used to clear
+        this by hand. They drifted the moment anything was added: the ETag
+        cache went into the involuntary path only, so a DELIBERATE sign-out
+        left the previous account's library sitting in memory, which is the
+        one case where somebody has actually asked for it to be gone.
+
+        One place, so the next thing that belongs here cannot miss a path.
+        """
         self._settings.pop("api_token", None)
         self._settings.pop("steam_id64", None)
         self._auth_ok = False
         self._auth_checked = 0.0
-        # Whoever signs in next must not find the last account's library still
-        # sitting here. A 304 could not leak it -- the gateway tags per user,
-        # so another account's request simply would not match -- but there is
-        # no reason to keep somebody's game list in memory once they are out.
         _ETAG_CACHE.clear()
+
+    def _forget_credentials(self) -> None:
+        """Drop a credential the gateway no longer accepts."""
+        self._clear_session_state()
         try:
             self._write_json(_settings_file(), self._settings)
         except OSError:
@@ -789,10 +808,7 @@ class Plugin:
             pass  # local sign-out must work even when the gateway is unreachable
         if self._login_task and not self._login_task.done():
             self._login_task.cancel()
-        self._settings.pop("api_token", None)
-        self._settings.pop("steam_id64", None)
-        self._auth_ok = False
-        self._auth_checked = 0.0
+        self._clear_session_state()
         await self._save_settings()
         return {"ok": True}
 
@@ -1721,7 +1737,7 @@ class Plugin:
         native = declared.group(1) if declared else "neptune"
 
         by_type = {native: vdf_text}
-        for other in OTHER_CONTROLLER_TYPES:
+        for other in CONTROLLER_TYPES:
             if other in by_type:
                 continue
             path = _best_template(steam_root, other, flavour)
@@ -1736,21 +1752,46 @@ class Plugin:
         # Rewrite the url field to point to the actual destination. Custom VDFs
         # arrive with whatever url the author set (often a path from a different
         # project), and built-in templates have none at all.
-        def _placeholder(text: str) -> str:
-            text = re.sub(r'"url"\s+"[^"]*"', '"url"\t\t"__PLACEHOLDER__"', text)
-            if '"url"' not in text:
-                text = text.replace(
-                    '"controller_mappings"\n{',
-                    '"controller_mappings"\n{\n'
-                    '\t"url"\t\t"__PLACEHOLDER__"\n'
-                    '\t"export_type"\t\t"template"',
-                    1)
-            return text
+        def _placeholder(text: str) -> Optional[str]:
+            """Put a rewritable url in, or say we could not.
 
-        # Every type, not just the authored one. Valve's templates carry no url
-        # at all, so a template left un-normalised here lands on disk with no
-        # autosave path and Steam treats it as read-only.
-        by_type = {t: _placeholder(text) for t, text in by_type.items()}
+            Custom layouts arrive with whatever url their author saved; Valve's
+            built-in templates have none at all and need one inserted.
+
+            The insertion used to match the literal '"controller_mappings"\n{'.
+            That was only ever tried against layouts we authored ourselves, and
+            it is now run over Valve's template for every pad type -- files
+            nobody here has read. A single different byte of whitespace and the
+            replace silently does nothing: no placeholder, so nothing to
+            substitute, so the file lands with no autosave path and Steam
+            treats it as read-only. A layout that quietly does not apply is
+            indistinguishable from one that does not exist.
+
+            So: match tolerantly, and when even that fails say so and skip the
+            type rather than write a file that cannot work.
+            """
+            text = re.sub(r'"url"\s+"[^"]*"', '"url"\t\t"__PLACEHOLDER__"', text)
+            if "__PLACEHOLDER__" in text:
+                return text
+            text, inserted = re.subn(
+                r'("controller_mappings"\s*\{)',
+                '\\1\n\t"url"\t\t"__PLACEHOLDER__"\n\t"export_type"\t\t"template"',
+                text, count=1)
+            return text if inserted else None
+
+        prepared = {}
+        for ctype, text in by_type.items():
+            ready = _placeholder(text)
+            if ready is None:
+                decky.logger.warning(
+                    "controller layout for %s has no place to put an autosave "
+                    "url; skipping that pad rather than writing a read-only "
+                    "config", ctype)
+                continue
+            prepared[ctype] = ready
+        by_type = prepared
+
+
 
         installed = 0
         autosave_url = None
@@ -1772,11 +1813,11 @@ class Plugin:
                     shortcut_name, user_path)
                 continue
             os.makedirs(dest_dir, exist_ok=True)
+            written = 0
             for ctype, text in by_type.items():
                 dest = os.path.join(dest_dir, f"controller_{ctype}.vdf")
                 try:
                     final = text.replace("__PLACEHOLDER__", f"autosave://{dest}")
-                    installed += 1
                     # The Deck's own pad is the one the caller cares about --
                     # it is what SetSelectedConfigForApp gets pointed at -- so
                     # only that one is reported back. The rest are laid down
@@ -1800,8 +1841,20 @@ class Plugin:
                             f.write(final)
                         decky.logger.info("controller layout: wrote %s", dest)
                     _register_configset(user_path, shortcut_name, ctype)
+                    # Counted HERE, after the write and the registration that
+                    # can both raise. It used to be counted on the way in, so
+                    # a layout that failed to land still reported itself as
+                    # installed -- and that is now up to seven files per
+                    # directory rather than one, so seven chances to say a
+                    # thing happened that did not.
+                    written += 1
                 except OSError as exc:
                     decky.logger.warning("controller layout copy failed: %s", exc)
+            # One per DIRECTORY, which is what this number has always meant.
+            # Counting files instead would turn a normal four-user Deck from
+            # "4" into "28" for the same work and make the figure unreadable.
+            if written:
+                installed += 1
         return {"ok": installed > 0, "installed": installed,
                 "autosave_url": autosave_url if installed else None}
 
