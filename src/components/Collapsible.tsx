@@ -13,10 +13,39 @@
 // opening everything at once buries the controls underneath.
 
 import { Focusable } from "@decky/ui";
-import { ReactNode, useState } from "react";
+import { createContext, ReactNode, useContext, useState } from "react";
 import { FaChevronDown, FaChevronUp } from "react-icons/fa";
 
+import { nextOpenId } from "../lib/accordion";
 import { theme } from "../lib/theme";
+
+/** Shared "which one is open" for a set of sections, or null when standalone.
+ *
+ *  Optional on purpose. A Collapsible used on its own -- NoBrowser is one --
+ *  keeps its own state and behaves exactly as before; only sections rendered
+ *  inside a group answer to each other.
+ */
+const GroupContext = createContext<{
+  openId: string | null;
+  setOpenId: (id: string | null) => void;
+} | null>(null);
+
+/** Let only one of the sections inside be open at a time.
+ *
+ *  The panel is read on a 7-inch screen with a thumbstick. Settings, Links and
+ *  About are each long enough that two of them open at once pushes the rest
+ *  off the bottom, and the thing you were reaching for moves while you reach
+ *  for it. Opening one now closes the last, so the panel's height stays in the
+ *  same neighbourhood however you got there.
+ */
+export function CollapsibleGroup({ children }: { children: ReactNode }) {
+  const [openId, setOpenId] = useState<string | null>(null);
+  return (
+    <GroupContext.Provider value={{ openId, setOpenId }}>
+      {children}
+    </GroupContext.Provider>
+  );
+}
 
 export function Collapsible({
   title,
@@ -32,13 +61,23 @@ export function Collapsible({
   defaultOpen?: boolean;
   children: ReactNode;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
+  const group = useContext(GroupContext);
+  const [localOpen, setLocalOpen] = useState(defaultOpen);
   const [focused, setFocused] = useState(false);
+
+  // The title doubles as the identity. These are headings a person reads, so
+  // they are already distinct within a group -- and a separate id prop would
+  // be one more thing to keep in step with the label for no gain.
+  const open = group ? group.openId === title : localOpen;
+  const toggle = () => {
+    if (group) group.setOpenId(nextOpenId(group.openId, title));
+    else setLocalOpen((v) => !v);
+  };
 
   return (
     <div style={{ marginTop: 8 }}>
       <Focusable
-        onActivate={() => setOpen((v) => !v)}
+        onActivate={toggle}
         onFocus={(e: React.FocusEvent) => {
           if (e.currentTarget === e.target) setFocused(true);
         }}

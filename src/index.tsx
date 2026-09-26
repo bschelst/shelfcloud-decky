@@ -38,7 +38,7 @@ import { syncLibrary, untiledFromRun } from "./lib/sync";
 import { changeSummary, syncSummary } from "./lib/summary";
 import { LibrarySummary } from "./components/LibrarySummary";
 import { Logo, LogoMono, NotificationLogo } from "./components/Logo";
-import { IconLabel } from "./components/Collapsible";
+import { CollapsibleGroup, IconLabel } from "./components/Collapsible";
 import { NoBrowser } from "./components/NoBrowser";
 import { SettingsSection } from "./components/SettingsSection";
 import { LinksSection } from "./components/LinksSection";
@@ -875,55 +875,59 @@ function Content() {
         )}
       </PanelSection>
 
+      {/* One at a time. Settings, Links and About are each long enough that
+          two open at once push everything below them off a 7-inch screen. */}
       <PanelSection>
-        <SettingsSection
-          status={status}
-          setStatus={setStatus}
-          signedOut={signedOut}
-          busy={busy}
-          shelves={shelves}
-          confirmClear={confirmClear}
-          confirmSignOut={confirmSignOut}
-          onRemoveAll={() => void removeAll()}
-          onSignOut={() => void signOut()}
-          onApplyOverrides={() => {
-            void applyOverrides().then((r) => {
-              toaster.toast({
-                title: "Shelfcloud",
-                body: r.ok
-                  ? `Gamepad permissions applied to ${r.browser}.`
-                  : (r.error || "No browser selected."),
-                logo: <NotificationLogo />,
+        <CollapsibleGroup>
+          <SettingsSection
+            status={status}
+            setStatus={setStatus}
+            signedOut={signedOut}
+            busy={busy}
+            shelves={shelves}
+            confirmClear={confirmClear}
+            confirmSignOut={confirmSignOut}
+            onRemoveAll={() => void removeAll()}
+            onSignOut={() => void signOut()}
+            onApplyOverrides={() => {
+              void applyOverrides().then((r) => {
+                toaster.toast({
+                  title: "Shelfcloud",
+                  body: r.ok
+                    ? `Gamepad permissions applied to ${r.browser}.`
+                    : (r.error || "No browser selected."),
+                  logo: <NotificationLogo />,
+                });
               });
-            });
-          }}
-          onSetSetting={setSetting}
-          // Turning "a tile per service" ON has to bring the games in, not
-          // just re-shape the ones already there. Fanning out a library that
-          // holds 8 of Luna's 119 games gives 8 Luna tiles and looks broken,
-          // because the other 111 were never added — a subscription covers
-          // them, and nothing had ever asked for them on the user's behalf.
-          //
-          // doAddOwned, rather than a second path of its own: it reads the
-          // Steam library, adds everything playable (owned, free-to-play and
-          // subscription alike) and syncs, with the progress, the Cancel and
-          // the put-back-on-cancel that a run this size needs.
-          onTilePerServiceEnabled={() => void doAddOwned()}
-          onSetShelf={setShelf}
-          onShelfChanged={() => void doSync()}
-          toaster={toaster}
-        />
-        <LinksSection
-          gatewayUrl={GATEWAY_URL}
-          githubUrl={GITHUB_URL}
-          openInBrowser={openInSteamBrowser}
-        />
-        <AboutSection
-          version={status.version || "unknown"}
-          tracked={status.tracked}
-          signedOut={signedOut}
-          deviceName={shelves?.ok ? shelves.device_name : null}
-        />
+            }}
+            onSetSetting={setSetting}
+            // Turning "a tile per service" ON has to bring the games in, not
+            // just re-shape the ones already there. Fanning out a library that
+            // holds 8 of Luna's 119 games gives 8 Luna tiles and looks broken,
+            // because the other 111 were never added — a subscription covers
+            // them, and nothing had ever asked for them on the user's behalf.
+            //
+            // doAddOwned, rather than a second path of its own: it reads the
+            // Steam library, adds everything playable (owned, free-to-play and
+            // subscription alike) and syncs, with the progress, the Cancel and
+            // the put-back-on-cancel that a run this size needs.
+            onTilePerServiceEnabled={() => void doAddOwned()}
+            onSetShelf={setShelf}
+            onShelfChanged={() => void doSync()}
+            toaster={toaster}
+          />
+          <LinksSection
+            gatewayUrl={GATEWAY_URL}
+            githubUrl={GITHUB_URL}
+            openInBrowser={openInSteamBrowser}
+          />
+          <AboutSection
+            version={status.version || "unknown"}
+            tracked={status.tracked}
+            signedOut={signedOut}
+            deviceName={shelves?.ok ? shelves.device_name : null}
+          />
+        </CollapsibleGroup>
       </PanelSection>
 
       {/* Decky's tab bar butts straight against the end of the panel. A focused
