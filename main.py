@@ -23,6 +23,7 @@ import json
 import os
 import random
 import re
+import shutil
 import subprocess
 import time
 import urllib.error
@@ -641,6 +642,8 @@ class Plugin:
         # Without this, a game removed on the web could never be found and
         # removed here, and re-syncing would create duplicate tiles.
         self._synced: Dict[str, Dict[str, Any]] = {}
+        # One-off maintenance, done on the first library read of a session.
+        self._pruned_layouts = False
         # Tracked tiles that shortcuts.vdf did not mention LAST time it was
         # read. Forgetting one takes two consecutive misses — see
         # _forget_vanished_tiles for why one is not enough.
@@ -1638,6 +1641,16 @@ class Plugin:
 
         await self._forget_vanished_tiles()
 
+        # Once per session, off the event loop. Cheap when there is nothing to
+        # do -- it is a listdir per Steam user -- and it only ever has
+        # something to do on a device that ran an older build.
+        if not self._pruned_layouts:
+            self._pruned_layouts = True
+            try:
+                await asyncio.to_thread(self._prune_stale_layouts)
+            except Exception as exc:
+                decky.logger.warning("layout prune failed: %s", exc)
+
         self._last_error = None
 
         # Versioned over what the caller ACTS on -- the desired tiles and the
@@ -1659,6 +1672,75 @@ class Plugin:
             "tracked": self._synced,
             "version": version,
         }
+
+    def _prune_stale_layouts(self) -> int:
+        """Remove layout directories left behind by an older naming rule.
+
+        The name Steam reads was got wrong twice: first the shortcut's own
+        case, then lower case, and only then lower case with the characters
+        Steam strips. Each attempt wrote a directory, and nothing removed the
+        previous one -- measured on this Deck, 552 dead directories holding
+        9.2 MB, none of which Steam has ever opened.
+
+        Deliberately narrow. A directory is removed only when all three hold:
+
+          - its name is one of OUR shortcut names under a spelling some
+            earlier rule produced, so nothing of the user's own is touched;
+          - the name Steam reads TODAY exists alongside it, so this can never
+            remove the only copy;
+          - it sits in a per-user config directory, checked by realpath.
+
+        Returns how many were removed.
+        """
+        steam_root = os.path.realpath(os.path.expanduser("~/.steam/steam"))
+        configs_root = os.path.join(
+            steam_root, "steamapps", "common", "Steam Controller Configs")
+        if not os.path.isdir(configs_root):
+            return 0
+
+        # Every name we have ever written a directory under, and the one we
+        # would write now, for each tile we track.
+        current, former = set(), set()
+        for entry in self._synced.values():
+            name = (entry or {}).get("name")
+            if not isinstance(name, str) or not name:
+                continue
+            key = _layout_key(name)
+            current.add(key)
+            for spelling in (name, name.lower()):
+                if spelling != key:
+                    former.add(spelling)
+        former -= current
+        if not former:
+            return 0
+
+        removed = 0
+        for user_dir in os.listdir(configs_root):
+            user_path = os.path.join(configs_root, user_dir, "config")
+            if not os.path.isdir(user_path):
+                continue
+            real_user = os.path.realpath(user_path)
+            for name in list(os.listdir(user_path)):
+                if name not in former:
+                    continue
+                key = _layout_key(name)
+                # Never the only copy.
+                if not os.path.isdir(os.path.join(user_path, key)):
+                    continue
+                victim = os.path.join(user_path, name)
+                if not os.path.realpath(victim).startswith(real_user + os.sep):
+                    continue
+                try:
+                    shutil.rmtree(victim)
+                    removed += 1
+                except OSError as exc:
+                    decky.logger.warning(
+                        "could not remove a stale layout directory: %s", exc)
+        if removed:
+            decky.logger.info(
+                "Removed %d controller layout directories left by an older "
+                "naming rule", removed)
+        return removed
 
     async def _forget_vanished_tiles(self) -> int:
         """Drop tracked tiles whose Steam shortcut is gone.
