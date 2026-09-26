@@ -1136,6 +1136,24 @@ class Plugin:
         if not providers:
             return []
 
+        # A route the subscription cannot reach is not a tile.
+        #
+        # The gateway marks each route with the rung it still needs. Dropping
+        # those matters most with a tile per service on, because that mode
+        # makes a shortcut out of EVERY route: Sonic Frontiers is free on
+        # Boosteroid and "Luna Premium" on Amazon, and a Luna Prime account got
+        # both tiles — the Luna one opening on "Included in Luna Premium, start
+        # your 7-day free trial". Ranking could not fix that; ranking chooses
+        # between routes and this mode keeps all of them.
+        #
+        # Unless that leaves nothing. A game reachable on no route at all is
+        # still a game the user deliberately added, and silently having no tile
+        # looks like the sync lost it. It keeps one, and the gateway's
+        # needs_tier says why it will ask for money.
+        reachable = [p for p in providers if not p.get("needs_tier")]
+        if reachable:
+            providers = reachable
+
         chosen = game.get("chosen_provider")
         if self._sync_all_providers():
             # Every route, preferred one first so it keeps whichever tile Steam

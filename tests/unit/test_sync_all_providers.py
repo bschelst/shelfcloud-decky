@@ -181,3 +181,57 @@ def test_the_setting_only_accepts_a_real_yes():
     plugin = main.Plugin()
     plugin._settings = {"sync_all_providers": "no"}
     assert plugin._sync_all_providers() is False
+
+
+# ------------------------------------------- routes behind a paywall
+#
+# Reported from a Deck, twice. Sonic Frontiers is free on Boosteroid and
+# "Luna Premium" on Amazon; a Luna Prime account got BOTH tiles, and the Luna
+# one opened on "Included in Luna Premium, start your 7-day free trial".
+#
+# Ranking had been taught about rungs by then and could not help: ranking
+# chooses BETWEEN routes, and this mode keeps all of them. The gateway marks
+# each route with the rung it still needs, and a route the subscription cannot
+# reach is not a tile.
+
+SONIC = {
+    "id": 457,
+    "name": "Sonic Frontiers",
+    "chosen_provider": "boosteroid",
+    "providers": [
+        {"provider": "boosteroid", "needs_tier": None,
+         "launch_url": "https://cloud.boosteroid.com/play/sonic"},
+        {"provider": "amazon_luna", "needs_tier": "Luna Premium",
+         "launch_url": "https://luna.amazon.com/play/sonic"},
+    ],
+}
+
+
+def test_a_route_above_the_users_tier_gets_no_tile():
+    made = desired(SONIC, all_providers=True)
+    assert [m["provider"] for m in made] == ["boosteroid"], \
+        "the Luna route needs a rung this account does not have"
+
+
+def test_it_still_applies_with_one_tile_per_game():
+    """Off, the single route must not be the unreachable one either."""
+    assert [m["provider"] for m in desired(SONIC, all_providers=False)] == \
+        ["boosteroid"]
+
+
+def test_a_game_reachable_nowhere_still_keeps_a_tile():
+    """Every route behind a paywall is still a game the user deliberately
+    added. No tile at all looks like the sync lost it, so one is kept and the
+    gateway's needs_tier is what says it will ask for money."""
+    gated = dict(SONIC, chosen_provider="amazon_luna", providers=[
+        {"provider": "amazon_luna", "needs_tier": "Luna Premium",
+         "launch_url": "https://luna.amazon.com/play/sonic"},
+    ])
+    assert [m["provider"] for m in desired(gated, all_providers=True)] == \
+        ["amazon_luna"]
+
+
+def test_a_gateway_that_says_nothing_about_tiers_changes_nothing():
+    """needs_tier is absent on an older gateway, and for anyone who has not
+    said which tier they hold. Neither of those is a paywall."""
+    assert len(desired(FORTNITE, all_providers=True)) == 3
