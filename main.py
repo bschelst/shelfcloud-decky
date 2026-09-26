@@ -414,10 +414,38 @@ class Plugin:
                           self._gateway(), len(self._synced))
         await self.apply_overrides()
         self._poll_task = asyncio.create_task(self._poll_loop())
+        self._beat_task = asyncio.create_task(self._heartbeat())
+
+    async def _heartbeat(self) -> None:
+        """Say, every few seconds, that this process can still run a callback.
+
+        Diagnostic, and it earns its place. A sync stalls with the backend at
+        0.1% CPU, no traceback, and RPCs unanswered -- which looks identical
+        whether the event loop here is blocked by synchronous work, or the
+        loop is fine and the frontend has stopped asking. Those need opposite
+        fixes, and seven attempts went past without distinguishing them.
+
+        If these lines stop when a sync stalls, the block is HERE. If they
+        keep coming, this process is healthy and the fault is on the other
+        side of the socket.
+        """
+        beat = 0
+        while True:
+            try:
+                await asyncio.sleep(5)
+                beat += 1
+                decky.logger.info("heartbeat %d", beat)
+            except asyncio.CancelledError:
+                return
+            except Exception:
+                return
 
     async def _unload(self):
         if self._poll_task:
             self._poll_task.cancel()
+        beat = getattr(self, "_beat_task", None)
+        if beat:
+            beat.cancel()
         if self._login_task:
             self._login_task.cancel()
         decky.logger.info("Shelfcloud unloaded")
@@ -1600,6 +1628,19 @@ class Plugin:
         await self._save_state()
         return {"ok": True}
 
+    @staticmethod
+    def _write_icon(path: str, raw: bytes) -> None:
+        """Blocking half of save_icon, for asyncio.to_thread.
+
+        Written whole then moved, so Steam can never read a half-written file
+        -- it re-reads this path every time it draws the icon, not once at
+        save time.
+        """
+        temporary = f"{path}.part"
+        with open(temporary, "wb") as handle:
+            handle.write(raw)
+        os.replace(temporary, path)
+
     async def save_icon(self, game_id: int, data: str, kind: str,
                         app_id: Optional[int] = None) -> Dict:
         """Write an image to disk and return the path, for SetShortcutIcon.
@@ -1633,13 +1674,11 @@ class Plugin:
 
         path = os.path.join(_icon_dir(), _icon_name(game_id, app_id, kind))
         try:
-            # Written whole then moved, so Steam can never read a file that is
-            # half-written — it reads this path whenever it draws the icon,
-            # not just once at save time.
-            temporary = f"{path}.part"
-            with open(temporary, "wb") as handle:
-                handle.write(raw)
-            os.replace(temporary, path)
+            # In a thread, like every other write here. This one was left on
+            # the event loop, and the loop is what answers RPCs -- including
+            # the one the panel uses to ask whether it is signed in. Blocking
+            # it stalls the plugin's whole interface, not just this call.
+            await asyncio.to_thread(self._write_icon, path, raw)
         except OSError as exc:
             return {"ok": False, "error": str(exc)}
         return {"ok": True, "path": path}
