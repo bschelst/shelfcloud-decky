@@ -28,6 +28,16 @@
  *  this only ever fires on a call that is genuinely never coming back. */
 export const STEAM_CALL_TIMEOUT = 15000;
 
+/** How long a call into the Python backend may take before it is abandoned.
+ *
+ *  Longer than a Steam call, because some of these genuinely do work -- an
+ *  artwork download fetches over the network, and a layout install writes
+ *  files. Still a deadline: these are promises over Decky's socket, and a
+ *  message that never arrives leaves one pending for the life of the session.
+ *  The backend sat idle through two frozen syncs for exactly this reason --
+ *  nothing was wrong with it, the frontend had simply stopped asking. */
+export const RPC_TIMEOUT = 45000;
+
 /** Resolve with `whenLate` if `work` has not settled in `ms`.
  *
  *  Resolves rather than rejects: the callers here treat a failed slot as "skip

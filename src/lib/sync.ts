@@ -10,7 +10,7 @@ import { addToProviderCollections, pruneProviderCollections,
          removeRetiredCollections, type CollectionMember } from "./collection";
 import { renderPageCapsule } from "./pagecapsule";
 import { BRAND_MARK } from "./brandmark";
-import { steamCall, withTimeout } from "./withTimeout";
+import { RPC_TIMEOUT, steamCall, withTimeout } from "./withTimeout";
 import { renderPageLogo } from "./pagelogo";
 import { providerLabel, WEBSITE_PROVIDERS, type DesiredGame, type SyncResult, type TrackedShortcut } from "./types";
 
@@ -129,7 +129,10 @@ const artUnavailable = new Set<number>();
  *  Python is subject to neither rule. */
 async function fetchArtworkBase64(url: string): Promise<{ data: string; kind: "png" | "jpg" } | undefined> {
   try {
-    const result = await fetchArtwork(url);
+    // The backend answers over Decky's socket, and a message that goes
+    // missing leaves this promise pending for ever -- which froze whole syncs
+    // with the backend sitting idle, because nothing ever asked it again.
+    const result = await withTimeout(fetchArtwork(url), undefined, RPC_TIMEOUT);
     if (!result?.ok || !result.base64) return undefined;
     return { data: result.base64, kind: result.kind === "png" ? "png" : "jpg" };
   } catch {
@@ -562,7 +565,7 @@ async function adoptStrayShortcuts(
 ): Promise<void> {
   let report;
   try {
-    report = await strayShortcuts();
+    report = await withTimeout(strayShortcuts(), undefined, RPC_TIMEOUT);
   } catch {
     return;
   }
@@ -612,8 +615,10 @@ async function adoptStrayShortcuts(
       // No DesiredGame here — this is reconciling a tile Steam already had.
       // The empty url leaves any fallback already recorded untouched; the
       // next full sync fills it in from the gateway.
-      await callbacks.record(key, entry.keep, adopted.name,
-                             adopted.launch, "", entry.provider ?? "", "");
+      await withTimeout(
+        callbacks.record(key, entry.keep, adopted.name,
+                         adopted.launch, "", entry.provider ?? "", ""),
+        undefined, RPC_TIMEOUT);
     } catch {
       /* the in-memory map is already right; the file catches up next time */
     }
@@ -859,7 +864,8 @@ export async function syncLibrary(
 
         if (game.controller_layout) {
           try {
-            const layoutResult = await installControllerLayout(title, game.controller_layout);
+            const layoutResult = await withTimeout(
+              installControllerLayout(title, game.controller_layout), undefined, RPC_TIMEOUT);
             const liveUrl = layoutResult?.autosave_url ?? game.controller_layout;
             await applyControllerConfig(appId, liveUrl, true);
           } catch { /* not fatal */ }
@@ -871,9 +877,11 @@ export async function syncLibrary(
         // fully dressed detail page, never retried.
         const appliedNew = await applyArtwork(appId, game);
         if (appliedNew.applied === 0) artUnavailable.add(game.game_id);
-        await callbacks.record(trackingKey(game), appId, title, game.options,
-                               appliedNew.visible ? art : "", game.provider,
-                               game.url ?? "");
+        await withTimeout(
+          callbacks.record(trackingKey(game), appId, title, game.options,
+                           appliedNew.visible ? art : "", game.provider,
+                           game.url ?? ""),
+          undefined, RPC_TIMEOUT);
         file({ appId, provider: game.provider });
         result.added++;
         result.addedNames.push(game.name);
@@ -883,7 +891,8 @@ export async function syncLibrary(
       } else {
         if (game.controller_layout) {
           try {
-            const layoutResult = await installControllerLayout(title, game.controller_layout);
+            const layoutResult = await withTimeout(
+              installControllerLayout(title, game.controller_layout), undefined, RPC_TIMEOUT);
             const liveUrl = layoutResult?.autosave_url ?? game.controller_layout;
             await applyControllerConfig(existing.app_id, liveUrl, false);
           } catch { /* best effort */ }
@@ -915,8 +924,10 @@ export async function syncLibrary(
           // Keep the old fingerprint until the visible slot goes on, so a later
           // session tries again rather than marking a blank tile as finished.
           const recordedArt = tryArt && !appliedArt.visible ? (existing.art ?? "") : art;
-          await callbacks.record(trackingKey(game), existing.app_id, title, game.options,
-                                 recordedArt, game.provider, game.url ?? "");
+          await withTimeout(
+            callbacks.record(trackingKey(game), existing.app_id, title, game.options,
+                             recordedArt, game.provider, game.url ?? ""),
+            undefined, RPC_TIMEOUT);
           result.updated++;
         }
         file({ appId: existing.app_id, provider: game.provider });
