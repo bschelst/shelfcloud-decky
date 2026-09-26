@@ -8,14 +8,22 @@
 
 import type { CSSProperties } from "react";
 
-/** How far the badge sits from the hero's edges — the same on every side.
- *
- *  Measured on hardware rather than chosen. The first version inset the sides
- *  by 20 and the bottom by 40, and used a top of 40 in one corner and 60 in
- *  the other. On a 360px hero that left a 32px gap under the badge beside a
- *  20px gap to its left, which reads as "not quite lined up" without it being
- *  obvious why. One number, used everywhere. */
+/** How far the badge sits from the hero's left and right edges. */
 export const INSET = 20;
+
+/** How far down a TOP badge sits, per corner — and they differ.
+ *
+ *  Taken from the ProtonDB medal, which sits on this same page. The numbers
+ *  look like an oversight and are not: the top-right of a Steam game page
+ *  carries its own furniture, so a badge there has further to come down
+ *  before it is clear of it. The top-left has nothing above it but the hero.
+ *
+ *  These were briefly "tidied" to one value on the reasoning that two corners
+ *  ought to match. They ought to, and they cannot — the page is not
+ *  symmetric. Overriding numbers that were arrived at against the real UI is
+ *  the same mistake as measuring the capsule instead of the hero art, and it
+ *  produced the same kind of wrong. */
+export const TOP_INSET = { tl: 40, tr: 60 } as const;
 
 /** Assumed badge height, used only until the real one can be measured.
  *
@@ -55,8 +63,8 @@ export function badgePosition(
 ): CSSProperties {
   const inset = `${INSET}px`;
 
-  if (position === "tl") return { top: inset, left: inset };
-  if (position === "tr") return { top: inset, right: inset };
+  if (position === "tl") return { top: `${TOP_INSET.tl}px`, left: inset };
+  if (position === "tr") return { top: `${TOP_INSET.tr}px`, right: inset };
 
   // Its BOTTOM edge INSET above the hero's — which is the gap the eye
   // compares against the side inset, not the distance to its top edge.

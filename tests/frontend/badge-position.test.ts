@@ -15,7 +15,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  ART_OVERHANG, BADGE_HEIGHT, INSET, badgePosition,
+  ART_OVERHANG, BADGE_HEIGHT, INSET, TOP_INSET, badgePosition,
 } from "../../src/lib/badgePosition";
 
 /** What the Deck reported for a real game page: the CAPSULE is 342 and the
@@ -56,12 +56,21 @@ describe("the bottom corners", () => {
 });
 
 describe("the top corners", () => {
-  it("uses the same inset as every other side", () => {
-    for (const corner of ["tl", "tr"] as const) {
-      expect(badgePosition(corner, CAPSULE).top).toBe(`${INSET}px`);
-    }
-    // The two top corners used to sit at different heights — 40 and 60.
-    expect(badgePosition("tl", CAPSULE).top).toBe(badgePosition("tr", CAPSULE).top);
+  it("keeps the two corners at DIFFERENT heights", () => {
+    // Not an oversight, and not ours to tidy: the top-right of a Steam game
+    // page carries its own furniture, so a badge there has further to come
+    // down before it is clear of it. These are the ProtonDB medal's numbers,
+    // arrived at against the real UI. Flattening them to one value put the
+    // top-right badge over the page's own controls.
+    expect(badgePosition("tl", CAPSULE).top).toBe(`${TOP_INSET.tl}px`);
+    expect(badgePosition("tr", CAPSULE).top).toBe(`${TOP_INSET.tr}px`);
+    expect(badgePosition("tl", CAPSULE).top)
+      .not.toBe(badgePosition("tr", CAPSULE).top);
+  });
+
+  it("still insets both from the side by the same amount", () => {
+    expect(badgePosition("tl", CAPSULE).left).toBe(`${INSET}px`);
+    expect(badgePosition("tr", CAPSULE).right).toBe(`${INSET}px`);
   });
 
   it("ignores the hero height, having nothing to measure against", () => {
