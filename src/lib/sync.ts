@@ -488,17 +488,23 @@ async function applyArtwork(appId: number, game: DesiredGame): Promise<ArtworkOu
     ?? (logoIndex >= 0 ? images[logoIndex] : undefined)
     ?? capsule;
 
-  // A page you added gets a logo drawn from its own name.
+  // Anything with no logo of its own gets one drawn from its name.
   //
-  // Only for `custom`: the published page has a real wordmark and that one IS
-  // its name. Every custom page was being given that same wordmark, so a shelf
-  // of them all announced themselves as Shelfcloud — and since Steam draws the
-  // logo INSTEAD of the title, the one thing saying which page you were
-  // looking at was the thing being covered.
+  // Steam draws the logo INSTEAD OF the title, so an empty slot is a game
+  // with nothing written over its hero and a WRONG slot is worse: filled with
+  // the Shelfcloud wordmark, a game's page announced itself as "shelfcloud"
+  // and the one thing saying which game you were looking at was the thing
+  // covering it. Disney/Pixar WALL-E said shelfcloud.
   //
-  // Applied after the others so a real logo, if the gateway ever serves one
-  // for this tile, always wins over a drawn one.
-  if (game.provider === "custom" && !images[logoIndex]) {
+  // This used to be for `custom` pages only, on the reasoning that the
+  // published page has a real wordmark and that one IS its name. True for
+  // that page; not true for the several hundred cloud games whose publishers
+  // ship no logo. They have the same problem and want the same answer: our
+  // mark, and the name of the thing itself beside it.
+  //
+  // Applied after the others so a real publisher logo always wins over a
+  // drawn one.
+  if (!images[logoIndex]) {
     const drawn = await renderPageLogo(game.name, iconImage);
     if (drawn) await applySlot(drawn, LibraryAsset.Logo);
   }
