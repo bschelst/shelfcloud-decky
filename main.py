@@ -2471,6 +2471,18 @@ class Plugin:
     # to meet it -- so three times fewer requests to a public endpoint costs
     # the reader nothing they would notice.
     PLAYERS_CACHE_SECONDS = 900.0
+
+    # A FAILURE is remembered for much less time than a count.
+    #
+    # Both used to share the number above, so a minute of bad connectivity --
+    # or Steam having a moment -- left a dash on that game for the full
+    # fifteen, long after everything was working again. The reasons to cache
+    # them are not the same either: a count is stable enough to reuse, while a
+    # failure is a fact about right now.
+    #
+    # Still a cache, not zero: an appid Steam refuses outright -- delisted,
+    # region-locked -- must not be re-asked on every single page open.
+    PLAYERS_FAILURE_CACHE_SECONDS = 60.0
     PLAYERS_URL = ("https://api.steampowered.com/ISteamUserStats/"
                    "GetNumberOfCurrentPlayers/v1/?appid=%s")
 
@@ -2494,8 +2506,12 @@ class Plugin:
 
         now = time.time()
         cached = self._players_cache.get(steam_app_id)
-        if cached and (now - cached[0]) < self.PLAYERS_CACHE_SECONDS:
-            return cached[1]
+        if cached:
+            age = now - cached[0]
+            keep = (self.PLAYERS_CACHE_SECONDS if cached[1].get("ok")
+                    else self.PLAYERS_FAILURE_CACHE_SECONDS)
+            if age < keep:
+                return cached[1]
 
         try:
             payload = await asyncio.to_thread(self._fetch_players, steam_app_id)
