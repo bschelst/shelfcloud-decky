@@ -265,10 +265,18 @@ def _open(url: str, headers: Optional[Dict[str, str]] = None, method: str = "GET
                                       context=SSL_CTX)
 
     try:
+            # NEVER None. urllib3 reads an explicit timeout=None as "wait for
+        # ever" and it OVERRIDES the pool's default -- so every call without
+        # an explicit one lost its deadline the moment this was pooled. A
+        # stalled read then held a thread-pool worker for good, and after
+        # four of those every asyncio.to_thread queued behind them and the
+        # backend answered nothing at all: get_status, tracked_providers,
+        # the lot. The socket was open the whole time, which is what made it
+        # look like a transport problem for hours.
         raw = _http().request(
             method, url, body=body, headers=headers or {},
             preload_content=False,
-            timeout=_urllib3.Timeout(total=timeout) if timeout else None,
+            timeout=_urllib3.Timeout(total=timeout or REQUEST_TIMEOUT),
         )
     except _urllib3.exceptions.HTTPError as exc:
         # Translated, not passed through. urllib3 raises MaxRetryError and
