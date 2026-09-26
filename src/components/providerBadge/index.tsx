@@ -146,26 +146,42 @@ export default function ProviderBadge(): ReactElement {
         return scope?.querySelector('img[src*="_hero"]') ?? hero;
       };
       let watched: Element | null = null;
+      let previous: number | null = null;
+
       const measure = () => {
         const anchor = ref.current?.offsetParent ?? ref.current?.parentElement;
         if (!anchor) return;
         const art = heroArt();
-        setHeroHeight(art.getBoundingClientRect().bottom
-                      - anchor.getBoundingClientRect().top);
+        const value = art.getBoundingClientRect().bottom
+                      - anchor.getBoundingClientRect().top;
+        setHeroHeight(value);
 
-        // Watch the ART once it exists, not only the capsule.
+        // Shown only once the answer STOPS CHANGING.
         //
-        // This measured once, at mount, and then never again: the hero image
-        // had not loaded yet so the lookup fell back to the capsule, and the
-        // capsule's own box never changes, so the ResizeObserver had nothing
-        // to report. The badge kept the first wrong answer for the life of
-        // the page — which is why two correct-looking fixes moved it by
-        // nothing at all.
-        if (art !== hero) setPlaced(true);
+        // The first attempt at this revealed the badge as soon as the hero
+        // <img> existed — but an img element exists long before it has
+        // loaded, and an unloaded one has no height. So the badge appeared
+        // against a zero-height image and hopped down the moment the picture
+        // arrived, on every game, which is exactly what it was meant to stop.
+        //
+        // Two readings that agree is the honest test of "settled". It costs
+        // one extra tick and makes no assumption about what Steam is loading
+        // or when.
+        if (value > 0 && previous !== null && Math.abs(value - previous) < 0.5) {
+          setPlaced(true);
+        }
+        previous = value;
+
+        // Watch the ART itself once it exists, not only the capsule, whose
+        // own box never changes — which is why nothing ever re-measured.
         if (art !== watched && art !== hero) {
           if (watched) resizes?.unobserve(watched);
           resizes?.observe(art);
           watched = art;
+          // And the moment the picture lands, rather than at the next poll.
+          if (art instanceof HTMLImageElement && !art.complete) {
+            art.addEventListener("load", measure, { once: true });
+          }
         }
       };
       resizes = new ResizeObserver(measure);
