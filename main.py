@@ -20,6 +20,7 @@ import base64
 import json
 import os
 import random
+import re
 import subprocess
 import time
 import urllib.error
@@ -66,13 +67,53 @@ _LAYOUT_GAMEPAD = "template://controller_neptune_gamepad_fps.vdf"
 _LAYOUT_WEB_BROWSER = "template://controller_neptune_webbrowser.vdf"
 
 
-def _register_configset(config_dir: str, app_key: str) -> None:
+# Controller types we lay a config down for besides the one the layout was
+# authored against.
+#
+# The point is that plugging a pad in just works. A config for a controller
+# nobody owns costs a few KB and is ignored; a MISSING config means Steam
+# falls back to its own default and the service's shortcuts are unreachable,
+# which is the state every non-Deck pad was in.
+OTHER_CONTROLLER_TYPES = ("ps5", "ps4", "xbox360", "xboxone", "switch_pro", "generic")
+
+# controller_neptune_gamepad_fps.vdf -> ("neptune", "gamepad_fps"). Anchored on
+# the known type names because several of them contain an underscore too, so
+# splitting on the first or last one gets switch_pro wrong either way.
+_re_flavour = re.compile(
+    r"^controller_(neptune|ps3|ps4|ps5|xbox360|xboxone|switch_pro|generic|android|apple)"
+    r"_(.+)\.vdf$")
+
+# What to fall back to when a type has no template for the flavour we wanted.
+# Not every type ships every flavour: ps4/ps5 have gamepad+mouse, xbox360 and
+# xboxone do not, and only neptune has webbrowser at all. Ordered best first.
+FLAVOUR_CHAIN = ("gamepad+mouse", "gamepad_fps", "gamepad_joystick", "wasd")
+
+
+def _best_template(steam_root: str, controller_type: str, flavour: str) -> Optional[str]:
+    """Valve's own template for this pad, as close to `flavour` as it ships."""
+    tdir = os.path.join(steam_root, "controller_base", "templates")
+    wanted = [flavour] + [f for f in FLAVOUR_CHAIN if f != flavour]
+    for candidate in wanted:
+        path = os.path.join(tdir, f"controller_{controller_type}_{candidate}.vdf")
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+def _register_configset(config_dir: str, app_key: str,
+                        controller_type: str = "neptune") -> None:
     """Register a per-game config in the configset file so Steam finds it.
 
     Without this entry Steam ignores the VDF file in the per-game directory.
     boosteroid-steamos does the same thing in _update_configset.
+
+    One configset per controller type, and it has to match the config it is
+    registering: writing controller_ps5.vdf but only ever touching
+    configset_controller_neptune.vdf leaves the PS5 config on disk and unused,
+    which looks exactly like the layout not working.
     """
-    configset = os.path.join(config_dir, "configset_controller_neptune.vdf")
+    configset = os.path.join(config_dir,
+                             f"configset_controller_{controller_type}.vdf")
     if not os.path.isfile(configset):
         return
     with open(configset, "r", encoding="utf-8", errors="replace") as f:
@@ -1584,6 +1625,13 @@ class Plugin:
 
         steam_root = os.path.realpath(os.path.expanduser("~/.steam/steam"))
 
+        # The flavour we would pick for a pad we have no authored layout for.
+        # A custom layout has no flavour of its own, and gamepad+mouse is the
+        # honest translation of what ours do: a gamepad that can still reach a
+        # cursor, because every one of these services is a web app with a
+        # login box somewhere.
+        flavour = "gamepad+mouse"
+
         if template_url.startswith("custom://"):
             vdf_text = await asyncio.to_thread(self._download_custom_layout,
                                                template_url.removeprefix("custom://"))
@@ -1596,21 +1644,53 @@ class Plugin:
                 return {"ok": False, "error": f"template not found: {filename}"}
             with open(source, "r", encoding="utf-8", errors="replace") as f:
                 vdf_text = f.read()
+            # controller_neptune_gamepad_fps.vdf -> gamepad_fps, so the other
+            # pads get the same INTENT rather than a fixed default.
+            named = _re_flavour.match(filename)
+            if named:
+                flavour = named.group(2)
         else:
             return {"ok": False, "error": "unsupported URL scheme"}
+
+        # Which pad this layout was actually authored for. Ours say neptune:
+        # they bind trackpads, gyro and the L4/R4 back buttons, none of which
+        # a PS5 or Xbox pad has. That is why the others cannot simply be this
+        # file under a different name -- the bindings would reference inputs
+        # that do not exist -- and get Valve's own per-type template instead.
+        declared = re.search(r'"controller_type"\s+"controller_([a-z0-9_]+)"', vdf_text)
+        native = declared.group(1) if declared else "neptune"
+
+        by_type = {native: vdf_text}
+        for other in OTHER_CONTROLLER_TYPES:
+            if other in by_type:
+                continue
+            path = _best_template(steam_root, other, flavour)
+            if not path:
+                continue
+            try:
+                with open(path, "r", encoding="utf-8", errors="replace") as f:
+                    by_type[other] = f.read()
+            except OSError:
+                pass
 
         # Rewrite the url field to point to the actual destination. Custom VDFs
         # arrive with whatever url the author set (often a path from a different
         # project), and built-in templates have none at all.
-        import re as _re
-        vdf_text = _re.sub(r'"url"\s+"[^"]*"', '"url"\t\t"__PLACEHOLDER__"', vdf_text)
-        if '"url"' not in vdf_text:
-            vdf_text = vdf_text.replace(
-                '"controller_mappings"\n{',
-                '"controller_mappings"\n{\n'
-                '\t"url"\t\t"__PLACEHOLDER__"\n'
-                '\t"export_type"\t\t"template"',
-                1)
+        def _placeholder(text: str) -> str:
+            text = re.sub(r'"url"\s+"[^"]*"', '"url"\t\t"__PLACEHOLDER__"', text)
+            if '"url"' not in text:
+                text = text.replace(
+                    '"controller_mappings"\n{',
+                    '"controller_mappings"\n{\n'
+                    '\t"url"\t\t"__PLACEHOLDER__"\n'
+                    '\t"export_type"\t\t"template"',
+                    1)
+            return text
+
+        # Every type, not just the authored one. Valve's templates carry no url
+        # at all, so a template left un-normalised here lands on disk with no
+        # autosave path and Steam treats it as read-only.
+        by_type = {t: _placeholder(text) for t, text in by_type.items()}
 
         installed = 0
         autosave_url = None
@@ -1632,27 +1712,36 @@ class Plugin:
                     shortcut_name, user_path)
                 continue
             os.makedirs(dest_dir, exist_ok=True)
-            dest = os.path.join(dest_dir, "controller_neptune.vdf")
-            try:
-                final = vdf_text.replace("__PLACEHOLDER__", f"autosave://{dest}")
-                installed += 1
-                autosave_url = f"autosave://{dest}"
-                # Only write when it would change something. This runs for
-                # every tile on every sync across every Steam user directory,
-                # so on this Deck that was 137 tiles x 4 directories = 548
-                # rewrites of files that already said exactly this.
+            for ctype, text in by_type.items():
+                dest = os.path.join(dest_dir, f"controller_{ctype}.vdf")
                 try:
-                    with open(dest, "r", encoding="utf-8", errors="replace") as f:
-                        unchanged = f.read() == final
-                except OSError:
-                    unchanged = False
-                if not unchanged:
-                    with open(dest, "w", encoding="utf-8") as f:
-                        f.write(final)
-                    decky.logger.info("controller layout: wrote %s", dest)
-                _register_configset(user_path, shortcut_name)
-            except OSError as exc:
-                decky.logger.warning("controller layout copy failed: %s", exc)
+                    final = text.replace("__PLACEHOLDER__", f"autosave://{dest}")
+                    installed += 1
+                    # The Deck's own pad is the one the caller cares about --
+                    # it is what SetSelectedConfigForApp gets pointed at -- so
+                    # only that one is reported back. The rest are laid down
+                    # for whatever gets plugged in later, and nothing selects
+                    # them up front.
+                    if ctype == native:
+                        autosave_url = f"autosave://{dest}"
+                    # Only write when it would change something. This runs for
+                    # every tile on every sync across every Steam user
+                    # directory, so on this Deck that was 137 tiles x 4
+                    # directories = 548 rewrites of files that already said
+                    # exactly this -- and it is now one per controller type on
+                    # top of that, which is precisely why the read stays.
+                    try:
+                        with open(dest, "r", encoding="utf-8", errors="replace") as f:
+                            unchanged = f.read() == final
+                    except OSError:
+                        unchanged = False
+                    if not unchanged:
+                        with open(dest, "w", encoding="utf-8") as f:
+                            f.write(final)
+                        decky.logger.info("controller layout: wrote %s", dest)
+                    _register_configset(user_path, shortcut_name, ctype)
+                except OSError as exc:
+                    decky.logger.warning("controller layout copy failed: %s", exc)
         return {"ok": installed > 0, "installed": installed,
                 "autosave_url": autosave_url if installed else None}
 
