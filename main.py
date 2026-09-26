@@ -297,6 +297,31 @@ def _open(url: str, headers: Optional[Dict[str, str]] = None, method: str = "GET
     return _PooledResponse(raw)
 
 
+def _layout_key(shortcut_name: str) -> str:
+    """The name Steam uses for a shortcut's controller config, LOWERCASED.
+
+    Steam normalises a non-Steam shortcut's name to lower case for both the
+    per-game config directory and the configset entry. Asked directly --
+    GetConfigForAppAndController -- it reports its selection as
+
+        .../config/assetto corsa rally (boosteroid)/FVAA2340A811.vdf
+
+    while this plugin had been writing
+
+        .../config/Assetto Corsa Rally (Boosteroid)/controller_neptune.vdf
+
+    On a case-sensitive filesystem those are two different directories, so
+    Steam never saw a single layout this plugin installed. Measured on this
+    Deck: 899 directories in our casing, ignored; the 86 that work are all
+    lower case, including the hand-made "boosteroid cloud gaming" -- same
+    filename, same contents, different case, and that one applied.
+
+    It looked like a per-provider fault because whichever service was tried
+    was equally invisible.
+    """
+    return shortcut_name.lower()
+
+
 def _register_configset(config_dir: str, app_key: str,
                         controller_type: str = "neptune") -> None:
     """Register a per-game config in the configset file so Steam finds it.
@@ -2026,6 +2051,58 @@ class Plugin:
         _LAYOUT_CACHE[name] = (time.time(), text, new_etag)
         return text
 
+    async def layout_selection_base(self) -> Dict:
+        """Where the installed layouts live, so tiles can be SELECTED cheaply.
+
+        Installing a layout and selecting it are two different costs, and they
+        were tied together. Installing is a backend call that writes files, so
+        it is rightly done only for a tile being touched. Selecting is a pure
+        Steam-client call -- no RPC, no disk -- and it has to happen for EVERY
+        tile, every session, because Steam does not select our config on its
+        own: a registered, on-disk, correctly named layout simply sits there
+        unselected.
+
+        That is why it "worked before and then stopped". The selection ran only
+        when a tile was CREATED, so a settled library never ran it again, and
+        every Shelfcloud tile quietly fell back to Steam's default layout.
+
+        One call per sync returns the base directory and the pad's own type;
+        the caller composes a path per tile. The alternative -- asking the
+        backend per tile -- is the 891-calls-a-sync problem that gating was
+        introduced to solve in the first place.
+        """
+        # Resolved, like install_controller_layout does: the layouts are
+        # written under the REAL path, and a url built through the
+        # ~/.steam/steam symlink is a different string for the same file --
+        # which is exactly the mismatch the layout docs warn about.
+        steam_root = os.path.realpath(os.path.expanduser("~/.steam/steam"))
+        configs_root = os.path.join(
+            steam_root, "steamapps", "common", "Steam Controller Configs")
+        if not os.path.isdir(configs_root):
+            return {"ok": False, "error": "no controller configs directory"}
+
+        # The user directory holding the most of our layouts.
+        #
+        # Steam keeps one per account that has signed in on this device, and
+        # this Deck has four. Only the signed-in one matters, and picking by
+        # population finds it without asking Steam who is logged in -- an empty
+        # or stale directory cannot win.
+        best, best_count = None, -1
+        for user_dir in os.listdir(configs_root):
+            path = os.path.join(configs_root, user_dir, "config")
+            if not os.path.isdir(path):
+                continue
+            try:
+                count = sum(1 for entry in os.listdir(path)
+                            if os.path.isdir(os.path.join(path, entry)))
+            except OSError:
+                continue
+            if count > best_count:
+                best, best_count = path, count
+        if not best:
+            return {"ok": False, "error": "no per-user config directory"}
+        return {"ok": True, "base": best, "native": "neptune"}
+
     async def install_controller_layout(self, shortcut_name: str,
                                         template_url: str) -> Dict:
         """Copy a Steam Input template into the per-game config directory.
@@ -2195,7 +2272,7 @@ class Plugin:
             user_path = os.path.join(configs_root, user_dir, "config")
             if not os.path.isdir(user_path):
                 continue
-            dest_dir = os.path.join(user_path, shortcut_name)
+            dest_dir = os.path.join(user_path, _layout_key(shortcut_name))
             # Belt and braces: resolve it and confirm it really is inside the
             # per-user config directory. The check above reads clearly and
             # catches the obvious shapes; this one catches whatever it did
@@ -2234,7 +2311,7 @@ class Plugin:
                         with open(dest, "w", encoding="utf-8") as f:
                             f.write(final)
                         decky.logger.info("controller layout: wrote %s", dest)
-                    _register_configset(user_path, shortcut_name, ctype)
+                    _register_configset(user_path, _layout_key(shortcut_name), ctype)
                     # Counted HERE, after the write and the registration that
                     # can both raise. It used to be counted on the way in, so
                     # a layout that failed to land still reported itself as

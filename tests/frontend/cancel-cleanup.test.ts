@@ -14,7 +14,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("../../src/lib/api", () => ({ logNote: vi.fn(async () => ({ ok: true })),
+vi.mock("../../src/lib/api", () => ({ layoutSelectionBase: vi.fn(async () => ({ ok: false })), logNote: vi.fn(async () => ({ ok: true })),
   fetchArtwork: vi.fn(async () => ({ ok: false })),
   saveIcon: vi.fn(async () => ({ ok: false })),
   strayShortcuts: vi.fn(async () => []),

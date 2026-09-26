@@ -5,7 +5,7 @@
 // This lives on the frontend because only here does SteamClient exist. The
 // backend decides *what* the library should contain; this makes it so.
 
-import { fetchArtwork, installControllerLayout, logNote, saveIcon, saveIconFromUrl, setSteamIds, strayShortcuts } from "./api";
+import { fetchArtwork, installControllerLayout, layoutSelectionBase, logNote, saveIcon, saveIconFromUrl, setSteamIds, strayShortcuts } from "./api";
 import { addToProviderCollections, pruneProviderCollections,
          removeRetiredCollections, type CollectionMember } from "./collection";
 import { renderPageCapsule } from "./pagecapsule";
@@ -323,6 +323,14 @@ interface SteamInput {
     appId: number, controllerIndex: number, templateUrl: string,
     unknownFlag: boolean, selection: number,
   ): void;
+  /** What Steam currently has selected, and how it was chosen.
+   *
+   *  `eSelectionType` 1 is a USER selection — the one thing this must not
+   *  overwrite. `URL` is the config's own address, which is how our layout is
+   *  told apart from a hand-picked one. */
+  GetConfigForAppAndController?(
+    appId: number, controllerIndex: number,
+  ): Promise<{ URL?: string; eSelectionType?: number; Title?: string }>;
 }
 
 interface SteamWindow {
@@ -372,9 +380,53 @@ function applyControllerConfig(
     const inStore = () => !!steam().appStore?.GetAppOverviewByAppID?.(appId);
 
     const apply = () => {
-      try { set.call(input, appId, idx, templateUrl, false, 1); }
-      catch { /* swallow */ }
-      resolve();
+      // Never overwrite a layout the USER chose.
+      //
+      // The selection now runs for every tile on every sync, not only when a
+      // tile is created -- which is what makes it work at all, and which would
+      // also quietly undo someone's own choice within three minutes of them
+      // making it.
+      //
+      // Steam reports how the current config was selected. eSelectionType 1 is
+      // a user selection, and one of those is left alone unless it is already
+      // OURS: refreshing our own layout is not overwriting a choice, while
+      // replacing a hand-picked "Gamepad With Joystick Trackpad" is.
+      //
+      // Best effort. If the getter is missing or throws we set it as before --
+      // an unselected layout is the bug being fixed, and a plugin that gives
+      // up because it could not read one field fixes nothing.
+      const ours = templateUrl.toLowerCase();
+      void (async () => {
+        try {
+          const get = input?.GetConfigForAppAndController;
+          if (typeof get === "function") {
+            const current = await get.call(input, appId, idx);
+            const url = String(current?.URL ?? "");
+            if (current?.eSelectionType === 1 && url && url.toLowerCase() !== ours) {
+              resolve();
+              return;
+            }
+          }
+        } catch { /* fall through and set it */ }
+        // 0, not 1. This one argument was the whole bug.
+        //
+        // An old probe note said the 5th argument "must be 1
+        // (CONFIG_SELECTION_USER)". Measured against Steam's own read-back,
+        // GetConfigForAppAndController, it is the opposite:
+        //
+        //   sel 0 -> Title "GeForce NOW", URL .../controller_neptune.vdf
+        //   sel 2 -> the same
+        //   sel 1 -> Title "Gamepad With Joystick Trackpad",
+        //            URL .../FVAA2340A811.vdf  (a file that does not exist)
+        //
+        // Passing 1 makes Steam record a USER selection naming an autosave it
+        // has never written, so it falls back to a default template -- and it
+        // does that for every provider equally, which is why this read as
+        // "the layouts do not work" rather than as one bad call.
+        try { set.call(input, appId, idx, templateUrl, false, 0); }
+        catch { /* swallow */ }
+        resolve();
+      })();
     };
 
     // A tile that ALREADY existed is either in appStore now or is never going
@@ -932,6 +984,17 @@ export async function syncLibrary(
     ...desired.filter((g) => !WEBSITE_PROVIDERS.has(g.provider)),
   ];
 
+  // Where the installed layouts live, asked once for the whole run.
+  //
+  // Needed to SELECT a layout for a tile the sync is not otherwise touching.
+  // Best effort: without it those tiles keep the behaviour they had, which is
+  // the bug this fixes, not a new one.
+  const selectionBase = await withTimeout(
+    layoutSelectionBase(), undefined, RPC_TIMEOUT)
+    .then((r) => (r?.ok && r.base && r.native
+      ? { base: r.base, native: r.native } : undefined))
+    .catch(() => undefined);
+
   await phase(`tiles (${ordered.length} desired)`);
   for (const game of ordered) {
     const mandatory = WEBSITE_PROVIDERS.has(game.provider);
@@ -1014,6 +1077,34 @@ export async function syncLibrary(
               installControllerLayout(title, game.controller_layout), undefined, RPC_TIMEOUT);
             const liveUrl = layoutResult?.autosave_url ?? game.controller_layout;
             await applyControllerConfig(existing.app_id, liveUrl, false);
+          } catch { /* best effort */ }
+        } else if (game.controller_layout && selectionBase) {
+          // SELECTING is not INSTALLING, and tying them together is what broke
+          // this. Installing writes files and rightly happens only for a tile
+          // being touched. Selecting is a pure Steam-client call -- no RPC, no
+          // disk -- and has to happen for every tile, because Steam does not
+          // pick our config up on its own: a registered, correctly named,
+          // on-disk layout just sits there unselected.
+          //
+          // So it only ever ran when a tile was CREATED. A settled library
+          // never ran it again, and every tile silently fell back to Steam's
+          // default -- measured here, 844 of them. It looked per-provider
+          // because whichever service you tried was equally unselected.
+          //
+          // The path is composed from one base fetched once per sync, rather
+          // than asking the backend per tile: that is the 891-calls-a-sync
+          // traffic the gating above exists to avoid.
+          try {
+            // Lowercased, because that is the name STEAM uses. See
+            // _layout_key in main.py: it reports its own selection under
+            // ".../config/assetto corsa rally (boosteroid)/…" while this
+            // plugin wrote ".../Assetto Corsa Rally (Boosteroid)/…", and on a
+            // case-sensitive filesystem those are different directories.
+            await applyControllerConfig(
+              existing.app_id,
+              `autosave://${selectionBase.base}/${title.toLowerCase()}`
+                + `/controller_${selectionBase.native}.vdf`,
+              false);
           } catch { /* best effort */ }
         }
 

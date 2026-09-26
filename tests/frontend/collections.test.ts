@@ -18,7 +18,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { syncLibrary } from "../../src/lib/sync";
 import type { DesiredGame } from "../../src/lib/types";
 
-vi.mock("../../src/lib/api", () => ({ logNote: vi.fn(async () => ({ ok: true })), fetchArtwork: vi.fn(async () => ({ ok: false })) }));
+vi.mock("../../src/lib/api", () => ({ layoutSelectionBase: vi.fn(async () => ({ ok: false })), logNote: vi.fn(async () => ({ ok: true })), fetchArtwork: vi.fn(async () => ({ ok: false })) }));
 vi.mock("../../src/lib/collection", () => ({
   addToProviderCollections: vi.fn(async () => []),
   pruneProviderCollections: vi.fn(async () => []),

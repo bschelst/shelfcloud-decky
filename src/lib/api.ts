@@ -121,6 +121,20 @@ export const getShelves =
 export const setShelf =
   guarded<[shelf_id: number | null], { ok: boolean; shelf_id?: number | null; error?: string }>("set_shelf");
 
+/** Where the installed layouts live, for SELECTING them.
+ *
+ *  Installing a layout and selecting it are different costs. Installing writes
+ *  files, so it only runs for a tile being touched; selecting is a pure
+ *  Steam-client call and has to run for EVERY tile, because Steam never picks
+ *  our config up on its own. Tying the two together meant the selection only
+ *  ever ran when a tile was created, so a settled library quietly fell back to
+ *  Steam's default layout on all 844 of them.
+ *
+ *  One call per sync; the caller composes a path per tile from the base. */
+export const layoutSelectionBase =
+  guarded<[], { ok: boolean; base?: string; native?: string; error?: string }>(
+    "layout_selection_base");
+
 export const installControllerLayout =
   guarded<[shortcut_name: string, template_url: string],
            { ok: boolean; installed?: number; autosave_url?: string; error?: string }>("install_controller_layout");
