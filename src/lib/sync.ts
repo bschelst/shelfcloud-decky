@@ -655,8 +655,15 @@ export interface SyncCallbacks {
  *         source for art the gateway serves off its own disk. Any tile that
  *         was recorded under revision 6 with a slot silently skipped is marked
  *         done and would never be looked at again.
+ * 7 -> 8: the drawn logo was floating. It was painted into a 640x360 canvas,
+ *         the size a publisher uses when the artwork FILLS it, while ours only
+ *         reached 71% of the height -- and Steam pins the logo to the bottom
+ *         of the hero, so the empty part became a gap and the words sat high.
+ *         The canvas is now cut to the content. Every tile already carries the
+ *         floating version and nothing else about it changed, so without this
+ *         they would keep it for as long as they exist.
  */
-const ART_REVISION = "7";
+const ART_REVISION = "8";
 
 /**
  * Bump when what this plugin DRAWS for a website tile changes.
