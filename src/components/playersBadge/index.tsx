@@ -22,6 +22,7 @@ import { type ReactElement } from "react";
 import { FaUsers } from "react-icons/fa";
 
 import HeroBadge from "../heroBadge";
+import { providerInfo } from "../../lib/theme";
 import { useBadgeSettings, usePlayersForApp, useProviderForApp } from "../../lib/badgeData";
 import { useParams } from "../../lib/useParams";
 
@@ -54,9 +55,14 @@ export default function PlayersBadge(): ReactElement {
   // Steam at all (about one in six here), and "0 playing" would be a claim
   // about a game Steam has never heard of rather than a measurement.
   const known = players !== undefined;
+  // The SERVICE's colour, the same one the provider badge wears, rather than
+  // a colour of its own. The two sit on the same hero and belong to the same
+  // tile; giving this one its own green made it read as a separate thing
+  // bolted on beside them.
+  const { color: accent } = providerInfo(provider);
 
   return (
-    <HeroBadge position={playersPosition} accent={known ? "#6cc04a" : "#7a8290"}>
+    <HeroBadge position={playersPosition} accent={accent}>
       <FaUsers size={13} />
       <span style={{ color: "#e8ecf2" }}>
         {known ? `${pretty(players)} playing` : "\u2013"}
