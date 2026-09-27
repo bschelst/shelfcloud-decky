@@ -249,6 +249,54 @@ def add_startup_script(ws: "_WebSocket", source: str, timeout: float = 15.0) -> 
             break
 
 
+def reload_dismissing_dialogs(ws: "_WebSocket") -> "threading.Thread":
+    """Reload, and quietly say yes to the page's "leave site?" prompt.
+
+    A plain Page.reload does not pop the browser's own manual-reload box, but a
+    streaming page guards itself with a beforeunload handler, and that still
+    throws up a JS dialog on reload. With Page enabled the browser does not draw
+    that dialog, it asks us through Page.javascriptDialogOpening and waits. So we
+    start reading first, accept anything that opens, then reload. We also null the
+    simple onbeforeunload up front so most pages never even reach the dialog.
+
+    Returns the pump thread. It keeps reading for the whole session, which also
+    drains the event stream the enabled Page domain produces, same job as
+    drain_in_background. Daemon, so it never outlives the game.
+    """
+    try:
+        ws.send_text(json.dumps({
+            "id": 8,
+            "method": "Runtime.evaluate",
+            "params": {"expression": "try{window.onbeforeunload=null}catch(e){}"},
+        }))
+    except Exception:
+        pass          # the dialog accept below is the real guarantee
+
+    def pump() -> None:
+        while True:
+            try:
+                message = json.loads(ws.recv_text())
+            except Exception:
+                return            # socket closed at end of session, thats fine
+            if message.get("method") == "Page.javascriptDialogOpening":
+                try:
+                    ws.send_text(json.dumps({
+                        "id": 9009,
+                        "method": "Page.handleJavaScriptDialog",
+                        "params": {"accept": True},
+                    }))
+                except Exception:
+                    return
+
+    thread = threading.Thread(target=pump, name="cdp-reload-drain", daemon=True)
+    thread.start()
+    # Fire and forget: the pump reads the ack. Waiting here would race the pump
+    # for the same socket.
+    ws.send_text(json.dumps({"id": 2, "method": "Page.reload",
+                             "params": {"ignoreCache": False}}))
+    return thread
+
+
 def drain_in_background(ws: "_WebSocket") -> "threading.Thread":
     """Read and throw away everything so an enabled domain cannot get stuck.
 
