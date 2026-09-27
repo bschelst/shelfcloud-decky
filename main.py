@@ -1342,7 +1342,7 @@ class Plugin:
             })
         return entries
 
-    async def get_website_launch(self) -> Optional[Dict[str, str]]:
+    async def get_website_launch(self) -> Dict[str, Any]:
         """Launch command for a Steam tile that opens the Shelfcloud website.
 
         Steam's own in-client browser forwards no controller input to web pages
@@ -1356,7 +1356,10 @@ class Plugin:
         """
         browser = await asyncio.to_thread(browsers.resolve_browser, self._settings.get("browser"))
         if browser is None:
-            return None
+            # A dict, not None: the frontend reads .ok off every reply, and a
+            # bare None reads as "the call itself broke" rather than "no browser
+            # is set yet". Same envelope as every other call here.
+            return {"ok": False, "error": "no browser configured"}
 
         launcher = os.path.join(decky.DECKY_PLUGIN_DIR, "bin", "shelfcloud-launch.py")
         profile = browsers.profile_dir(browser["app_id"])
@@ -1365,6 +1368,7 @@ class Plugin:
             launcher, browser["app_id"], profile, self._gateway(), "--no-autoplay",
         ])
         return {
+            "ok": True,
             "exe": "/usr/bin/python3",
             "options": options,
             "name": "Shelfcloud (website)",
