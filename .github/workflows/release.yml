@@ -48,7 +48,10 @@ jobs:
           python-version: "3.11"
 
       - name: Install backend test dependencies
-        run: python3 -m pip install --disable-pip-version-check pytest
+        # urllib3 too: the connection pool needs it and one test checks the pool
+        # really reuses a connection. Without it the runner has no pool and the
+        # test sees 40 handshakes instead of 1, so the release fails on it.
+        run: python3 -m pip install --disable-pip-version-check pytest urllib3
 
       - name: Test backend
         # Bounded so a hanging test fails in minutes with its output, instead
