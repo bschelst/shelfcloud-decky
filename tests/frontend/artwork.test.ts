@@ -454,6 +454,22 @@ describe("when artwork counts as finished", () => {
 
     expect(appliedOrder).toContain(CAPSULE);
   });
+
+  it("stops retrying a logo that never downloads instead of every sync", async () => {
+    // A real logo url that always fails. First sync keeps the fingerprint empty
+    // so the next one retries; the second accepts the drawn fallback, so a dead
+    // logo does not re-apply all its art on every sync forever.
+    const game: DesiredGame = { ...GAME, game_id: 88 };
+    failSlot(game.artwork!.logo!);
+    const cb = recording();
+
+    await syncLibrary([game], {}, cb);
+    expect(cb.record.mock.calls[0][4]).toBe("");        // empty = retry next sync
+
+    const tracked = { "88": { app_id: 999, name: "x", launch: game.options, art: "" } };
+    await syncLibrary([game], tracked, cb);
+    expect(cb.record.mock.calls[1][4]).not.toBe("");    // now it settles
+  });
 });
 
 describe("a slot the gateway no longer offers", () => {

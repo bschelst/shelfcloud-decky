@@ -73,6 +73,14 @@ const START_DIR = "/usr/bin/";
 // and were "updated" on every sync. Per session, so a reload gives one more try.
 const artUnavailable = new Set<number>();
 
+// Games we drew a fallback logo for, after the real one would not download.
+// This bounds the logo self-heal: the first miss keeps the old fingerprint so
+// the next sync tries the real logo one more time, but a url that simply never
+// resolves (there are a couple hundred dead steam cdn logos) is then accepted
+// instead of re-applying all its artwork on every sync forever -- that showed
+// up as "8 artworks updated", agian and again.
+const logoRetried = new Set<number>();
+
 // Tiles whose controller layout is already selected this session. Selecting is
 // two Steam round trips, and doing it for every tile on every sync turned a run
 // that changes nothing into a full minute of work (measured 61s for 844 tiles).
@@ -448,6 +456,17 @@ async function applyArtwork(
   return { applied, visible, logoSettled };
 }
 
+/** May the logo be recorded as done? Yes when it settled, or when we already
+ *  spent this game's one retry on it. Marks the retry spent as a side effect,
+ *  so a logo that keeps failing settles for the fallback after a single retry
+ *  rather than looping. */
+function logoRecorded(outcome: ArtworkOutcome, game: DesiredGame): boolean {
+  if (outcome.logoSettled) return true;
+  if (logoRetried.has(game.game_id)) return true;
+  logoRetried.add(game.game_id);
+  return false;
+}
+
 // Make the tracked map agree with the shortcuts Steam has. Two repairs the main
 // loop can't do: a tile that exists but is not tracked gets ADOPTED instead of
 // duplicated (art fingerprint left empty so the next pass dresses it), and a game
@@ -724,8 +743,8 @@ export async function syncLibrary(
         const appliedNew = await applyArtwork(appId, game, turn);
         if (appliedNew.applied === 0) artUnavailable.add(game.game_id);
         // Same guard as the update path: an unsettled logo leaves the fingerprint
-        // empty so the next sync retries instead of freezing the fallback in.
-        const recordedNew = appliedNew.visible && appliedNew.logoSettled ? art : "";
+        // empty so the next sync retries -- but bounded, see logoRecorded.
+        const recordedNew = appliedNew.visible && logoRecorded(appliedNew, game) ? art : "";
         await withTimeout(
           callbacks.record(trackingKey(game), appId, title, game.options,
                            recordedNew, game.provider,
@@ -807,7 +826,7 @@ export async function syncLibrary(
           // settled, so a later session tries again rather than marking a blank
           // tile (or one wearing a drawn fallback over a real logo it could not
           // fetch) as finished.
-          const recordedArt = tryArt && (!appliedArt.visible || !appliedArt.logoSettled)
+          const recordedArt = tryArt && (!appliedArt.visible || !logoRecorded(appliedArt, game))
             ? (existing.art ?? "") : art;
           await withTimeout(
             callbacks.record(trackingKey(game), existing.app_id, title, game.options,
