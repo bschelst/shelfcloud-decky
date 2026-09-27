@@ -1,24 +1,16 @@
 // Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 //
-// The provider mark on the HIGHLIGHTED card, on the home page and the grid.
+// The provider mark on the FOCUSED card, on the home page and the grid.
 //
-// The game page gets its badge by patching React (see patchLibraryApp). This
-// cannot: the home carousel is a virtualised grid whose cards are recycled as
-// you scroll, and there is no stable component to hang a child off. The
-// ProtonDB plugin meets the same wall with its library dots and answers it the
-// same way — reach into the document and put an element there — so this
-// follows that, including the two things about it that are not obvious:
+// The game page gets its badge by patching React; this cannot. The home
+// carousel is a virtual grid with reused cards and no stable component to hang
+// a child off. The ProtonDB library dots hit the same wall and answer it the
+// same way, put an element in the document, with two non-obvious bits:
+//   - the library lives in the BIG PICTURE window, a different document, so it
+//     comes from SteamUIStore, not the global `document`.
+//   - the app id is in the card image URL, /customimages/<appid>p.png.
 //
-//   - The library is drawn in the BIG PICTURE window, a different document
-//     from the one this plugin's code runs in. Reaching for the global
-//     `document` finds an empty page and nothing ever appears. It has to come
-//     from SteamUIStore.
-//
-//   - The app id is not in a data attribute. It is in the card's image URL,
-//     /customimages/<appid>p.png — which is also how ProtonDB finds it.
-//
-// Only the focused card is marked, which is what was asked for and is also
-// the honest thing: one mark you can read beats forty you cannot.
+// Only the focused card is marked: one mark you can read beats forty you cannot.
 
 import { providerInfo } from "./theme";
 
@@ -31,20 +23,13 @@ const BADGE_CLASS = "shelfcloud-focus-badge";
 /** appid out of /assets/<id>... or /customimages/<id>... */
 const APP_ID_IN_SRC = /\/(?:assets|customimages)\/(\d+)/;
 
-/** Page art, as opposed to card art.
- *
- *  A card shows a capsule — <id>p.png or <id>.jpg. A PAGE shows <id>_hero.jpg
- *  and <id>_logo.png. Both carry an app id, and telling them apart is what
- *  stops this badging the wrong thing: focus the Play button on a game page
- *  and the search upwards would otherwise find the hero behind it and pin a
- *  card badge to the page, beside the React one already there. */
+/** Page art, not card art. A card shows <id>p.png or <id>.jpg, a PAGE shows
+ *  <id>_hero.jpg and <id>_logo.png. Telling them apart stops us badging the
+ *  hero behind a game page's Play button. */
 const PAGE_ART = /_(?:hero|logo)\./;
 
-/** How far to look upwards for the card holding this art.
- *
- *  The focused element is usually the card itself, but not always — a result
- *  in the search overlay can be an inner control. Two levels covers that;
- *  more would start finding the grid. */
+/** How far to look up for the card holding this art. Two levels covers a
+ *  search-overlay result being an inner control; more would find the grid. */
 const ANCESTORS_TO_TRY = 2;
 
 declare const SteamUIStore: {
@@ -73,15 +58,8 @@ function appIdWithin(element: Element): string | null {
   return null;
 }
 
-/**
- * The card the focus is on, and which game it is — or null for neither.
- *
- * The focused element is usually the card itself. In the search overlay it
- * can be an inner control with the art a level or two above, so this looks
- * upward as well — but only a little, and only at card art. Without the
- * PAGE_ART rule, focusing Play on a game page would walk up, find the hero
- * behind it and pin a second badge to the page beside the real one.
- */
+/** The card the focus is on and which game it is, or null. Looks up a little too,
+ *  since a search result can be an inner control. Card art only, not page heroes. */
 function focusedCard(doc: Document): { card: Element; appId: string } | null {
   let element: Element | null = doc.querySelector(`.${FOCUS_CLASS}`);
   for (let step = 0; element && step <= ANCESTORS_TO_TRY; step++) {
@@ -92,13 +70,8 @@ function focusedCard(doc: Document): { card: Element; appId: string } | null {
   return null;
 }
 
-/** The provider mark, as plain DOM.
- *
- *  Built by hand rather than rendered with React: this lands in another
- *  window's document, and mounting a React root per focus change — which on a
- *  carousel is every few hundred milliseconds — would cost far more than the
- *  handful of nodes it draws. Same reasoning as the ProtonDB dot.
- */
+/** The provider mark, as plain DOM. Built by hand, not React: a React root in
+ *  another window per focus change would cost far more. Same as the ProtonDB dot. */
 function buildBadge(doc: Document, provider: string): HTMLElement {
   const { label, color } = providerInfo(provider);
 
@@ -157,8 +130,7 @@ function update(doc: Document, providers: Record<string, string>,
 
   const { appId } = found;
   const provider = providers[appId];
-  // Not one of ours, which is most cards. Nothing is drawn, and that absence
-  // is what makes the badge mean "this one streams".
+  // not one of ours, which is most cards. drawing nothing is the whole point.
   if (!provider) return;
 
   const badge = buildBadge(doc, provider);
@@ -170,17 +142,16 @@ function update(doc: Document, providers: Record<string, string>,
     badge.style.left = "";
     badge.style.right = "8px";
   }
-  // Centred last, so it overrides whichever side the corner rules just set.
-  // 8px from the card's edge is the inset everywhere here -- a card is not a
-  // hero and has no furniture to clear, so the middle needs no special drop.
+  // Centred last, so it wins over whichever side the corner rules set. 8px is
+  // the inset everywhere here -- a card has no furniture, so no special drop.
   if (position === "tm" || position === "bm") {
     badge.style.right = "";
     badge.style.left = "50%";
     badge.style.transform = "translateX(-50%)";
   }
 
-  // The card has to be a containing block, or an absolutely positioned child
-  // escapes to the nearest one — which on this page is the whole grid.
+  // the card must be a containing block, else the absolute child slips out to
+  // the whole grid.
   const host = card as HTMLElement;
   const view = doc.defaultView;
   if (view && view.getComputedStyle(host).position === "static") {
@@ -190,13 +161,8 @@ function update(doc: Document, providers: Record<string, string>,
   lastCard = card;
 }
 
-/**
- * Follow the focused card and keep the badge on it.
- *
- * Driven by a mutation observer on the class attribute rather than a timer:
- * `gpfocus` moves the moment the stick does, and a poll slow enough not to
- * waste power would visibly lag behind the highlight.
- */
+/** Follow the focused card and keep the badge on it. Driven by a class-attribute
+ *  observer, not a timer: gpfocus moves the moment the stick does. */
 export function startFocusBadge(
   getData: () => { providers: Record<string, string>; enabled: boolean; position: string },
 ): void {

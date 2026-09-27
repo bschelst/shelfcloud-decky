@@ -1,30 +1,16 @@
 // Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 //
-// The panel's header: one number, one bar, provider chips.
-//
-// Deliberately not a chart. A chart earns its place when there is a trend or a
-// distribution to read; "184 games" is a single number, and a pie of 184-vs-124
-// says less than the numbers themselves. On a ~300px panel held at arm's length
-// the legible thing is a big figure and a bar.
-//
-// The same bar doubles as the live sync progress, so the most prominent element
-// always answers "where am I?" — idle or working.
+// The panel header: one number, one bar, provider chips. Not a chart -- on a
+// ~300px panel a big figure and a bar read better than a pie of two numbers.
+// The bar doubles as the live sync progress.
 
 import { theme } from "../lib/theme";
 import { providerLabel } from "../lib/types";
 
-// The header uses Shelfcloud's accent throughout, idle and working alike.
-//
-// It used to be green when idle and blue only while syncing, which read as a
-// status light — green for "healthy" — when it was never reporting health at
-// all: the number is a count and the bar is coverage. A colour implying a
-// state that does not exist is worse than no colour, and it made the header
-// the one element on the panel not speaking the plugin's own blue.
-//
-// Idle and working stay distinguishable without it: the bar keeps a deeper
-// blue for coverage and a lighter one for live progress, and the row beneath
-// swaps the provider chips for the progress line, which says outright which
-// of the two the bar is showing.
+// The header uses the accent blue whether idle or working. Green when idle used
+// to read as a status light for "healthy", which it never reported. Idle and
+// working still differ: a deeper blue bar for coverage, a lighter one for live
+// progress, and the row below names which of the two it is.
 const DIM = "rgba(255,255,255,0.55)";
 const BAR_IDLE = `linear-gradient(90deg, ${theme.accent}, ${theme.accentText})`;
 const BAR_WORKING = `linear-gradient(90deg, ${theme.accentText}, #bfe0ff)`;
@@ -48,17 +34,14 @@ export function LibrarySummary({
 }: LibrarySummaryProps) {
   const working = typeof progress === "number";
 
-  // On a shelf the two numbers stop being comparable, so they stop being
-  // compared. `synced` is what this device holds — its shelf plus the shared
-  // games — while `available` counts every owned game that could be added
-  // ANYWHERE on the account. Shown together as "6 of 360" they read as "the
-  // shelf is ignoring 354 games", and a coverage bar drawn from 6/360 makes a
-  // full shelf look 2% full.
+  // On a shelf the two numbers are not comparable. `synced` is what this device
+  // holds (its shelf plus shared), `available` is every game that could be added
+  // anywhere on the account. "6 of 360" would look like a near-empty shelf, so
+  // on a shelf we stop comparing them.
   const onShelf = Boolean(shelfName);
 
-  // The shelf's own count comes from the gateway; the shared half is whatever
-  // is left of what this device holds. Clamped both ways because the two are
-  // read at different moments — mid-sync `synced` can trail the shelf count,
+  // Shelf count comes from the gateway, the shared half is what is left of what
+  // this device holds. Clamped both ways: the two are read at different moments,
   // and a negative "shared" would be worse than a stale one.
   const onShelfCount = Math.max(0, Math.min(synced, shelfGames ?? 0));
   const sharedCount = Math.max(0, synced - onShelfCount);
@@ -82,10 +65,8 @@ export function LibrarySummary({
         </div>
         <div style={{ fontSize: "0.8em", color: DIM, paddingBottom: 2 }}>
           {onShelf
-            // Both halves, so the total adds up in front of the reader. A
-            // device on a shelf holds that shelf's games AND the shared ones,
-            // so 3 on Bart with 3 shared is 6 — and "6 on Bart" states
-            // something false about a shelf the user knows holds three.
+            // Both halves, so the total adds up: 3 on Bart + 3 shared is 6.
+            // "6 on Bart" would be false about a shelf the user knows holds 3.
             ? `${onShelfCount} on ${shelfName} + ${sharedCount} shared`
             : available > synced ? `of ${available} games` : "games in your library"}
         </div>
@@ -111,8 +92,8 @@ export function LibrarySummary({
         <div style={{
           fontSize: "0.78em",
           color: DIM,
-          // Fixed height: progress text changes length constantly and a box
-          // that resizes makes the whole panel jump.
+          // fixed height: progress text keeps changing length and a resizing
+          // box makes the whole panel jump
           height: "1.2em",
           overflow: "hidden",
           whiteSpace: "nowrap",

@@ -1,17 +1,9 @@
 // Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 //
-// Putting a small thing over a game's hero, and keeping it there.
-//
-// Shared because there are two of these now -- which service streams a game,
-// and how many people are playing it -- and the hard part is not either
-// badge. It is the placement: finding the capsule in a tree that is still
-// being built, surviving Steam's fullscreen transition, and measuring against
-// the right box.
-//
-// None of that was reasoned out. It was arrived at against a moving Steam UI,
-// through a badge that floated too high, then hopped on load, then hopped
-// twice -- and the comments below record which wrong thing was measured each
-// time. Copying it for a second badge would have meant re-earning those.
+// A small badge over a game's hero, kept in place. Shared by the two badges
+// (which service streams it, how many people play it). The hard part is the
+// placement: find the capsule while the tree is still being built, survive
+// Steam's fullscreen transition, and measure against the right box.
 
 import { appDetailsClasses, appDetailsHeaderClasses } from "@decky/ui";
 import { useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
@@ -40,19 +32,12 @@ export default function HeroBadge(
   { position: string; accent: string; children: ReactNode },
 ): ReactElement {
   // Visible by default: opening a page is not a mutation, so nothing would
-  // ever set this true if it started false.
+  // ever turn it on if it started off.
   const [show, setShow] = useState(true);
   const [heroHeight, setHeroHeight] = useState<number | null>(null);
-  // Whether the number above came from the real hero art yet.
-  //
-  // The badge used to draw immediately at the fallback position and then
-  // JUMP down once the artwork loaded and the measurement corrected — on
-  // every game, every time the page opened. It is kept invisible until the
-  // measurement is real, so it appears once, in the right place.
-  //
-  // Invisible rather than absent: it has to be IN the document to be
-  // measured at all — offsetParent is null for an element that is not
-  // rendered, and that is the very thing being measured against.
+  // True once we have a real measurement. Kept invisible until then so it does
+  // not draw at the fallback spot and jump. Invisible, not gone: it has to be
+  // in the document to be measured (offsetParent is null otherwise).
   const [placed, setPlaced] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
 
@@ -65,15 +50,13 @@ export default function HeroBadge(
     const attach = () => {
       const hero = findHeroCapsule(ref.current);
       if (!hero) {
-        // The tree is not finished yet. Retrying beats giving up: this
-        // component mounts as part of the render it is measuring.
+        // tree not built yet, so try again in a moment
         retry = setTimeout(attach, 100);
         return;
       }
 
-      // Steam animates in and out of the fullscreen hero, and an absolutely
-      // positioned child sits over the animation looking wrong for its
-      // duration. Hide for the transition, come back when it settles.
+      // Steam animates in and out of the fullscreen hero, and an absolute
+      // child looks wrong over that. Hide for the transition, come back after.
       mutations = new MutationObserver((entries) => {
         for (const entry of entries) {
           if (entry.type !== "attributes" || entry.attributeName !== "class") continue;
@@ -90,27 +73,14 @@ export default function HeroBadge(
       });
       mutations.observe(hero, { attributes: true, attributeFilter: ["class"] });
 
-      // How far the hero's BOTTOM is from the top of whatever `top` is
-      // measured against — not the hero's height.
+      // Distance from the hero capsule's BOTTOM to the top of whatever `top`
+      // is measured against, not its height. The two match only when the offset
+      // parent starts where the hero does, which twice it did not, so the badge
+      // floated high above. So we measure both boxes and subtract.
       //
-      // Those are the same number only when the badge's offset parent starts
-      // exactly where the hero does, and twice now they have not: the badge
-      // floated far above the edge with no obvious reason, because a height
-      // was being used as a position. Both boxes are measured and subtracted,
-      // which is true wherever either one happens to start.
-      //
-      // The hero IMAGE rather than the capsule around it, too — measured on
-      // hardware, the capsule reported 342px where the image inside it was
-      // 360, so the capsule's edge is not the edge anyone sees.
-      // The CAPSULE, which is what the ProtonDB medal measures.
-      //
-      // Its height is settled at first paint. The hero IMAGE is not: the
-      // <img> is in the tree long before it has loaded, and an unloaded one
-      // has no height — so measuring that drew the badge against nothing and
-      // hopped it down when the picture arrived. Three attempts at hiding
-      // the hop were three attempts at papering over a problem introduced by
-      // measuring the wrong thing. The capsule never moves, so there is
-      // nothing to hide.
+      // The capsule, not the hero image: the image has no height until it
+      // loads, so measuring it drew against nothing and hopped on load. The
+      // capsule is settled at first paint and never moves.
       const measure = () => {
         const anchor = ref.current?.offsetParent ?? ref.current?.parentElement;
         if (!anchor) return;
@@ -144,16 +114,14 @@ export default function HeroBadge(
         zIndex: 10,
         ...badgePosition(position, heroHeight),
         display: show ? "flex" : "none",
-        // See `placed`: invisible until it knows where it goes, so it does
-        // not appear in one spot and hop to another.
+        // see `placed`: invisible until it knows where it goes
         visibility: placed ? "visible" : "hidden",
         alignItems: "center",
         gap: 6,
         padding: "5px 10px",
         borderRadius: 999,
-        // Dark and translucent rather than a brand colour: it sits on artwork
-        // nobody chose, and a solid block of colour over a screenshot reads
-        // as damage. The colour is the icon.
+        // dark and see-through, not a brand colour: it sits on artwork nobody
+        // chose. the colour is the icon.
         background: "rgba(8, 10, 14, 0.78)",
         border: `1px solid ${accent}`,
         color: accent,

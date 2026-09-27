@@ -1,19 +1,12 @@
 // Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 //
-// Fitting a page's name into a box.
-//
-// Shared by the two tiles drawn on the device — the logo and the capsule —
-// because they want the same arithmetic at different proportions, and having
-// it twice is how the two would quietly drift apart.
-//
-// Kept pure, taking a measuring callback rather than a canvas, for one
-// reason: this is where the bugs are. Text that overflows is clipped by Steam
-// with no warning and no error, so the half-drawn name looks like a rendering
-// quirk rather than a fault. A pure function can be driven with hostile names
-// in a test suite that has no canvas in it at all.
+// Fitting a page's name into a box. Shared by the logo and the capsule so the
+// two do not drift apart. Kept pure, with a measuring callback and no canvas:
+// overflow is clipped by Steam with no warning, so this is where the bugs are,
+// and a pure function can be driven with nasty names in a test with no canvas.
 
-/** How a name may be set: the column it must fit, the sizes to try (largest
- *  first) and how many lines are allowed. */
+/** How a name may be set: the column to fit, the sizes to try (largest first)
+ *  and how many lines are allowed. */
 export interface FitOptions {
   width: number;
   sizes: number[];
@@ -21,10 +14,8 @@ export interface FitOptions {
 }
 
 export interface Fitted {
-  /** Point size chosen — the largest from `sizes` that fits. */
-  size: number;
-  /** The name broken into lines, already truncated if it could not fit. */
-  lines: string[];
+  size: number;       // the largest from `sizes` that fits
+  lines: string[];    // cut short if the name could not fit
 }
 
 /** Collapse whitespace so a name pasted out of a browser tab sets cleanly. */
@@ -32,12 +23,7 @@ export function tidyName(name: string): string {
   return (name ?? "").replace(/\s+/g, " ").trim();
 }
 
-/**
- * Choose a size and line breaks for `text`.
- *
- * An empty name yields no lines rather than an empty box: a tile showing
- * nothing where its name goes is better than one showing a stray ellipsis.
- */
+/** Choose a size and line breaks for `text`. Empty name yields no lines. */
 export function fitText(
   text: string,
   options: FitOptions,
@@ -52,10 +38,8 @@ export function fitText(
     if (lines) return { size, lines };
   }
 
-  // Nothing fit even at the smallest size — one very long unbroken word, or a
-  // name in a script this font sets wide. Truncate rather than overflow: a
-  // name that runs off the tile is worse than one that trails off, because
-  // Steam gives it no room to spill into.
+  // nothing fit even at the smallest size — one long unbroken word, or a script
+  // this font sets wide. cut it rather than overflow, Steam gives no room to spill.
   return { size: smallest, lines: [ellipsise(clean, options.width, smallest, measure)] };
 }
 

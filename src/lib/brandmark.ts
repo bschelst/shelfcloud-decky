@@ -1,25 +1,15 @@
 // Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 //
-// Our mark, carried rather than fetched.
-//
-// The drawn logo puts this beside a game's name, and it has to be OUR mark
-// every time -- it is the bit that says the tile is a cloud game. It used to
-// be whatever the icon slot happened to return, which worked until the icon
-// slot started answering 404 for catalogue games (correctly: a game should
-// wear its own art, not ours). The mark then fell through to the logo, and
-// then to the capsule -- and a game with no capsule gets the gateway's
-// default tile, which is FULLY OPAQUE. Decimated ended up with its name
-// beside a black rectangle.
-//
-// A fallback chain was the wrong shape for this. The mark is not artwork that
-// varies per game and might be missing; it is one fixed image that is always
-// the same and must never be substituted. So it is compiled in: no request,
-// no 404, no chance of landing on an opaque tile, and it still draws when the
-// gateway is unreachable.
+// Our mark, compiled in rather than fetched. The drawn logo puts this beside a
+// game's name and it must be OUR mark every time. It used to come from the icon
+// slot, which started 404ing for catalogue games; the mark then fell through to
+// the gateway's default tile, which is fully opaque, so Decimated got its name
+// beside a black rectangle. A fallback chain was the wrong shape: this is one
+// fixed image that must never be swapped, so it is compiled in.
 //
 // 256x256 with a real alpha channel, the same file the gateway serves at
-// /static/img/tiles/shelfcloud-icon.png. If that art is ever redrawn, this
-// has to be regenerated from it -- see tools/embed-brand-mark.md.
+// /static/img/tiles/shelfcloud-icon.png. If that art is ever redrawn, this has
+// to be made again from it -- see tools/embed-brand-mark.md.
 
 import type { SourceImage } from "./canvas";
 

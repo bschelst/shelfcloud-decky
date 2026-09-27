@@ -57,26 +57,16 @@ const LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
 const GATEWAY_URL = "https://shelfcloud.cc";
 const GITHUB_URL = "https://github.com/bschelst/shelfcloud-decky";
 
-/** How often to re-read the library count while a sync is running.
- *
- *  Fast enough that the number visibly climbs, slow enough that it is not a
- *  call per tile: a large sync writes several games a second, so a shorter
- *  interval would buy nothing a reader could perceive. */
+/** How often to re-read the library count during a sync - it climbs, but is not a call per tile. */
 const COUNT_POLL_MS = 1500;
 
-/** No install started. Mirrors IDLE_INSTALL in main.py so the panel can read
- *  the fields without guarding each one when the backend predates this. */
+/** No install started. Mirrors IDLE_INSTALL in main.py so the panel reads the fields even on an older backend. */
 const IDLE_INSTALL: InstallState = {
   running: false, app_id: null, label: null, message: "", error: null, done: false,
 };
 
-/** Start a browser install and show it immediately.
- *
- *  The backend returns as soon as the download has started and reports
- *  progress through get_status, so the panel refreshes once here to pick up
- *  `running: true` — that is what starts the progress poll, and what stops the
- *  buttons being pressable twice.
- */
+/** Start a browser install and show it right away. The backend returns once the
+ *  download starts, so we refresh once to pick up `running: true` and start the poll. */
 async function startBrowserInstall(appId: string): Promise<Status | null> {
   const started = await installBrowser(appId);
   if (!started.ok) {
@@ -85,21 +75,10 @@ async function startBrowserInstall(appId: string): Promise<Status | null> {
   return getStatus().catch(() => null);
 }
 
-/** Scroll the panel back to the very top.
- *
- * Steam's Quick Access menu scrolls only to whatever has focus, so anything
- * that cannot take focus cannot be scrolled to. The header — the count, the
- * bar and the provider chips — is not interactive, and it sits above every
- * control, so once you scrolled down to Links or About it went off the top and
- * pushing up could not bring it back: focus stopped at the first button, and
- * Steam scrolled no further than that button needed.
- *
- * Wrapping the header in a Focusable ought to be enough on its own, and it is
- * there. This is the part that does not depend on Steam choosing to navigate
- * to a Focusable with nothing to activate: when focus reaches the topmost
- * control, scroll its container fully to the top, which puts the header back
- * on screen regardless.
- */
+/** Scroll the panel back to the very top. The Quick Access menu only scrolls to
+ *  what has focus, and the header cannot take focus, so once it went off the top
+ *  pushing up could not bring it back. When focus reaches the top control,
+ *  scroll its container all the way up so the header shows again. */
 function scrollPanelToTop(event: React.FocusEvent<HTMLDivElement>): void {
   let node: HTMLElement | null = event.currentTarget;
   while (node) {
@@ -113,13 +92,9 @@ function scrollPanelToTop(event: React.FocusEvent<HTMLDivElement>): void {
   }
 }
 
-/** Open a URL in Steam's built-in browser, the only browser Game Mode has.
- *
- * The cast works around a name collision: `SteamClient.URL` resolves to the
- * DOM's global `URL` type rather than Steam's, so ExecuteSteamURL is invisible
- * to TypeScript even though it is declared by @decky/ui and present at runtime
- * (verified on hardware).
- */
+/** Open a URL in Steam's built-in browser, the only one Game Mode has. The cast
+ *  works around a name clash: `SteamClient.URL` resolves to the DOM's global
+ *  `URL`, so ExecuteSteamURL is invisible to TypeScript but is there at runtime. */
 type SteamUrlApi = { ExecuteSteamURL(url: string): void };
 
 function openInSteamBrowser(url: string): void {
@@ -129,8 +104,8 @@ function openInSteamBrowser(url: string): void {
   }
   try {
     (SteamClient.URL as unknown as SteamUrlApi).ExecuteSteamURL(`steam://openurl/${url}`);
-    // Retry after a short delay — on the first call the browser window may not
-    // be ready yet and lands on a blank data:text/html placeholder.
+    // Retry: on the first call the browser window may not be ready and lands
+    // on a blank placeholder.
     setTimeout(() => {
       try {
         (SteamClient.URL as unknown as SteamUrlApi).ExecuteSteamURL(`steam://openurl/${url}`);
@@ -142,40 +117,26 @@ function openInSteamBrowser(url: string): void {
   }
 }
 
-/** The sync currently running, if any. Module scope on purpose: the panel and
- *  the background poll are different callers and must share it. */
+/** The sync running now, if any. Module scope so the panel and the background
+ *  poll can share it. */
 let syncInFlight: Promise<SyncOutcome> | null = null;
 
-/** `total` is every entry in the Shelfcloud library, INCLUDING the skipped
- *  ones, so that "N games — X added (Y skipped)" adds up on screen. It used to
- *  be the usable count, which made the two numbers look like they belonged to
- *  the same total when they did not: 385 games, 385 added, 7 skipped invites
- *  the reader to look for the 7 inside the 385, and they are not there. */
+/** `total` counts every library entry, skipped ones included, so "N games — X added (Y skipped)" adds up. */
 type SyncOutcome = { result: SyncResult; total: number; skipped: number };
 
 
-/** Run a full reconcile, but never two at once.
- *
- *  Without this, two overlapping runs each read the tracked list before either
- *  records anything, so both create shortcuts for the same games and the user
- *  gets duplicate tiles. That is not a rare race: adding 200 games on the
- *  website makes the first sync take minutes while the poll keeps firing every
- *  minute.
- *
- *  A caller arriving mid-sync gets the running one rather than being refused,
- *  so "Sync now" still reports a real outcome. Anything changed after this run
- *  started is picked up by the next poll.
- */
+/** Run a full reconcile, but never two at once. Two overlapping runs both read
+ *  the tracked list before either records anything, so both make shortcuts for
+ *  the same games and the user gets double tiles. A caller mid-sync gets the
+ *  running one, so "Sync now" still reports a real outcome. */
 async function runSync(
   onProgress?: (message: string) => void,
 ): Promise<SyncOutcome & { owned: boolean }> {
   const running = syncInFlight;
   if (running) {
-    // Wait for the run already in progress and report its outcome, but mark
-    // that this caller did not perform it. Every waiter resolves from the same
-    // promise, so without `owned` each one would fire its own notification —
-    // six poll ticks during one long sync would mean six identical toasts for
-    // a single batch of games.
+    // Wait for the run in progress and report its outcome, but mark that this
+    // caller did not do it. Without `owned` every waiter would fire its own
+    // toast - six poll ticks in one long sync means six copies.
     return { ...(await running), owned: false };
   }
 
@@ -184,20 +145,15 @@ async function runSync(
   try {
     return { ...(await started), owned: true };
   } finally {
-    // Only if it is still OURS. Cancel's force-idle releases the in-flight
-    // promise so the next sync starts fresh instead of adopting a run nobody
-    // can reach -- and that next run must not then have its own promise
-    // cleared out from under it when this abandoned one finally settles.
+    // Only if it is still ours. Cancel can release the in-flight promise so the
+    // next sync starts fresh, and that next run must not have its own promise
+    // cleared when this abandoned one finally settles.
     if (syncInFlight === started) syncInFlight = null;
   }
 }
 
-/** Is this entry complete enough to build a Steam shortcut from?
- *
- *  The backend validates too, but this is the last step before calling
- *  SteamClient, and a half-formed entry there produces a broken tile rather
- *  than an error anyone would notice. Cheap to check, expensive to skip.
- */
+/** Is this entry complete enough to build a Steam shortcut from? A half-formed
+ *  entry makes a broken tile with no error, so we check before SteamClient. */
 function isUsableGame(game: unknown): game is DesiredGame {
   const g = game as DesiredGame;
   return !!g && typeof g === "object"
@@ -208,11 +164,8 @@ function isUsableGame(game: unknown): game is DesiredGame {
     && typeof g.options === "string" && g.options !== "";
 }
 
-/** The last library the backend sent, and the version it called it.
- *
- *  Kept so an unchanged library need not be sent again: this payload is 1.6 MB
- *  on a large account and it crossed Decky\'s socket on every sync — every few
- *  minutes — only to say that nothing had changed. */
+/** The last library the backend sent, with its version. Kept so an unchanged one
+ *  need not be sent again: 1.6 MB on a large account, sent every sync just to say nothing changed. */
 let lastLibrary: { version: string; body: LibraryResponse } | null = null;
 
 async function performSync(onProgress?: (message: string) => void): Promise<SyncOutcome> {
@@ -221,8 +174,8 @@ async function performSync(onProgress?: (message: string) => void): Promise<Sync
     if (lastLibrary) {
       library = lastLibrary.body;
     } else {
-      // We claimed to hold a version we do not. Ask again without one rather
-      // than sync against nothing.
+      // We claimed a version we do not have. Ask again without one instead of
+      // syncing against nothing.
       library = await getDesiredLibrary();
     }
   }
@@ -250,10 +203,9 @@ async function performSync(onProgress?: (message: string) => void): Promise<Sync
     shouldStop: cancelRequested,
   });
   await syncFinished(result.added, result.removed, result.updated);
-  // Two places drop entries before we get here: the backend, which reports its
-  // count as library.skipped, and isUsableGame above. Both are already gone
-  // from `desired`, so the library's real size is the survivors plus the two
-  // rejected counts -- report that, not the survivors alone.
+  // Two places drop entries: the backend (library.skipped) and isUsableGame.
+  // Both are already gone from `desired`, so the real size is the survivors
+  // plus both rejected counts.
   const skipped = (library.skipped ?? 0) + unusable;
   return {
     result,
@@ -262,64 +214,45 @@ async function performSync(onProgress?: (message: string) => void): Promise<Sync
   };
 }
 
-/** Reconcile the Steam library, reporting progress into the job store.
- *
- * At module scope, not inside the component, for the same reason the store is:
- * this must keep running and keep reporting while the panel is closed.
- */
+/** Reconcile the Steam library, reporting progress into the job store. At module scope so it keeps going while the panel is closed. */
 async function doSync(quiet = false): Promise<boolean> {
   setJob({ busy: true });
   try {
     const { result, total, skipped } = await runSync((line) => {
-      // The sync emits "Adding X (12/124)"; reuse it rather than threading a
-      // second callback through every call site.
+      // The sync emits "Adding X (12/124)"; reuse it instead of a second callback.
       const match = line.match(/\((\d+)\/(\d+)\)\s*$/);
       const done = match ? Number(match[1]) : 0;
       const all = match ? Number(match[2]) : 0;
-      // Keep the last known fraction on lines that carry no counter, so the
-      // bar holds its position instead of flicking back to indeterminate.
+      // Keep the last fraction on lines with no counter, so the bar does not jump back to indeterminate.
       setJob({ message: line, progress: match && all > 0 ? done / all : getJob().progress });
     });
     finishJob(syncSummary(total, result, skipped));
     if (!quiet) toaster.toast({ title: "Shelfcloud", body: changeSummary(result),
                                logo: <NotificationLogo /> });
-    // Reported back so "add all my games" can tell a run that STOPPED from one
-    // that finished, and tidy up the games it never reached.
+    // Reported back so "add all my games" can tell a stopped run from a finished one and clean up games it never reached.
     return Boolean(result.cancelled);
   } catch (error) {
     finishJob(String(error));
     if (!quiet) toaster.toast({ title: "Sync failed", body: String(error),
                                logo: <NotificationLogo /> });
-    // A failure is not a cancel: the library is left exactly as it is so the
-    // next sync can finish the job.
+    // A failure is not a cancel: the library is left as is so the next sync can finish the job.
     return false;
   }
 }
 
-/** The "add all my games" run in progress, if any.
- *
- * Single-flight like the sync, and for a sharper reason: the panel can be
- * closed and reopened mid-run, and a reopened panel that had lost its busy
- * flag offered the button again. Pressing it started a second pass over the
- * same Steam library while the first was still writing. Now a second press
- * joins the run already going.
- */
+/** The "add all my games" run in progress, if any. Single-flight: a panel closed
+ *  and reopened mid-run lost its busy flag and offered the button again, so a second press now joins the run. */
 let addOwnedInFlight: Promise<void> | null = null;
 
-/** Every game id currently in the account's library, or null if unreadable.
- *
- * null rather than an empty set, deliberately: "the library is empty" and "we
- * could not read it" must not be the same value, because the caller subtracts
- * this from a later reading and an empty set would make every game look newly
- * added and eligible for removal.
- */
+/** Every game id in the account's library now, or null if we could not read it.
+ *  Null, not an empty set: the caller subtracts this from a later reading, and an
+ *  empty set would make every game look newly added and removable. */
 async function libraryGameIds(): Promise<Set<number> | null> {
   try {
     const library = await getDesiredLibrary();
     if (!library.ok || !Array.isArray(library.desired)) return null;
-    // Rows filtered before they are read: one null entry here throws, and the
-    // catch below turns that into "could not read the library" — which is safe
-    // but silently disables the cleanup this set exists for.
+    // Filter rows before reading them: one null entry throws, and the catch below
+    // turns that into "could not read the library", quietly disabling the cleanup.
     return new Set(library.desired
       .filter((g) => g && typeof g === "object")
       .map((g) => Number(g.game_id))
@@ -329,17 +262,10 @@ async function libraryGameIds(): Promise<Set<number> | null> {
   }
 }
 
-/** After a cancelled bulk add: take back the games it added but never tiled.
- *
- * Cancel means "stop, and forget the rest". Without this the library still
- * held every owned game and the next sync simply created them all, so the
- * cancel stopped that one run and changed nothing that lasted.
- *
- * Three conditions, all required, because this REMOVES things:
- *   - not in the library before this run started, so it was added by it
- *   - has no tile, so the run never reached it
- *   - not a web page, which is mandatory and exempt from cancel anyway
- */
+/** After a cancelled bulk add: take back the games it added but never tiled, or
+ *  the next sync would just make them all again. Three conditions, all needed,
+ *  because this removes things: added by this run (not in the library before),
+ *  has no tile (never reached), and not a web page (exempt from cancel). */
 async function forgetUntiled(before: Set<number> | null): Promise<void> {
   if (!before) return;          // could not read the library; change nothing
   try {
@@ -372,9 +298,8 @@ async function doAddOwned(): Promise<void> {
         return;
       }
 
-      // What was already in the library BEFORE the bulk add. Taken first so a
-      // cancel can tell the games this run added from the ones that were
-      // already the person's choice — only the former may be taken away again.
+      // What was in the library before the bulk add. Taken first so a cancel can
+      // tell this run's games from the user's own choices - only ours may go.
       const beforeAdd = await libraryGameIds();
 
       setJob({ message: `You own ${steam.owned} Steam games. Adding the cloud ones…` });
@@ -400,21 +325,15 @@ async function doAddOwned(): Promise<void> {
   }
 }
 
-/** Empty the library and let a sync delete every tile we created.
- *
- * Wrapped in runJob so every exit leaves the panel idle. It used to set `busy`
- * itself and clear it on three of its four exits — the missing one being the
- * path where everything worked, which left every button greyed out with
- * nothing running.
- */
+/** Empty the library and let a sync delete every tile we made. Wrapped in runJob
+ *  so every exit leaves the panel idle - it used to miss one and leave the buttons greyed out. */
 async function doRemoveAll(): Promise<void> {
   await runJob(async () => {
     const result = await clearLibrary();
     if (!result.ok) return result.error || "Could not clear your library";
     setJob({ message: `Removed ${result.removed} games. Removing all tiles…` });
-    // Remove every tracked tile without consulting the gateway. The gateway
-    // is already empty, but reading it (doSync) would re-add the website
-    // tile via adopt_pushed_websites before we can remove it. An empty
+    // Remove every tracked tile without asking the gateway. It is already empty,
+    // but reading it (doSync) would re-add the website tile first. An empty
     // desired list means "remove everything tracked".
     const library = await getDesiredLibrary();
     const tracked = (library.ok && library.tracked && typeof library.tracked === "object")
@@ -422,26 +341,18 @@ async function doRemoveAll(): Promise<void> {
     const syncResult = await syncLibrary([], tracked, {
       record: recordShortcut,
       forget: forgetShortcut,
-      // Cancellable. Without this the button said "Stopping…" and went on
-      // deleting every remaining tile, because the stop was only ever checked
-      // in the ADD loop and this run has nothing to add.
+      // Cancellable. Without this the button said "Stopping…" but kept deleting,
+      // because the stop was only checked in the add loop and this run adds none.
       shouldStop: cancelRequested,
     });
     await syncFinished(syncResult.added, syncResult.removed, syncResult.updated);
 
     if (syncResult.cancelled) {
-      // Stopping the deletions is not enough on its own. The library was
-      // emptied server-side before any tile was touched, so every tile the
-      // cancel just saved is no longer wanted and the next sync would take
-      // it — the stop would have lasted about a minute. Put the survivors
-      // back, and only those: a game whose tile is already gone stays gone,
-      // because undoing a deletion somebody watched happen is worse than
-      // honouring it.
-      //
-      // Read back rather than reusing `tracked`: the removal loop tells the
-      // backend to forget each tile as it goes, but does not mutate the copy
-      // it was handed. Using that copy would restore the games whose tiles
-      // were successfully deleted — the exact opposite of honouring them.
+      // Stopping the deletions is not enough: the library was emptied
+      // server-side first, so every saved tile is no longer wanted and the next
+      // sync would take it. Put the survivors back, only those. Read them back,
+      // do not reuse `tracked` - that copy would restore the already-deleted
+      // tiles, the opposite of what we want.
       const after = await getDesiredLibrary().catch(() => null);
       const survivors = Object.keys(
         (after?.ok && after.tracked && typeof after.tracked === "object")
@@ -461,17 +372,10 @@ async function doRemoveAll(): Promise<void> {
   });
 }
 
-/** The last status the panel saw, kept outside React.
- *
- *  Closing Quick Access unmounts the panel, so component state is destroyed
- *  every time. Starting from null meant every open re-fetched before it could
- *  draw anything -- and a fetch that lands while a sync is running waits for a
- *  slot, so the panel showed "Loading…" for as long as half a minute.
- *
- *  Nothing here is worth blocking a repaint for: it is a count, a few
- *  switches and a shelf name, all of which were true a moment ago. Show them
- *  at once and correct them when the answer arrives.
- */
+/** The last status the panel saw, kept outside React. Closing Quick Access
+ *  unmounts the panel, so state is lost. Starting from null made every open show
+ *  "Loading…" while it re-fetched. None of this is worth blocking on, so show it
+ *  at once and correct it when the answer comes. */
 let lastStatus: Status | null = null;
 
 function Content() {
@@ -486,47 +390,36 @@ function Content() {
       });
     }, []);
   const [owned, setOwned] = useState<number | null>(null);
-  // Which shelf this device shows, and what it could show. Loaded from the
-  // gateway rather than from settings: the shelf can be changed on the website
-  // or another device, so a local copy would go quietly out of date.
+  // Which shelf this device shows, and what it could show. From the gateway, not
+  // settings: the shelf can change on the website or another device.
   const [shelves, setShelves] = useState<Awaited<ReturnType<typeof getShelves>> | null>(null);
   // Two-press confirm: this deletes every tile the plugin made.
   const [confirmClear, setConfirmClear] = useState(false);
-  // Cancel has been pressed for the run in flight. Local to the panel rather
-  // than in the job store because it is only about THIS button's label: the
-  // run stops between tiles, so there is a gap between asking and stopping,
-  // and a button that still says "Cancel" invites a second press.
+  // Cancel was pressed for the run in flight. Local to the panel, not the job
+  // store: it is only about this button's label. The run stops between tiles, so
+  // a button still saying "Cancel" invites a second press.
   const [stopping, setStopping] = useState(false);
   const [confirmSignOut, setConfirmSignOut] = useState(false);
   const loginTimer = useRef<number | null>(null);
-  // A sign-in that has been STARTED but not yet handed to the browser.
-  //
-  // The gap exists so the pairing code can be read before Steam's browser
-  // takes the screen and closes this panel.
+  // A sign-in started but not yet handed to the browser. The gap lets the pairing
+  // code be read before Steam's browser takes the screen and closes this panel.
   const [pendingLogin, setPendingLogin] =
     useState<{ url: string; code: string; session: string } | null>(null);
   // "of N playable", held still for the duration of a sync — see below.
   const totalWhenSyncStarted = useRef<number | null>(null);
 
-  // Whatever is running right now, even if it started before this panel was
-  // opened. This is what makes a reopened panel show live progress rather than
-  // an idle one.
+  // Whatever is running now, even if it started before this panel opened. This
+  // is what makes a reopened panel show live progress, not an idle one.
   const { busy, message, progress, completed } =
     useSyncExternalStore(subscribeJob, getJob);
 
-  // Set when the backend cannot be reached, so the panel can say so instead
-  // of pretending it is still loading.
+  // Set when the backend cannot be reached, so the panel can say so.
   const [unreachable, setUnreachable] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    // Each call stands alone, and a failure is REPORTED rather than thrown.
-    //
-    // This used to be a bare `setStatus(await getStatus())`. When that call
-    // fails -- and it does: Decky's socket drops, and every call after it is
-    // refused -- the await threw, refresh gave up, `status` stayed null, and
-    // the panel sat on "Loading..." with no way forward. A backend that is
-    // briefly unreachable made the whole plugin look broken, and there was
-    // nothing on screen saying which of the two it was.
+    // Each call stands alone, and a failure is reported, not thrown. A bare
+    // `setStatus(await getStatus())` left `status` null when the socket dropped,
+    // so the panel sat on "Loading…" and looked broken.
     try {
       const next = await getStatus();
       if (next) {
@@ -537,9 +430,8 @@ function Content() {
       setUnreachable(String((error as Error)?.message || error));
     }
 
-    // How many owned games could still be added, so the button can say the
-    // number rather than making the user press it to find out. Its own try:
-    // a count we cannot read must not cost us the settings as well.
+    // How many owned games could still be added, so the button can show it. Its
+    // own try: a count we cannot read must not cost the settings too.
     try {
       const preview = await previewOwned();
       setOwned(preview.ok ? (preview.not_added ?? 0) : null);
@@ -548,44 +440,29 @@ function Content() {
     }
   }, []);
 
-  // On mount, and again whenever a job finishes while the panel is open, so
-  // the counts follow work that completed with the panel closed.
+  // On mount, and again when a job finishes, so the counts follow work done with the panel closed.
   useEffect(() => { void refresh(); }, [refresh, completed]);
 
-  // Put the Cancel button back to its normal label once the run it belongs to
-  // has actually stopped, so the next one does not open already saying
-  // "Stopping…".
+  // Put Cancel back to its normal label once its run has really stopped, so the next one does not open saying "Stopping…".
   useEffect(() => { if (!busy) setStopping(false); }, [busy]);
 
-  // Alongside the status, and re-read after a sync: a sync is when the library
-  // changes, which is exactly when a shelf's game count is out of date.
+  // Read with the status, and again after a sync: a sync is when the library changes, so a shelf's count can be stale.
   useEffect(() => {
     void getShelves().then(setShelves).catch(() => setShelves(null));
   }, [completed]);
 
-  // While a sync runs, keep the headline count honest.
-  //
-  // It is read from getStatus() and was refreshed only when a job FINISHED, so
-  // during a long "add all my games" it sat at its pre-sync value — reading 0
-  // while the bar advanced and the line underneath said "Adding … (189/385)".
-  // The one number people watch was the one number not moving.
-  //
-  // Polled rather than counted locally: the backend's tracked list is the
-  // truth, and the sync adds, updates and removes, so counting steps here
-  // would drift from it. Only getStatus() is called, not the owned-games
-  // preview, which is a slower query and cannot change mid-sync.
+  // While a sync runs, keep the headline count honest. It comes from getStatus(),
+  // refreshed only when a job finished, so a long run sat at 0 while the bar moved.
+  // Polled, not counted locally: the tracked list is the truth.
   useEffect(() => {
     if (!busy) {
       totalWhenSyncStarted.current = null;
       return undefined;
     }
-    // Freeze the denominator for the duration.
-    //
-    // It is owned-not-yet-added plus already-tracked, and only the second half
-    // is refreshed here — the first is a slower query that cannot change
-    // mid-sync. Left alone the total would climb with the count, so adding 189
-    // games would read "189 of 581 playable" when the real answer is 392. The
-    // number of playable games does not change because you added some.
+    // Freeze the denominator for the run. It is owned-not-yet-added plus
+    // already-tracked; only the second half is refreshed here. Left alone it
+    // would climb with the count, and adding games does not change how many are
+    // playable.
     if (totalWhenSyncStarted.current === null) {
       totalWhenSyncStarted.current = (owned ?? 0) + (status?.tracked ?? 0);
     }
@@ -593,18 +470,14 @@ function Content() {
       void getStatus().then(setStatus).catch(() => {});
     }, COUNT_POLL_MS);
     return () => window.clearInterval(timer);
-    // Deliberately depends only on `busy`. Adding `owned` or `status` would
-    // re-run this on every poll, and the frozen total must be the value from
-    // the moment the sync began, not whatever it is a tick later.
+    // Depends only on `busy` on purpose. Adding `owned` or `status` would re-run
+    // this every poll, and the frozen total must be the value from when the sync
+    // began, not a tick later.
   }, [busy]);
 
-  // While a browser is downloading, keep reading its progress.
-  //
-  // Separate from the sync poll above: an install is not a "job" in the store
-  // sense — it lives in the backend so it survives the panel closing, and it
-  // runs in the one state where the rest of the panel does not exist yet.
-  // When it finishes, the same poll picks up the newly detected browser and
-  // the panel moves on by itself.
+  // While a browser is downloading, keep reading its progress. Separate from the
+  // sync poll: an install is not a "job" - it lives in the backend so it survives
+  // the panel closing. When it finishes the same poll finds the new browser.
   const installing = status?.install?.running ?? false;
   useEffect(() => {
     if (!installing) return undefined;
@@ -614,8 +487,8 @@ function Content() {
     return () => window.clearInterval(timer);
   }, [installing]);
 
-  // Cancel any in-flight login poll when the panel unmounts, so a forgotten
-  // timer cannot keep hitting the gateway for five minutes.
+  // Cancel any login poll when the panel unmounts, so a forgotten timer cannot
+  // keep hitting the gateway for five minutes.
   useEffect(() => () => {
     if (loginTimer.current) window.clearInterval(loginTimer.current);
   }, []);
@@ -623,10 +496,9 @@ function Content() {
   const sync = useCallback((quiet = false) => doSync(quiet), []);
   const addOwned = useCallback(() => doAddOwned(), []);
 
-  // NOTE: the background sync listener is deliberately NOT registered here.
-  // This component only mounts while the panel is open, so a listener here
-  // would make "background" sync work only while the user is watching it.
-  // It lives in definePlugin() instead, which stays alive for the session.
+  // The background sync listener is NOT registered here on purpose: this
+  // component only mounts while the panel is open, so it would run only while
+  // the user watches. It lives in definePlugin() instead, alive all session.
 
   const signIn = useCallback(async () => {
     setPendingLogin(null);
@@ -638,25 +510,11 @@ function Content() {
       return;
     }
 
-    // Game Mode has no browser of its own, so hand the URL to Steam.
-    //
-    // Navigation.NavigateToExternalWeb() opens a browser window but leaves it
-    // on its blank data:text/html placeholder — verified on hardware. The
-    // steam://openurl protocol actually navigates, and is the same mechanism
-    // boosteroid-steamos uses for Google sign-in.
-    // NOT opened here any more.
-    //
-    // Opening Steam's browser closes the Quick Access Menu, and the pairing
-    // code lives in the Quick Access Menu — so firing this immediately meant
-    // the panel vanished before the code had been on screen for a frame. The
-    // user then reached a page asking for a code they had never seen, and the
-    // only way to find it was to guess that reopening the QAM over the browser
-    // would show it.
-    //
-    // The code is shown first, with a button to continue. Nothing is being
-    // memorised under time pressure: it is on screen, the user reads it, and
-    // presses Open when ready. The QAM can still be reopened over the browser
-    // to check it, because the backend keeps it for the life of the sign-in.
+    // The browser is NOT opened here any more. Opening Steam's browser closes
+    // the Quick Access Menu, where the pairing code lives, so firing it right
+    // away made the panel vanish before the code was ever seen. The code is
+    // shown first, with a button to continue; the user reads it and presses
+    // Open when ready.
     setPendingLogin({ url: start.login_url, code: start.confirm_code || "",
                       session: start.session_token });
     setJob({ busy: false, message: "" });
@@ -665,10 +523,8 @@ function Content() {
   const openSteamSignIn = useCallback((url: string, session: string) => {
     openInSteamBrowser(url);
 
-    // The backend waits for the sign-in to complete and stores the token, so
-    // it finishes even though opening Steam's browser closes this panel and
-    // unmounts everything here. This only watches for the result, and losing
-    // the watcher no longer loses the sign-in.
+    // The backend waits for the sign-in and stores the token, so it finishes even
+    // though opening the browser closes this panel. This only watches, and losing the watcher no longer loses the sign-in.
     setJob({ busy: false, message: "Finish signing in in the browser…" });
 
     const deadline = Date.now() + LOGIN_TIMEOUT_MS;
@@ -694,7 +550,7 @@ function Content() {
     }, LOGIN_POLL_MS);
   }, [refresh, sync]);
 
-  /** Empty the library and let sync delete every tile we created. */
+  /** Empty the library and let sync delete every tile we made. */
   const removeAll = useCallback(async () => {
     if (!confirmClear) {
       setConfirmClear(true);
@@ -718,9 +574,9 @@ function Content() {
   }, [confirmSignOut, refresh]);
 
   if (!status) {
-    // Nothing read yet. Two very different reasons, and the panel used to
-    // show the same word for both -- so a backend that was never coming back
-    // looked exactly like one that was about to answer.
+    // Nothing read yet. Two very different reasons, and the panel used to show
+    // the same word for both, so a dead backend looked like one about to
+    // answer.
     return (
       <PanelSection title="Shelfcloud">
         {unreachable ? (
@@ -759,24 +615,16 @@ function Content() {
   }
 
   // Signed out: everything that needs an account is shown but disabled, so the
-  // panel still explains what it does instead of hiding it. "Signed out" is a
-  // verified answer, not just "no token on disk" — a revoked or expired
-  // credential used to leave every control enabled and every action failing.
+  // panel still explains itself. "Signed out" is a checked answer, not just "no
+  // token on disk" - a revoked one used to leave every control on but failing.
   const signedOut = !status.signed_in;
 
   const activeShelf = shelves?.ok && typeof shelves.shelf_id === "number"
     ? (shelves.shelves ?? []).find((s) => s.id === shelves.shelf_id) ?? null
     : null;
 
-  // The pairing code for a sign-in in progress.
-  //
-  // Shown here, persistently, because the browser that ASKS for it is the same
-  // action that closes this panel — a code displayed once, in the panel, would
-  // be gone by the time it was needed. It comes from the backend's status so
-  // reopening the panel over the browser shows it again.
-  // Either a sign-in we just started (code in hand, browser not yet opened) or
-  // one already in flight (code recovered from the backend, because this panel
-  // was closed by the browser and has since been reopened over it).
+  // The pairing code for a sign-in in progress. Shown here and kept, because the
+  // browser that asks for it is what closes this panel. From the backend's status, so reopening the panel shows it again.
   const pairingCode = status.signed_in ? "" : (pendingLogin?.code || status.pending_login_code || "");
 
   return (
@@ -824,9 +672,9 @@ function Content() {
                 if (pendingLogin) {
                   openSteamSignIn(pendingLogin.url, pendingLogin.session);
                 } else {
-                  // Falls back to /my, not the root: this button is labelled
-                  // "Reopen sign-in page", and the sign-in lives with the
-                  // library now. The root would show the home page instead.
+                  // Falls back to /my, not the root: this button reopens the
+                  // sign-in page, which lives with the library. The root would
+                  // show the home page.
                   const url = (status as unknown as Record<string, unknown>).pending_login_url as string || `${GATEWAY_URL}/my`;
                   openInSteamBrowser(url);
                 }
@@ -838,9 +686,8 @@ function Content() {
             </ButtonItem>
           </PanelSectionRow>
           <PanelSectionRow>
-            {/* The same marginTop the note above the button already had. Two
-                footnotes in one panel were sitting at different distances
-                from the thing they explain. */}
+            {/* Same marginTop as the note above the button, so both footnotes
+                sit the same distance from what they explain. */}
             <div style={{ fontSize: 11, opacity: 0.7, marginTop: 6 }}>
               Reopen this panel any time to see the code again.
             </div>
@@ -849,17 +696,11 @@ function Content() {
       ) : null}
       <PanelSection title="Shelfcloud">
         <PanelSectionRow>
-          {/* Focusable, even though there is nothing here to activate.
-              The Quick Access menu scrolls to whatever has focus, so a block
-              the controller cannot focus is a block the controller cannot
-              scroll to. As plain markup this header was reachable only until
-              you scrolled past it: after that the topmost focusable thing was
-              the button below it, and pushing up could never go higher — the
-              count and the bar stayed off-screen with no way back short of
-              closing the panel.
-
-              onFocus scrolls it fully into view rather than just far enough,
-              so landing here puts the whole header on screen. */}
+          {/* Focusable, even with nothing to activate. The Quick Access menu
+              scrolls to whatever has focus, so a block that cannot take focus
+              cannot be scrolled to; as plain markup this header could not be
+              reached again after you scrolled past it. onFocus scrolls it
+              fully into view so the whole header shows. */}
           <Focusable
             onFocus={(event: React.FocusEvent<HTMLDivElement>) =>
               event.target.scrollIntoView({ behavior: "smooth", block: "start" })
@@ -867,9 +708,8 @@ function Content() {
           >
             <LibrarySummary
               synced={status.tracked}
-              // Named only when this device is actually ON a shelf. Shared is
-              // spelled null, and there the account-wide total is the right
-              // comparison, so the summary keeps saying "of N playable".
+              // Named only when this device is on a shelf. Shared is null, and
+              // there the account-wide total is the right compare.
               shelfName={activeShelf?.name ?? null}
               shelfGames={activeShelf?.games ?? null}
               available={busy && totalWhenSyncStarted.current !== null
@@ -893,8 +733,8 @@ function Content() {
 
 
         {signedOut && (
-          // Signed out this is the topmost control, so it carries the same
-          // scroll-to-top duty as the Shelfcloud button does when signed in.
+          // Signed out, this is the topmost control, so it does the same
+          // scroll-to-top job as the Shelfcloud button when signed in.
           <div onFocus={scrollPanelToTop}>
             <PanelSectionRow>
               <ButtonItem layout="below" disabled={busy} onClick={() => void signIn()}>
@@ -905,17 +745,15 @@ function Content() {
         )}
 
         {/* onFocus, not onClick: focus bubbles, so this fires when the button
-            inside receives it. Reaching the topmost control means the header
-            above it should be on screen — see scrollPanelToTop. */}
+            inside gets it. Reaching the top control means the header above
+            should be on screen - see scrollPanelToTop. */}
         <div onFocus={scrollPanelToTop}>
           <PanelSectionRow>
-            {/* Straight to the library, not the site root.
-                The root is the home page now — what Shelfcloud is, the guide,
-                the catalogue — so sending somebody there to pick games would
-                land them on the pitch with another click still to make. /my is
-                the library, and puts the sign-in in front of it if needed.
-
-                Reachable signed out on purpose: signing in happens there. */}
+            {/* Straight to the library, not the site root. The root is the
+                home page now, so sending someone there to pick games would
+                land them on the pitch with another click to make. /my is the
+                library, and shows the sign-in first if needed. Reachable
+                signed out on purpose: signing in happens there. */}
             <ButtonItem layout="below" onClick={() => openInSteamBrowser(`${GATEWAY_URL}/my`)}>
               {signedOut ? "Open Shelfcloud" : "Select games on Shelfcloud"}
             </ButtonItem>
@@ -928,12 +766,11 @@ function Content() {
           </ButtonItem>
         </PanelSectionRow>
 
-        {/* While something is running this row becomes the way OUT of it.
-            "Add all my games" walks a whole Steam library — thousands of tiles
-            and many minutes on a large account — and until now the only ways
-            to stop were to let it finish or to kill Steam. The button is only
-            replaced while busy, so there is never a Cancel with nothing to
-            cancel. */}
+        {/* While something runs this row becomes the way out of it. "Add all
+            my games" walks a whole Steam library, many minutes on a large
+            account, and before this the only way to stop was to kill Steam.
+            The button is only swapped while busy, so there is never a Cancel
+            with nothing to cancel. */}
         <PanelSectionRow>
           {busy ? (
             <ButtonItem
@@ -956,8 +793,8 @@ function Content() {
               fontSize: "0.8em",
               opacity: status.last_error ? 1 : 0.75,
               color: status.last_error ? theme.bad : undefined,
-              // Fixed two-line box: progress messages change length constantly,
-              // and letting the box grow and shrink makes the panel jump.
+              // Fixed two-line box: progress messages change length all the
+              // time, and a box that grows and shrinks makes the panel jump.
               minHeight: "2.4em",
               maxHeight: "2.4em",
               overflow: "hidden",
@@ -995,16 +832,10 @@ function Content() {
               });
             }}
             onSetSetting={setSetting}
-            // Turning "a tile per service" ON has to bring the games in, not
-            // just re-shape the ones already there. Fanning out a library that
-            // holds 8 of Luna's 119 games gives 8 Luna tiles and looks broken,
-            // because the other 111 were never added — a subscription covers
-            // them, and nothing had ever asked for them on the user's behalf.
-            //
-            // doAddOwned, rather than a second path of its own: it reads the
-            // Steam library, adds everything playable (owned, free-to-play and
-            // subscription alike) and syncs, with the progress, the Cancel and
-            // the put-back-on-cancel that a run this size needs.
+            // Turning "a tile per service" ON must bring the games in, not just
+            // re-shape the ones there. A library with 8 of Luna's 119 games
+            // would give 8 tiles and look broken. doAddOwned does the whole
+            // thing: reads the library, adds everything playable and syncs.
             onTilePerServiceEnabled={() => void doAddOwned()}
             onSetShelf={setShelf}
             onShelfChanged={() => void doSync()}
@@ -1024,20 +855,16 @@ function Content() {
         </CollapsibleGroup>
       </PanelSection>
 
-      {/* Decky's tab bar butts straight against the end of the panel. A focused
-          ButtonItem draws its ring outside its own box, so the last control's
-          ring was being cut off — 16px was enough for the button but not for
-          the ring around it. */}
+      {/* Decky's tab bar sits right against the end of the panel. A focused
+          ButtonItem draws its ring outside its box, so the last control's ring
+          was cut off - 16px was enough for the button but not the ring. */}
       <div style={{ height: 28 }} />
     </>
   );
 }
 
-/** What to say when games appear on their own.
- *
- *  Names the game when there is one, because "1 new game" makes you go and
- *  look. Beyond a few, names would overflow the toast, so it counts instead.
- */
+/** What to say when games appear on their own. Names the game when there is
+ *  one; beyond a few, names would overflow the toast, so it counts instead. */
 function newGamesToast(names: string[]) {
   if (names.length === 1) {
     return { title: "Added to your library", body: names[0],
@@ -1055,47 +882,37 @@ function newGamesToast(names: string[]) {
 }
 
 export default definePlugin(() => {
-  // Registered here, NOT in the panel component: Decky keeps this alive for the
-  // whole Steam session, whereas the panel only exists while it is open. With
-  // the listener in the component, "background" sync only ran while the user
-  // was watching it — which is not background at all.
+  // Registered here, NOT in the panel: Decky keeps this alive for the whole Steam
+  // session, but the panel only exists while open. In the component, "background" sync ran only while the user watched.
   const onLibraryChanged = () => {
     void runSync()
       .then(({ result, owned }) => {
-        // Only the run that actually did the work notifies, and only when
-        // something arrived. A sync runs every minute and almost always finds
-        // nothing; notifying on completion would be a toast every minute, and
-        // notifying from every waiter would be one toast per poll tick that
-        // happened to land during a long sync.
+        // Only the run that did the work notifies, and only when something arrived.
+        // A sync runs every minute and mostly finds nothing.
         if (owned && result.added > 0) toaster.toast(newGamesToast(result.addedNames));
-        // Tiles were made or removed, so the badge's app-id map is stale by
-        // definition. Cheaper than a shorter cache life, and exact.
+        // Tiles were made or removed, so the badge's app-id map is stale. Cheaper than a shorter cache life, and exact.
         invalidateBadgeData();
       })
       .catch((error) => {
         console.error("[shelfcloud] background sync failed", error);
       });
   };
-  // Cancel gives up after ten seconds and resets the panel while the run is
-  // still going. Let go of it here, or the next sync waits on that unreachable
-  // promise and reports its outcome as its own -- a cancelled run coming back
-  // to life and announcing itself as a fresh one.
+  // Cancel gives up after ten seconds and resets the panel while the run is still
+  // going. Let go of it here, or the next sync waits on that dead promise.
   setAbandonHandler(() => { syncInFlight = null; });
 
   addEventListener(SYNC_EVENT, onLibraryChanged);
 
-  // The provider badge on Steam's own game page. Patched here rather than in
-  // the panel: the panel exists only while it is open, and the badge has to
-  // be there whenever a game page is.
+  // The provider badge on Steam's own game page. Patched here, not in the panel:
+  // the panel exists only while open, and the badge must be there on every game
+  // page.
   const libraryPatch = patchLibraryApp();
 
-  // And the same mark on the highlighted card in the home carousel and the
-  // grid. Not a React patch: those cards are recycled by a virtualised list,
-  // so there is nothing stable to hang a child off — see focusBadge.
+  // And the same mark on the highlighted card in the home carousel and grid. Not
+  // a React patch: those cards are recycled by a virtual list, nothing stable to hang a child on - see focusBadge.
   refreshBadgeData();
   startFocusBadge(() => {
-    // Kept fresh from here rather than from inside the observer, which runs
-    // while the highlight is moving and must not wait on anything.
+    // Kept fresh from here, not inside the observer, which runs while the highlight moves and must not wait.
     refreshBadgeData();
     return badgeDataNow();
   });
@@ -1112,23 +929,19 @@ export default definePlugin(() => {
       </div>
     ),
     content: <Content />,
-    // Monochrome and em-sized, so it matches its neighbours in Decky's plugin
-    // list: they are react-icons that take their colour from the row and turn
-    // white when it is selected. A coloured, pixel-sized mark stood out as
-    // both larger and out of place.
+    // Monochrome and em-sized so it matches its neighbours in Decky's plugin
+    // list: they take their colour from the row and turn white when selected.
     icon: <LogoMono />,
     onDismount() {
       removeEventListener(SYNC_EVENT, onLibraryChanged);
-      // Removed explicitly. A patch left behind survives the plugin being
-      // unloaded and keeps rendering a component whose module is gone.
+      // Removed on purpose. A patch left behind outlives the unloaded plugin and keeps rendering a dead component.
       try {
         routerHook.removePatch("/library/app/:appid", libraryPatch);
       } catch (error) {
         console.error("[shelfcloud] could not remove the library patch", error);
       }
-      // Disconnects the observer AND takes the badge off whatever card it is
-      // sitting on. A node left in another window's document outlives the
-      // plugin that put it there.
+      // Disconnects the observer AND takes the badge off whatever card it is on -
+      // a node left in another window's document outlives the plugin.
       stopFocusBadge();
     },
   };

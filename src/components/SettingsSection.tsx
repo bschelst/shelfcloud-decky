@@ -43,11 +43,8 @@ interface SettingsSectionProps {
   onSignOut: () => void;
   onApplyOverrides: () => void;
   onSetSetting: (key: string, value: unknown) => Promise<Status>;
-  /** Run after "a tile per service" is switched ON, to pull in the games the
-   *  user can play but has never added — a subscription covers a whole
-   *  catalogue, and fanning out a library that does not contain it produces a
-   *  handful of tiles and looks broken. Not called when switching OFF: that
-   *  only removes tiles, and needs nothing fetched. */
+  /** Run after "a tile per service" is switched ON, to pull in games the user
+   *  can play but never added. Not called on OFF, which only removes tiles. */
   onTilePerServiceEnabled?: () => void;
   onSetShelf: (shelfId: number | null) => Promise<{ ok: boolean; shelf_id?: number | null; error?: string }>;
   onShelfChanged: () => void;
@@ -88,12 +85,8 @@ export const SettingsSection: FC<SettingsSectionProps> = ({
     </PanelSectionRow>
 
     <PanelSectionRow>
-      {/* Spaced on BOTH sides, which the rows around it do not need.
-          Every other row here is a small label and a control. This one is a
-          label, a switch and a paragraph — and a paragraph with nothing above
-          it reads as if it belongs to the "Sync every" dropdown sitting on
-          top, while one with nothing below it runs straight into the "Shelf
-          for …" label underneath. Padding only above fixes half of that. */}
+      {/* Padded top and bottom, unlike the rows around it: this one ends in a
+          paragraph, which otherwise runs into the labels above and below it. */}
       <div style={{ padding: "10px 0" }}>
         <ToggleField
           label="A tile per service"
@@ -104,13 +97,9 @@ export const SettingsSection: FC<SettingsSectionProps> = ({
             + "subscriptions cover but you have never added. This makes the "
             + "library much larger and the first sync a long one."
           }
-          // NOT disabled while a sync runs.
-          //
-          // It used to be, and a sync runs every few minutes — so tapping it
-          // at the wrong moment did nothing, said nothing, and left the switch
-          // where it was. From the outside that is a setting that will not
-          // turn on. Storing it is instant and safe at any time; only the
-          // bulk add that follows has to wait, and it already waits.
+          // Not disabled during a sync. It used to be, and a sync runs every few
+          // minutes, so tapping it then looked like a setting that would not turn
+          // on. Storing it is safe any time; only the bulk add waits, and it does.
           disabled={signedOut}
           checked={status.sync_all_providers === true}
           onChange={(value) => {
@@ -141,10 +130,8 @@ export const SettingsSection: FC<SettingsSectionProps> = ({
             void onSetSetting("ui_scale", option.data).then(setStatus);
           }}
         />
-        {/* What was detected, said out loud. The scale is applied before the
-            browser paints, so a wrong guess shows up only as a UI that is the
-            wrong size — and "Auto" is otherwise a number taken on trust. The
-            same sentence goes into the launch log. */}
+        {/* Show what was detected: "Auto" is otherwise a number taken on trust,
+            and a wrong guess only shows up as a wrong-sized UI. */}
         {status.ui_scale_detected && (
           <div style={{
             fontSize: "0.7em",
@@ -171,9 +158,8 @@ export const SettingsSection: FC<SettingsSectionProps> = ({
           onChange={(value) => {
             void onSetSetting("badge_enabled", value).then((next) => {
               setStatus(next);
-              // The badge caches this for half a minute so that paging
-              // through a library is not two RPCs per press. A setting the
-              // user just changed must not wait that out.
+              // the badge caches this for ~30s; a setting just changed must
+              // not wait that out
               invalidateBadgeData();
             });
           }}

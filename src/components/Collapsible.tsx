@@ -1,16 +1,9 @@
 // Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 //
-// Collapsible panel sections, matching the layout used by steamstatus-decky:
-// a focusable header with the section icon on the left and a chevron on the
-// right, a soft tint while focused, and an indented body when open.
-//
-// Built from Focusable rather than Field because the header needs two things
-// on one row — icon+label pushed left, chevron pushed right — and Field owns
-// its own row layout. Focusable gives the controller behaviour with none of
-// the layout opinions.
-//
-// Collapsed by default: this is read on a 7-inch screen with a thumbstick, so
-// opening everything at once buries the controls underneath.
+// Collapsible panel sections: a focusable header with icon and chevron, a soft
+// tint while focused, an indented body when open. Built on Focusable, not Field,
+// so we own the row layout. Collapsed by default: read on a 7-inch screen, so
+// opening all at once buries the controls.
 
 import { Focusable } from "@decky/ui";
 import { createContext, ReactNode, useContext, useState } from "react";
@@ -20,24 +13,14 @@ import { nextOpenId } from "../lib/accordion";
 import { theme } from "../lib/theme";
 
 /** Shared "which one is open" for a set of sections, or null when standalone.
- *
- *  Optional on purpose. A Collapsible used on its own -- NoBrowser is one --
- *  keeps its own state and behaves exactly as before; only sections rendered
- *  inside a group answer to each other.
- */
+ *  A Collapsible on its own (NoBrowser) keeps its own state. */
 const GroupContext = createContext<{
   openId: string | null;
   setOpenId: (id: string | null) => void;
 } | null>(null);
 
-/** Let only one of the sections inside be open at a time.
- *
- *  The panel is read on a 7-inch screen with a thumbstick. Settings, Links and
- *  About are each long enough that two of them open at once pushes the rest
- *  off the bottom, and the thing you were reaching for moves while you reach
- *  for it. Opening one now closes the last, so the panel's height stays in the
- *  same neighbourhood however you got there.
- */
+/** Let only one section inside be open at a time. Two open at once on a 7-inch
+ *  screen push the rest off the bottom, so opening one closes the last. */
 export function CollapsibleGroup({ children }: { children: ReactNode }) {
   const [openId, setOpenId] = useState<string | null>(null);
   return (
@@ -65,9 +48,8 @@ export function Collapsible({
   const [localOpen, setLocalOpen] = useState(defaultOpen);
   const [focused, setFocused] = useState(false);
 
-  // The title doubles as the identity. These are headings a person reads, so
-  // they are already distinct within a group -- and a separate id prop would
-  // be one more thing to keep in step with the label for no gain.
+  // The title is the identity too: these are headings a person reads, so they
+  // are already distinct, and a separate id prop would be one more thing to sync.
   const open = group ? group.openId === title : localOpen;
   const toggle = () => {
     if (group) group.setOpenId(nextOpenId(group.openId, title));

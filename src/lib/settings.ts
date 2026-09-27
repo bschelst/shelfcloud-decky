@@ -1,56 +1,36 @@
 // Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 //
-// Settings behaviour that is more than "store what the control says".
-//
-// In lib/ rather than beside the panel because SettingsSection imports
-// @decky/ui, which only loads inside Steam — anything living in that file is
-// unreachable from a test.
+// Settings behaviour that is more than "store what the control says". in lib/ and
+// not next to the panel because SettingsSection imports @decky/ui, which only
+// loads inside Steam, so anything in that file can not be reached from a test.
 
 import type { Status } from "./types";
 
 export interface TilePerServiceDeps {
   setSetting: (key: string, value: unknown) => Promise<Status>;
   setStatus: (s: Status) => void;
-  /** Pulls in the games the user can play but has never added. */
+  // pulls in the games the user can play but has never added.
   onEnabled?: () => void;
-  /** Whether a sync or bulk add is already running. The setting is stored
-   *  regardless; only the fetch that follows is held back. */
+  // whether a sync or bulk add is already running. the setting is stored either
+  // way; only the fetch that follows is held back.
   busy?: boolean;
 }
 
-/**
- * What happens when "a tile per service" is switched.
- *
- * The ORDER here is the whole behaviour.
- *
- * On: store the setting, wait for it, and only then pull the games in. The
- * fetch ends in a sync, and a sync that read the old value would fan nothing
- * out — the games would arrive in exactly the shape the option was switched
- * on to change.
- *
- * Off: store it and stop. Switching off only takes tiles away; there is
- * nothing to fetch, and a bulk add there would be the opposite of what was
- * asked for.
- *
- * The fetch matters because the option alone is not enough. It fans a game
- * out across every service it plays on, which does nothing for a service
- * whose games were never added: a library holding 8 of Amazon Luna's 119
- * titles gives 8 Luna tiles however this is set. The other 111 are covered by
- * the subscription and nothing had ever asked for them.
- */
+// What happens when "a tile per service" is switched. the ORDER is the whole
+// behaviour. on: store the setting, wait for it, then pull the games in, because a
+// sync reading the old value would fan nothing out. off: store it and stop, since
+// switching off only takes tiles away. the fetch matters because the option alone
+// only fans out games already added: a library with 8 of Luna's 119 titles stays
+// at 8 tiles until the other 111 are fetched.
 export async function applyTilePerService(
   value: boolean,
   deps: TilePerServiceDeps,
 ): Promise<void> {
-  // The setting is stored FIRST and unconditionally, whatever else is going
-  // on. It used to be reachable only when nothing was running, which meant a
-  // tap during one of the syncs that happen every few minutes did nothing at
-  // all and said nothing about it.
+  // the setting is stored first and always, whatever else is going on. it used to
+  // be reachable only when nothing ran, so a tap during a sync did nothing.
   const next = await deps.setSetting("sync_all_providers", value);
   deps.setStatus(next);
-  // The games that follow can wait for a free moment; the answer to "is this
-  // on" cannot. `busy` is what the caller knows about a run in flight — with
-  // one going, the fetch is skipped and the sync already under way picks the
-  // setting up on its next pass.
+  // the games that follow can wait; the answer to "is this on" can not. if a run
+  // is in flight the fetch is skipped and that sync picks the setting up next pass.
   if (value && !deps.busy) deps.onEnabled?.();
 }

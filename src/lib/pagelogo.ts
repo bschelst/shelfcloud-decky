@@ -1,60 +1,23 @@
 // Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 //
-// A logo for a page you added, drawn from its name.
+// A logo for an added page, drawn from its name. Steam paints the logo slot
+// over the hero INSTEAD of the title, so every added page used to show the
+// Shelfcloud wordmark and none said which page it was. So we draw the name.
 //
-// Steam paints the logo slot over the hero and uses it INSTEAD of the title,
-// so a tile that has one shows a picture where its name would be. For a
-// published page that is fine — the picture IS the name, drawn nicely. For a
-// page somebody added themselves it was actively wrong: every one of them got
-// the Shelfcloud wordmark, so a shelf of pages all claimed to be called
-// Shelfcloud, and the one thing that said which page you were looking at was
-// the thing being covered up.
-//
-// So the name is drawn. The mark on the left says where the tile came from,
-// the words say which page it is, and the result is the same shape as every
-// publisher logo Steam already draws.
-//
-// Rendered HERE rather than on the gateway deliberately. The server has
-// neither an image library nor a font, and adding both — plus a licence to
-// carry — to produce a picture only Steam ever looks at is a large amount of
-// machinery for one slot. This runs inside Steam's own UI, which has a canvas
-// and a font already, and that font is the one the rest of Steam is set in.
-//
-// The layout is separated from the drawing on purpose: a canvas cannot be
-// exercised in this test suite, but the arithmetic that decides where the
-// words go and whether they fit can be, and that is where the bugs are.
-//
-// The capsule next door is drawn the same way, from the same fitting code —
-// see pagecapsule.ts.
+// Drawn here, not on the gateway: the server has no image library or font, and
+// this runs inside Steam's UI, which has a canvas and the right font already.
+// The layout is kept apart from the drawing so the fitting math can be tested
+// without a canvas. The capsule next door works the same way, see
+// pagecapsule.ts.
 
 import { INK, loadImage, toPng, type Png, type SourceImage } from "./canvas";
 import { fitText, tidyName } from "./textfit";
 
-/** Steam's logo canvas.
- *
- *  640 wide like every logo Steam serves. The HEIGHT is not 360, and that is
- *  the point: 360 is what a publisher ships when the artwork FILLS it, and
- *  ours does not. The mark is 150 tall and the words beside it about the
- *  same, so on a 360 canvas the content sat between 29% and 71% of the
- *  height with nothing above or below it.
- *
- *  Steam pins the logo against the bottom of the hero, so that empty 29%
- *  became a gap under the words and the whole thing floated. Disney/Pixar
- *  WALL-E sat visibly higher than the games either side of it.
- *
- *  Measured rather than guessed, off Steam's own CDN. Real logos put their
- *  content between roughly 20% and 85% of the canvas:
- *
- *      Hades           y 19%..87%      Cyberpunk 2077  y 27%..79%
- *      Hollow Knight   y 24%..88%      Terraria        y 25%..78%
- *
- *  and Portal 2 ships 640x191 with the artwork filling all of it, which is
- *  the case that settles it: a short, wide logo canvas is normal and Steam
- *  draws it correctly. So the canvas is cut to the content instead of the
- *  content being floated in a canvas built for someone else's artwork.
- *
- *  At 210 the same content lands at 14%..86%, which is where the measured
- *  logos live. */
+/** Steam's logo canvas. 640 wide like every logo Steam serves. The height is
+ *  NOT 360: our content only fills the middle, so on a 360 canvas Steam pinned
+ *  it to the hero bottom and a gap floated above. Real logos, measured off
+ *  Steam's CDN, keep their content between about 20% and 85%; at 210 ours lands
+ *  at 14%..86%, right where those sit. */
 export const LOGO_W = 640;
 export const LOGO_H = 210;
 
@@ -69,31 +32,20 @@ const SIZES = [64, 56, 48, 42, 36, 30, 26, 22];
 const MAX_LINES = 2;
 
 export interface LogoLayout {
-  /** Point size for the name. */
   size: number;
-  /** The name broken into lines, already truncated if it could not fit. */
-  lines: string[];
-  /** Left edge of the text column. */
+  lines: string[];    // cut short if the name could not fit
   textLeft: number;
-  /** Width the widest line actually occupies at `size`. */
-  textWidth: number;
-  /** Where the mark is drawn. */
+  textWidth: number;  // width the widest line takes at `size`
   mark: { x: number; y: number; size: number };
 }
 
-/**
- * Decide how the name is set.
- *
- * `measure` returns the width of a string at a given size — supplied by the
- * caller so this stays pure. The canvas provides the real one; a test provides
- * a predictable one.
- */
+/** Decide how the name is set. `measure` is passed in so this stays pure — the
+ *  canvas gives the real one, a test a fixed one. */
 export function logoLayout(
   name: string,
   measure: (text: string, size: number) => number,
 ): LogoLayout {
-  // The widest the text column can ever be — mark pinned to the left margin.
-  // Fitting decides size and wrapping against this; centring comes after.
+  // Widest the text column can be, with the mark pinned to the left margin.
   const maxTextWidth = LOGO_W - (EDGE + MARK_BOX + GAP) - EDGE;
 
   const fitted = fitText(
@@ -102,12 +54,9 @@ export function logoLayout(
     measure,
   );
 
-  // The name almost never fills the column, so [mark][gap][text] is narrower
-  // than the canvas. Pinned to the left margin it sat off to one side, and
-  // Steam draws the provider chip centred under the logo slot -- so the chip
-  // ended up floating to the right of the mark instead of sitting under it.
-  // Measure what the text really occupies and centre the whole group; now the
-  // mark, the name and the chip beneath them share one vertical axis.
+  // The name rarely fills the column, so pinned left the group sat off to one
+  // side while Steam's provider chip stays centred under the slot. Centre the
+  // whole group so the mark, the name and the chip line up.
   const textWidth = fitted.lines.reduce(
     (widest, line) => Math.max(widest, measure(line, fitted.size)), 0);
   const contentWidth = textWidth > 0 ? MARK_BOX + GAP + textWidth : MARK_BOX;
@@ -118,13 +67,8 @@ export function logoLayout(
   return { size: fitted.size, lines: fitted.lines, textLeft, textWidth, mark };
 }
 
-/**
- * Draw the logo and return it as base64 PNG, or undefined if this environment
- * cannot draw.
- *
- * `markPng` is the tile's own square mark, already downloaded for the icon
- * slot — passed in rather than fetched again.
- */
+/** Draw the logo as base64 PNG, or undefined if this environment cannot draw.
+ *  `markPng` is the tile's own square mark, already downloaded for the icon. */
 export async function renderPageLogo(
   name: string,
   markPng?: SourceImage,
@@ -165,8 +109,7 @@ export async function renderPageLogo(
 
     return toPng(canvas);
   } catch {
-    // Drawing is a nicety. A tile with no logo shows its name as text, which
-    // is the outcome this is trying to produce anyway.
+    // drawing is a nicety. with no logo the tile just shows its name as text.
     return undefined;
   }
 }

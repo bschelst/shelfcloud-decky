@@ -1,19 +1,11 @@
 // Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 //
-// The two bits of browser that drawing a tile needs.
-//
-// Separated from the tiles themselves so the layout modules stay pure and
-// testable, and so the capsule does not have to reach into the logo to borrow
-// them.
+// The two bits of browser that drawing a tile needs. Kept apart from the tiles
+// so the layout modules stay pure and testable.
 
-/** The palette the shipped tiles are drawn in.
- *
- *  Both sampled out of the PNGs rather than copied from the SVG, and that is
- *  the point: the SVG's #0f1621 is the colour of the shelf slots CUT OUT of
- *  the cloud, not the ground behind it. Using it here would have put a drawn
- *  capsule on a visibly lighter navy than the header and hero the gateway
- *  serves for the same tile. The three opaque tiles are all #0b0f16, and the
- *  wordmark is set in #e8eaed. */
+/** The palette the shipped tiles are drawn in. Sampled from the PNGs, not the
+ *  SVG: the SVG's #0f1621 is the slots cut out of the cloud, and using it gave
+ *  a lighter navy. */
 export const GROUND = "#0b0f16";
 export const INK = "#e8eaed";
 
@@ -33,11 +25,8 @@ const DECODE_TIMEOUT = 10000;
 
 export function loadImage(src: string): Promise<HTMLImageElement | null> {
   return new Promise((resolve) => {
-    // onload and onerror cover a picture that arrives and one that is refused.
-    // They do not cover a decode that simply never finishes, and this is fed
-    // base64 that came off the network -- so a third ending is needed, or a
-    // single bad image stops the sync where it stands. Drawing is a nicety
-    // anyway: null here means the tile keeps its own art.
+    // onload/onerror cover an image that arrives or is refused, not a decode
+    // that never finishes — so a timeout, else one bad image stops the sync.
     let done = false;
     const finish = (value: HTMLImageElement | null) => {
       if (done) return;

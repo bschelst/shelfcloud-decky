@@ -1,24 +1,17 @@
 // Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 //
-// What the library badge needs to know, fetched once and shared.
-//
-// The badge mounts every time a game page is opened — which on a Deck is
-// constantly, and on a library of several hundred cloud tiles is the most
-// frequently mounted component this plugin has. Fetching per mount would put
-// two RPCs behind every press of the A button.
-//
-// So both answers live at module scope with a short life, and concurrent
-// callers share one in-flight request rather than starting their own. Neither
-// answer changes except when a sync runs or a setting is changed, and both of
-// those already tell us.
+// What the library badge needs to know, fetched once and shared. The badge
+// mounts every time a game page opens, which on a Deck is constantly, so
+// fetching per mount would put two RPCs behind every A press. Both answers live
+// at module scope with a short life, and callers arriving together share one
+// request. Neither changes except on a sync or a setting change.
 
 import { useEffect, useState } from "react";
 
 import { currentPlayers, getStatus, trackedProviders } from "./api";
 
-/** How long an answer may be reused. Long enough that paging through a
- *  library costs one request, short enough that a sync finishing elsewhere
- *  shows up without anyone reopening the panel. */
+/** How long an answer may be reused. Long enough that paging a library costs
+ *  one request, short enough that a sync finishing elsewhere shows up. */
 const CACHE_MS = 30_000;
 
 interface Cached<T> {
@@ -40,34 +33,24 @@ let badge = emptyCache<{
 }>({ enabled: true, onCards: true, position: "bl",
      players: false, playersPosition: "tr" });
 
-/** Throw both answers away, so the next badge asks again.
- *
- *  Called when a sync finishes: tiles have been made or removed, so the
- *  app-id map is stale by definition. */
+/** Throw both answers away so the next badge asks again. Called when a sync
+ *  finishes: tiles were made or removed, so the app-id map is stale. */
 export function invalidateBadgeData(): void {
   providers = emptyCache(providers.value);
   steamIds = emptyCache(steamIds.value);
   badge = emptyCache(badge.value);
 }
 
-/** The last answers, without waiting for anything.
- *
- *  For the focused-card badge, which runs inside a mutation observer: that
- *  fires while the user is moving the highlight and has to decide what to
- *  draw immediately. An await there would draw the badge a frame or two after
- *  the card it belongs to, which looks like a bug.
- *
- *  Starts as "nothing is ours", so the first card focused before the first
- *  fetch returns gets no badge rather than a wrong one. `refreshBadgeData`
- *  fills it in and the observer's next tick picks it up. */
+/** The last answers, without waiting. For the focused-card badge in a mutation
+ *  observer, which must draw right away — an await would draw a frame late.
+ *  Starts as "nothing is ours", so a card before the first fetch gets no badge. */
 export function badgeDataNow(): {
   providers: Record<string, string>; enabled: boolean; position: string;
 } {
   return {
     providers: providers.value,
-    // The CARD badge has its own switch. Turning the game-page one off should
-    // not silently take this with it, and the reverse: they are two places,
-    // and somebody may well want one and not the other.
+    // The card badge has its own switch. Turning the game-page one off should
+    // not take this with it, they are two places and someone may want just one.
     enabled: badge.value.onCards,
     position: badge.value.position,
   };
@@ -89,8 +72,7 @@ export function refreshBadgeData(): void {
       enabled: status?.badge_enabled !== false,
       onCards: status?.badge_on_cards !== false,
       position: status?.badge_position ?? "bl",
-      // Off by default. It asks Steam a question per game page opened, and a
-      // count nobody wanted is not worth that.
+      // off by default. it asks Steam a question on every page open.
       players: status?.players_enabled === true,
       playersPosition: status?.players_position ?? "tr",
     };
@@ -100,8 +82,8 @@ export function refreshBadgeData(): void {
 async function read<T>(cache: Cached<T>, fetcher: () => Promise<T>): Promise<T> {
   const now = Date.now();
   if (cache.at && now - cache.at < CACHE_MS) return cache.value;
-  // One request for however many callers arrive while it is open. Without
-  // this, opening a page mid-sync could start several at once.
+  // one request for all the callers that arrive while it is open. without this,
+  // opening a page mid-sync could start several at once.
   if (!cache.inFlight) {
     cache.inFlight = fetcher()
       .then((value) => {
@@ -116,9 +98,7 @@ async function read<T>(cache: Cached<T>, fetcher: () => Promise<T>): Promise<T> 
 }
 
 /** Which service a tile launches, or undefined when it is not one of ours.
- *
- *  Undefined is the normal answer: most games on a Deck are not cloud tiles,
- *  and the badge renders nothing for them. That is the whole meaning of it. */
+ *  Undefined is the normal answer, most games are not cloud tiles. */
 export function useProviderForApp(appId: string | undefined): string | undefined {
   const [provider, setProvider] = useState<string | undefined>(
     appId ? providers.value[appId] : undefined);
@@ -144,18 +124,13 @@ export function useProviderForApp(appId: string | undefined): string | undefined
 export function useBadgeSettings(): {
   enabled: boolean; onCards: boolean; position: string;
   players: boolean; playersPosition: string;
-  /** False until the real settings have been read.
-   *
-   *  The defaults below are a GUESS, and a badge drawn on a guess is a badge
-   *  that appears and then vanishes when the answer arrives -- which is what
-   *  a switched-off badge did on every page open. Nothing draws until this
-   *  is true, so the only badge ever shown is one that was actually asked
-   *  for. */
+  /** False until the real settings are read. A badge drawn on the guessed
+   *  defaults shows up then vanishes, so nothing draws until this is true. */
   loaded: boolean;
 } {
   const [value, setValue] = useState(badge.value);
-  // `at` is 0 until a fetch has landed. Module scope, so a second page open
-  // in the same session already knows and does not flash.
+  // `at` is 0 until a fetch has landed. module scope, so a second page open in
+  // the same session already knows and does not flash.
   const [loaded, setLoaded] = useState(badge.at !== 0);
 
   useEffect(() => {
@@ -167,8 +142,8 @@ export function useBadgeSettings(): {
         onCards: status?.badge_on_cards !== false,
         position: status?.badge_position ?? "bl",
         players: status?.players_enabled === true,
-        // Top right by default, so it does not land on the provider badge,
-        // which defaults to the bottom left.
+        // top right by default, so it does not land on the provider badge,
+        // which defaults to bottom left.
         playersPosition: status?.players_position ?? "tr",
       };
     }).then((next) => {
@@ -183,17 +158,9 @@ export function useBadgeSettings(): {
 }
 
 
-/** How many people are playing this tile's game on Steam, if anyone can say.
- *
- *  Undefined covers three different "no": the tile is not one of ours, its
- *  game is not on Steam at all (about one in six), or Steam had no answer.
- *  None of those is a zero, and showing "0 playing" for any of them would be
- *  a statement we cannot support.
- *
- *  Not cached here: current_players caches on the backend, where the answer
- *  is shared by every page that asks and a five minute life is right. A
- *  second cache in front of it would only make the number staler.
- */
+/** How many people play this tile's game on Steam, if anyone can say. Undefined
+ *  covers three kinds of "no": not ours, not on Steam, or Steam had no answer —
+ *  none is a zero. Not cached here, current_players caches on the backend. */
 export function usePlayersForApp(appId: string | undefined): number | undefined {
   const [players, setPlayers] = useState<number | undefined>(undefined);
 

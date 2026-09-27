@@ -1,12 +1,8 @@
 // Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 //
-// One place for colour, so the page reads as designed rather than assembled.
-//
-// Steam's Game Mode is a dark, desaturated blue-grey. Picking an accent that
-// sits *with* that rather than fighting it is the difference between a plugin
-// page that looks native and one that looks bolted on — so the accent is a
-// cloud blue drawn from the same family as Steam's own selection colour, and
-// the neutrals are blue-biased rather than pure grey.
+// One place for colour. Steam's Game Mode is a dark blue-grey, so the accent is
+// a cloud blue from the same family as Steam's own selection colour, and the
+// neutrals lean blue rather than pure grey, to look native.
 
 import { providerLabel } from "./types";
 
@@ -25,14 +21,14 @@ export const theme = {
   textDim: "rgba(232, 234, 237, 0.72)",
   textFaint: "rgba(232, 234, 237, 0.48)",
 
-  /** Semantic, and deliberately separate from the accent: a green that also
-   *  means "GeForce NOW" would make state and branding indistinguishable. */
+  /** Status colours, kept apart from the accent: a green that also means
+   *  "GeForce NOW" would mix up state and branding. */
   good: "#5ac878",
   warn: "#f0b429",
   bad: "#ff6b6b",
 
-  /** A focus tint derived from whatever colour a section carries, so the
-   *  highlight always belongs to that section rather than to a fixed accent. */
+  /** A focus tint made from whatever colour a section carries, so the highlight
+   *  belongs to that section. */
   tint(color: string, alpha: number): string {
     const hex = color.replace("#", "");
     if (hex.length !== 6) return `rgba(255, 255, 255, ${alpha})`;
@@ -41,22 +37,15 @@ export const theme = {
   },
 } as const;
 
-/** Provider colours, taken from each service's own branding.
- *
- * These are identity, not decoration — a row tinted GeForce green should mean
- * GeForce and nothing else, which is why they never double as status colours.
- */
-// Colours ONLY. The label comes from types.ts, which is the one place a
-// provider is named — this file used to carry its own copy, and keeping two in
-// step is exactly what failed when Luna was added: the guide here knew the
-// name, and the Steam tile title did not, so it shipped as
-// "Fortnite (amazon_luna)".
+/** Provider colours, from each service's own branding. Identity, not decoration,
+ *  so they never double as status colours. */
+// Colours only. The label comes from types.ts, the one place a provider is
+// named -- two copies is what shipped "Fortnite (amazon_luna)" when Luna landed.
 const PROVIDER_COLORS: Record<string, string> = {
   boosteroid: "#7b61ff",
   geforce_now: "#76b900",
   xbox_cloud: "#107c10",
-  // Luna's own purple. Far enough from Boosteroid's that a tinted row still
-  // names one service at a glance, which is the only thing these are for.
+  // Luna's purple, far enough from Boosteroid's to tell them apart at a glance.
   amazon_luna: "#c86dd7",
 };
 

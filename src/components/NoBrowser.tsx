@@ -1,17 +1,9 @@
 // Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 //
-// Shown when no supported browser is installed — the only state in which
-// Shelfcloud cannot do its job at all.
-//
-// It used to be one line of text telling the user to leave Game Mode, open
-// Discover, find a browser and come back. That is four context switches to
-// fix something the plugin can do in a few seconds: SteamOS ships no browser
-// but does ship the Flathub remote, and plugin backends run as `deck`, so a
-// --user install needs no root and no password prompt — which matters,
-// because Game Mode has no way to show one.
-//
-// The Desktop Mode instructions are still here, below the buttons, for when
-// the install fails or there is no network.
+// Shown when no supported browser is installed, the one state where Shelfcloud
+// cannot work. We install one from Flathub as `deck` (a --user install needs no
+// root, and Game Mode cannot show a password prompt). Desktop Mode instructions
+// stay below the buttons for when the install fails or there is no network.
 
 import { ButtonItem, PanelSection, PanelSectionRow } from "@decky/ui";
 import { FaDownload, FaExclamationTriangle } from "react-icons/fa";
@@ -73,9 +65,7 @@ export function NoBrowser({ installable, install, onInstall, onDismiss }: NoBrow
               <FaExclamationTriangle color={theme.bad} />
               <strong>{install.message}</strong>
             </div>
-            {/* The real reason, not a generic apology: it is usually "no
-                network" or "Flathub unreachable", both of which the user can
-                act on. */}
+            {/* the real reason, usually "no network" or "Flathub unreachable" */}
             <div style={{ color: theme.textDim, wordBreak: "break-word" }}>
               {install.error}
             </div>
@@ -83,20 +73,14 @@ export function NoBrowser({ installable, install, onInstall, onDismiss }: NoBrow
         </PanelSectionRow>
       )}
 
-      {/* One button per browser, each with its reason directly beneath it
-          rather than in a legend further down — pairing them means the reader
-          does not have to hold two lists in their head to choose. Hidden
-          entirely while installing, so nothing can be pressed twice. */}
+      {/* One button per browser with its reason right beneath it. Hidden while
+          installing so nothing can be pressed twice. */}
       {!busy && installable.map((browser) => (
         <PanelSectionRow key={browser.app_id}>
           <div>
             <ButtonItem layout="below" onClick={() => onInstall(browser.app_id)}>
-              {/* nowrap because a wrapped ButtonItem label grows the row from
-                  40px to 60px, and these are the longest labels in the plugin:
-                  "Install Google Chrome" measures ~169px against the 187px a
-                  button gives its label. It fits, but not by enough to trust a
-                  font substitution — and a row that silently changes height is
-                  how the Remove-all button went wrong three times. */}
+              {/* nowrap: a wrapped ButtonItem label grows the row from 40 to
+                  60px, and these are the longest labels in the plugin */}
               <IconLabel icon={<FaDownload size={13} color={theme.accent} />}>
                 <span style={{ whiteSpace: "nowrap" }}>Install {browser.label}</span>
               </IconLabel>
@@ -120,9 +104,7 @@ export function NoBrowser({ installable, install, onInstall, onDismiss }: NoBrow
 
       {!busy && installable.length > 0 && (
         <PanelSectionRow>
-          {/* Inset like the per-browser note above it, which carries the same
-              padding. Without it this line sat flush against the last Install
-              button while the notes between the buttons did not. */}
+          {/* inset to match the per-browser notes above it */}
           <div style={{
             fontSize: "0.76em",
             color: theme.textFaint,
@@ -141,12 +123,9 @@ export function NoBrowser({ installable, install, onInstall, onDismiss }: NoBrow
         </PanelSectionRow>
       )}
 
-      {/* Always reachable: the fallback for no network, a Flathub outage, or
-          someone who would rather do it themselves.
-
-          No icon here. IconLabel centres its icon against the label, which
-          looks wrong beside three lines of wrapped text — and an icon on a
-          footnote earns nothing. */}
+      {/* Always here: the fallback for no network or a Flathub outage. No icon --
+          IconLabel centres it against the label, which looks wrong on wrapped
+          text. */}
       {!busy && (
         <PanelSectionRow>
           <div style={{

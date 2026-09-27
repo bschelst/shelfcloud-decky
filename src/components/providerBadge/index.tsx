@@ -1,19 +1,9 @@
 // Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 //
-// A small mark on a game's page saying which service streams it.
-//
-// Shaped after the ProtonDB plugin's medal, which solves the same problem on
-// the same page: sit over the hero image, survive the fullscreen transition,
-// and be placed by the user rather than by us. The mechanics that are not
-// obvious — the mutation observer, measuring the hero to place a bottom
-// badge — are taken from there deliberately, because they were arrived at
-// against a moving Steam UI and re-deriving them would be re-earning scars.
-//
-// What is different: a cloud tile is a NON-Steam shortcut, so the app id in
-// the route is the shortcut's own and needs no lookup against Steam's
-// catalogue. And the badge is shown only for tiles this plugin made — on
-// anything else it renders nothing at all, which is what makes it mean
-// "this one is a cloud game".
+// A small mark on a game's page saying which service streams it. Shaped after
+// the ProtonDB medal, which solves the same placement problem on the same page.
+// Shown only for tiles this plugin made, so on anything else it draws nothing --
+// which is what makes it mean "this one is a cloud game".
 
 import { type ReactElement } from "react";
 import { FaAmazon, FaCloud, FaXbox } from "react-icons/fa";
@@ -26,11 +16,8 @@ import { useParams } from "../../lib/useParams";
 import { useBadgeSettings, useProviderForApp } from "../../lib/badgeData";
 
 
-/** The mark for each service.
- *
- *  Boosteroid has no icon in react-icons and no wordmark we may redistribute,
- *  so it gets a generic cloud. The two website providers get the Shelfcloud
- *  mark, because what they have in common is that WE published them. */
+/** The mark for each service. Boosteroid has no react-icon, so it gets a plain
+ *  cloud. The two website providers get the Shelfcloud mark. */
 function ProviderIcon({ provider, size }: { provider: string; size: number }) {
   switch (provider) {
     case "geforce_now": return <SiNvidia size={size} />;
@@ -44,21 +31,15 @@ function ProviderIcon({ provider, size }: { provider: string; size: number }) {
   }
 }
 
-/** Find the hero capsule, which is what a bottom badge is measured against.
- *
- *  Walks from our own node rather than querying the document: there is one of
- *  these per app page and more than one app page can exist in the tree during
- *  a transition, so a global query can return somebody else's. */
+/** The provider badge: nothing unless this is one of our tiles. */
 export default function ProviderBadge(): ReactElement {
   const { appid } = useParams<{ appid: string }>();
   const provider = useProviderForApp(appid);
   const { enabled, position, loaded } = useBadgeSettings();
 
-  // Nothing at all unless this is one of ours. A badge on every game would
-  // say nothing; the whole meaning is "this tile streams".
-  // Nothing until the settings are READ. Drawing on the default and
-  // correcting a moment later is how a switched-off badge still flashed up
-  // on every page open.
+  // Nothing unless this is one of ours (a badge on every game would say
+  // nothing), and nothing until the settings are read -- drawing on the default
+  // and fixing it a moment later is how a switched-off badge still flashed up.
   if (!loaded || !enabled || !provider) return <></>;
 
   const { label, color: accent } = providerInfo(provider);

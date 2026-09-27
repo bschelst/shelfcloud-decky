@@ -1,64 +1,32 @@
 // Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 //
-// A promise that is not allowed to take forever.
-//
-// Every Steam client call the sync awaits is a promise handed back by code
-// none of this can see. The sync already assumes such a call may FAIL -- each
-// artwork slot is wrapped so one bad picture does not cost the others -- but
-// it assumed a call always SETTLES, and that is a different thing. A promise
-// that simply never resolves is not caught by a catch; the await sits there,
-// the loop never comes round, and nothing else in the sync ever runs again.
-//
-// That happened, twice, on the same call. SetCustomArtworkForApp stopped
-// coming back partway through a library: no error, no CPU, no network, no
-// further grid files -- and because the sync is serial, all 800-odd games
-// behind it stopped too. The panel showed a Cancel button that could do
-// nothing, because the loop that reads the cancel flag was never reached.
-//
-// So every wait gets a deadline. The slot is given up on, the sync moves to
-// the next game, and a library finishes with a few pictures missing instead
-// of stopping dead with most of them missing. A missing capsule is a retry
-// next sync; a frozen sync is a plugin that needs restarting.
+// A promise that is not allowed to take forever. Every Steam client call the sync
+// awaits comes from code we can not see. The sync handles a call that FAILS, but
+// a promise that simply never settles is not caught by a catch: the await sits
+// there and nothing else in the sync runs again (SetCustomArtworkForApp did this
+// twice). so every wait gets a deadline, the sync gives up the slot and moves on,
+// and a library finishes with a few pictures missing instead of frozen.
 
-/** How long any single Steam call may take before it is abandoned.
- *
- *  Generous on purpose. These calls write a file and talk to the Steam client,
- *  and on a busy Deck mid-sync that is not instant -- the measured worst case
- *  through the gateway was well under a second, so seconds of headroom means
- *  this only ever fires on a call that is genuinely never coming back. */
+// How long one Steam call may take before we give up on it. generous: these write
+// a file and talk to the Steam client, and the worst measured case was well under
+// a second, so this only fires on a call that is never coming back.
 export const STEAM_CALL_TIMEOUT = 15000;
 
-/** How long a call into the Python backend may take before it is abandoned.
- *
- *  Longer than a Steam call, because some of these genuinely do work -- an
- *  artwork download fetches over the network, and a layout install writes
- *  files. Still a deadline: these are promises over Decky's socket, and a
- *  message that never arrives leaves one pending for the life of the session.
- *  The backend sat idle through two frozen syncs for exactly this reason --
- *  nothing was wrong with it, the frontend had simply stopped asking. */
+// How long a backend call may take before we give up. longer than a Steam call
+// since some do real work (an artwork download, a layout install). still a
+// deadline: a message that never arrives would stay pending for the session.
 export const RPC_TIMEOUT = 20000;
 
-/** How long ONE game may take before the sync abandons it and moves on.
- *
- *  A backstop, not a budget. Every individual call in a game's turn already
- *  has its own deadline, so reaching this one means something is hanging that
- *  none of those cover -- and rather than work out what, in advance, the loop
- *  refuses to be held by any of it.
- *
- *  Three separate fixes went in by bounding one layer at a time -- the Steam
- *  calls, then the backend RPCs -- and the sync froze again after each,
- *  because the next await down was still unbounded. Bounding the ITERATION is
- *  the version that does not depend on guessing right: whatever hangs, the
- *  library still finishes and the log names the game it happened on. */
+// How long ONE game may take before the sync drops it and moves on. a backstop,
+// not a budget: every call in a game's turn has its own deadline, so reaching this
+// means something is hanging that none of those cover. bounding the iteration
+// means whatever hangs, the library still finishes and the log names the game.
 export const PER_GAME_TIMEOUT = 40000;
 
-/** Resolve with `whenLate` if `work` has not settled in `ms`.
- *
- *  Resolves rather than rejects: the callers here treat a failed slot as "skip
- *  it and carry on", and making a timeout throw would only mean writing the
- *  same catch at every call site. The abandoned promise is left alone -- there
- *  is no way to cancel it, and if it ever does settle nobody is listening.
- */
+// Resolve with `whenLate` if `work` has not settled in `ms`. resolves, not
+// rejects: the callers treat a failed slot as "skip it and carry on", so a throw
+// would only mean the same catch at every call site. the abandoned promise is
+// left alone (no way to cancel it, and nobody is listening if it ever settles).
 export function withTimeout<T>(
   work: Promise<T>, whenLate: T, ms = STEAM_CALL_TIMEOUT,
 ): Promise<T> {
@@ -71,18 +39,15 @@ export function withTimeout<T>(
       resolve(value);
     };
     const timer = setTimeout(() => done(whenLate), ms);
-    // A rejection is a normal outcome here and means the same as a timeout:
-    // this slot did not happen. Swallowed so the sync sees one shape.
+    // a rejection is normal here and means the same as a timeout: this slot did
+    // not happen. swallowed so the sync sees one shape.
     work.then((value) => done(value), () => done(whenLate));
   });
 }
 
-/** A Steam call we only need to COMPLETE, whatever it hands back.
- *
- *  Most of these return something the sync does not read -- it cares that the
- *  artwork was written, not what the client said about it -- so this flattens
- *  every outcome (value, rejection, or never) to the same "it is over now".
- */
+// A Steam call we only need to COMPLETE, whatever it returns. most of these hand
+// back something the sync does not read, so this flattens every outcome (value,
+// rejection, or never) to the same "it is over now".
 export function steamCall(work: unknown, ms = STEAM_CALL_TIMEOUT): Promise<void> {
   return withTimeout(
     Promise.resolve(work).then(() => undefined), undefined, ms,

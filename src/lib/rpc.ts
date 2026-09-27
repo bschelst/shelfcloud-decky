@@ -1,61 +1,26 @@
 // Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 //
-// Every call into the Python backend goes through here.
-//
-// RULE: no single message may exceed 4 MB, in either direction. Breaking it
-// does not raise, it closes the socket and freezes the plugin with an empty
-// log. Read docs/RPC-PAYLOAD-LIMITS.md before adding or changing an RPC.
-//
-// Decky carries these over a single websocket. That socket dies under a burst:
-// measured on hardware mid-sync, `DeckyBackend.ws.readyState` was CLOSED with
-// 553 calls outstanding and the request counter still climbing, because the
-// panel went on posting into a pipe that had no other end. Nothing throws when
-// that happens -- the promises simply never settle -- so the plugin does not
-// fail, it stops, and every await in the sync hangs at once. Seven separate
-// attempts to find "the call that hangs" were looking for a single culprit
-// when the answer was all of them, from the moment the socket went.
-//
-// Two rules, both of them about not doing that again:
-//
-//   1. Look before posting. A CLOSED socket is an error now, raised in
-//      milliseconds and visible in the log, instead of a promise nobody ever
-//      hears from. A dead channel should be loud.
-//
-//   2. Do not post faster than it can answer. The calls were fired as fast as
-//      a loop could issue them; they queue here instead, a few at a time. The
-//      same work reaches the backend, at a rate that does not bury it.
+// Every call into the Python backend goes through here. Two rules that both
+// exist because a burst over Decky's single websocket kills it silently (4 MB
+// message cap, no throw, promises never settle): check the socket before
+// posting, and don't post faster than it can answer. See
+// docs/RPC-PAYLOAD-LIMITS.md before adding an RPC.
 
 import { callable } from "@decky/api";
 
-/** How many backend calls may be in flight at once.
- *
- *  Small deliberately. These are local and quick, so a handful in parallel is
- *  already more than enough to keep the socket busy -- and the failure this
- *  exists to prevent came from having hundreds outstanding at once. */
+// kept small: these calls are local and fast, and the freeze we guard against
+// came from having hundreds open at once.
 const MAX_IN_FLIGHT = 4;
 
-/** How many of those a BACKGROUND caller may hold.
- *
- *  One slot is always kept for the panel. The sync issues thousands of calls
- *  and holds every permit for the fifty seconds it runs, so opening Quick
- *  Access mid-sync left get_status queued behind all of it -- the panel sat on
- *  "Loading…" for half a minute through no fault of its own, and a sync runs
- *  every few minutes so it was easy to hit.
- *
- *  The reserve is what fixes it: background work saturates what it is given,
- *  and the one thing a person is actually waiting for goes first. */
+// one slot is always kept free for the panel, so get_status does not wait behind
+// a sync that holds every permit for the fifty seconds it runs.
 const MAX_BACKGROUND = MAX_IN_FLIGHT - 1;
 
 let active = 0;
 const waiting: Array<() => void> = [];
 
-/** Whether Decky's socket can still carry a call.
- *
- *  Reads the loader's own websocket rather than keeping a guess of our own.
- *  When it cannot be found -- a Decky version that arranges this differently,
- *  or a test -- the answer is "yes": refusing to call on the strength of a
- *  missing internal would break the plugin for a detail it cannot see.
- */
+// Reads the loader's own socket. When we can not find it (other Decky version,
+// or a test) we say yes, so a missing detail does not break the plugin.
 interface DeckySocket {
   ws?: { readyState?: number };
   connect?: () => void;
@@ -75,19 +40,9 @@ export function socketUsable(): boolean {
   return state === 1;                       // 1 = OPEN
 }
 
-/** Ask Decky to open its socket again.
- *
- *  Waiting was not enough, and the measurement says why: this context's
- *  `ws` does not cycle, it stays CLOSED. The reconnects visible in the
- *  loader's journal belong to Steam's OTHER renderer contexts, each holding
- *  its own connection -- ours, once dropped, is simply never rebuilt, and
- *  every call after it waits for a socket that is not coming back.
- *
- *  DeckyBackend.connect() rebuilds it. Verified on hardware: CLOSED before
- *  the call, OPEN after. It is Decky's own method, the one its bootstrap
- *  uses, so this is asking for the reconnect Decky would have done rather
- *  than reaching around it.
- */
+// Ask Decky to open its socket again. Just waiting does not help: our own `ws`
+// stays CLOSED and is never rebuilt on its own. connect() rebuilds it, tested on
+// hardware (closed before, open after). It is Decky's own method.
 function reconnect(): void {
   try {
     backend()?.connect?.();
@@ -96,7 +51,7 @@ function reconnect(): void {
   }
 }
 
-/** How many calls are queued or running, for tests and diagnostics. */
+// how many calls are queued or running, for tests and diagnostics.
 export function rpcLoad(): { active: number; waiting: number } {
   return { active, waiting: waiting.length };
 }
@@ -104,11 +59,9 @@ export function rpcLoad(): { active: number; waiting: number } {
 async function withSlot<T>(run: () => Promise<T>,
                            background = false): Promise<T> {
   const ceiling = background ? MAX_BACKGROUND : MAX_IN_FLIGHT;
-  // `while`, not `if`. Waking a waiter and its taking the permit are a
-  // microtask apart, and a caller arriving in that gap takes the free slot
-  // synchronously -- so both proceed and more than MAX_IN_FLIGHT calls are in
-  // flight, which is the one thing this exists to prevent. Re-checking on
-  // wake costs a spurious loop and closes it.
+  // `while`, not `if`: a caller can slip into the gap between waking a waiter
+  // and it taking the slot, pushing us over the limit. re-checking on wake
+  // stops that.
   while (active >= ceiling) {
     await new Promise<void>((resolve) => waiting.push(resolve));
   }
@@ -121,31 +74,20 @@ async function withSlot<T>(run: () => Promise<T>,
   }
 }
 
-/** How long to wait for a closed socket to come back before giving up. */
-const RECONNECT_WAIT = 20000;
-/** How often to look while waiting. */
-const RECONNECT_POLL = 250;
+const RECONNECT_WAIT = 20000; // how long to wait for a closed socket to return
+const RECONNECT_POLL = 250; // how often to look while waiting
 
-/** Wait for Decky's socket to come back, or give up after RECONNECT_WAIT.
- *
- *  Measured on hardware: the socket does not stay down, it CYCLES -- ready,
- *  closed, ready again, dozens of times a minute, because several of Steam's
- *  renderer contexts each hold a connection and the router keeps one. Any
- *  single call has a good chance of landing in a closed moment.
- *
- *  Refusing on the spot was honest and useless: it turned a gap of a few
- *  seconds into a failed sync and a panel that could not load. Waiting rides
- *  straight over the gap, which is the difference between a plugin that works
- *  and a plugin that correctly explains why it does not.
- */
+// Wait for the socket to come back, or give up after RECONNECT_WAIT. The socket
+// does not stay down, it keeps flipping open/closed many times a minute, so any
+// one call may land in a closed moment. waiting rides over the gap instead of
+// turning a few seconds into a failed sync.
 async function waitForSocket(): Promise<boolean> {
   if (socketUsable()) return true;
   const until = Date.now() + RECONNECT_WAIT;
   let asked = 0;
   while (Date.now() < until) {
-    // Ask, then wait; and ask again every couple of seconds, because the
-    // first attempt can land while the loader is still tearing the old
-    // connection down.
+    // ask again every couple of seconds: the first try can land while the old
+    // connection is still being torn down.
     if (Date.now() >= asked) {
       reconnect();
       asked = Date.now() + 2000;
@@ -156,56 +98,28 @@ async function waitForSocket(): Promise<boolean> {
   return false;
 }
 
-/** How long any single backend call may stay outstanding.
- *
- *  Not a performance budget -- it is far longer than any call here takes. It
- *  exists so that a call which never comes back cannot cost a SLOT forever.
- *
- *  That distinction is the whole freeze. withTimeout gives up WAITING on a
- *  promise, but it cannot cancel it, so the abandoned call still sits inside
- *  withSlot holding its permit. Four of those and every later call -- the
- *  panel's get_status included -- queues behind permits that will never come
- *  back. The plugin does not fail at that point, it goes quiet, which is
- *  precisely what "stuck on Loading..." was.
- *
- *  So the slot is released on a deadline too, and the call is rejected rather
- *  than left pending: the callers all treat a failed call as "skip it and
- *  carry on", and an error names itself in the log where silence names
- *  nothing.
- *
- *  It bounds the WHOLE guarded operation, not each attempt. Applied per call
- *  it was not the 60 s it claimed: a socket wait, the call, another socket
- *  wait and a retry could hold one slot for about 160 s -- nearly three
- *  minutes of a permit that four callers are sharing. */
+// How long one backend call may stay open. Not a speed budget, it is far longer
+// than any real call. it exists so a call that never comes back can not hold a
+// slot forever, which is what left the panel stuck on "Loading...". bounds the
+// whole guarded operation, not each try.
 const CALL_DEADLINE = 60000;
 
-/** The largest argument this will put on the wire.
- *
- *  Decky carries these over aiohttp, which CLOSES a websocket on a message
- *  over 4 MB instead of raising. Nothing reports it: the socket simply stops,
- *  every outstanding promise stays pending forever, and the log ends
- *  mid-sentence. Two separate freezes were this, a hero image and then an
- *  icon, and each cost a day because the failure erases its own evidence.
- *
- *  Refusing loudly under the cap turns a silenced plugin into one failed call
- *  with a message that says which one and how big. Anything genuinely this
- *  large belongs in slices -- see ARTWORK_CHUNK_CHARS -- or should be named by
- *  URL and fetched on the Python side, which is what the icon does now. */
+// Biggest argument we put on the wire. Decky closes the socket on a message over
+// 4 MB instead of raising, and it does so silently, so we refuse under the cap
+// and say which call and how big. Big things go in slices, or named by URL and
+// fetched in Python.
 const MAX_ARG_CHARS = 3 * 1024 * 1024;
 
 function tooBig(name: string, args: unknown[]): string | undefined {
-  // The whole argument list, not each string in it. What aiohttp measures is
-  // the MESSAGE, so a big value nested in an object counts exactly as much as
-  // a big top-level one — and several of these take objects: set_steam_ids
-  // sends a map of the entire library, record_shortcut seven fields. Checking
-  // only top-level strings would have let precisely those through, which is
-  // the same blind spot in a different place.
+  // the whole argument list, not each string: aiohttp measures the message, so a
+  // big value nested in an object counts just as much. some of these take
+  // objects (set_steam_ids, record_shortcut).
   let size: number;
   try {
     size = JSON.stringify(args)?.length ?? 0;
   } catch {
-    // Not serialisable — a cycle, or a BigInt. Decky cannot send it either, so
-    // let the call go and fail on its own terms rather than inventing a reason.
+    // not serialisable (a cycle, or a BigInt). Decky can not send it either, so
+    // let the call go and fail on its own.
     return undefined;
   }
   if (size <= MAX_ARG_CHARS) return undefined;
@@ -215,7 +129,7 @@ function tooBig(name: string, args: unknown[]): string | undefined {
     + "in Python (see docs/RPC-PAYLOAD-LIMITS.md)";
 }
 
-/** Reject if `work` has not settled in `ms`, so its slot is always given up. */
+// Reject if `work` has not settled in `ms`, so its slot is always freed.
 function onADeadline<T>(work: Promise<T>, ms: number, name: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(
@@ -226,28 +140,21 @@ function onADeadline<T>(work: Promise<T>, ms: number, name: string): Promise<T> 
   });
 }
 
-/** A backend method, rate-limited and ridden over a socket that keeps
- *  cycling. */
+// A backend method, rate-limited and safe over a socket that keeps flipping.
 export function guarded<A extends unknown[], R>(
   name: string, background = false,
 ): (...args: A) => Promise<R> {
   const call = callable<A, R>(name);
   return (...args: A): Promise<R> =>
     withSlot(async () => {
-      // Checked before the socket, because this is the one failure that takes
-      // the socket WITH it. A refusal here costs one call; sending it costs
-      // the connection and every call still waiting on it.
+      // checked before the socket: this is the one failure that takes the socket
+      // with it. a refusal here costs one call, sending it costs the connection.
       const oversized = tooBig(name, args);
       if (oversized) return Promise.reject(new Error(oversized));
       if (!socketUsable() && !(await waitForSocket())) {
-        // Thrown rather than left pending. The callers already treat a failed
-        // call as "skip this and carry on", and an error that says why beats
-        // a sync that stops with no reason recorded anywhere.
-        //
-        // It says what to DO, because nothing here can fix it: Decky exposes
-        // no way to reopen this socket, and it does not reopen itself. An
-        // error that only says "unreachable" leaves you pressing Sync at
-        // something that can never answer.
+        // thrown, not left pending, and it says what to do: nothing here can
+        // reopen the socket, so an error that only says "unreachable" would
+        // leave you pressing Sync at something that can never answer.
         return Promise.reject(new Error(
           "Decky's connection to the plugin has been down for "
           + `${RECONNECT_WAIT / 1000}s \u2014 reload Shelfcloud in Decky `
@@ -258,11 +165,9 @@ export function guarded<A extends unknown[], R>(
       try {
         return await onADeadline(call(...args), left(), name);
       } catch (error) {
-        // One retry, and only for a call that failed WITH the socket. Decky
-        // drops the in-flight call when the connection goes, so this is the
-        // difference between a sync surviving a five second gap and a sync
-        // ending on one. A call that failed for its own reasons is not
-        // retried -- the socket is still up, so the error is real.
+        // one retry, and only when the call failed WITH the socket. Decky drops
+        // the in-flight call when the connection goes, so this lets a sync
+        // survive a short gap. if the socket is still up the error is real.
         if (socketUsable()) throw error;
         if (!(await waitForSocket())) throw error;
         return await onADeadline(call(...args), left(), name);

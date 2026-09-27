@@ -1,12 +1,8 @@
 // Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 //
-// Which app a patched Steam route is showing.
-//
-// Taken from the ProtonDB plugin, which needs the same thing on the same
-// route. @decky/ui re-exports React Router's useParams, but it has moved
-// between versions and a plugin that only works on one Steam build is not
-// much use — so there are two fallbacks, ending at the URL itself, which
-// cannot move.
+// Which app a patched Steam route is showing. From the ProtonDB plugin. @decky/ui
+// re-exports React Router's useParams, but it moves between versions, so there
+// are two fallbacks, ending at the URL itself, which cannot move.
 
 import { useParams as deckyUseParams, findModuleExport } from "@decky/ui";
 

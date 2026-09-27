@@ -1,24 +1,16 @@
 // Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 //
-// What a long operation is doing, held outside React.
-//
-// Closing the Quick Access panel unmounts the whole component tree, so
-// anything kept in useState is destroyed. The work itself carries on — it is a
-// promise, not a component — but its progress used to be written into
-// component state, so reopening the panel showed a fresh, idle UI while
-// "Add all my games" was still running underneath: no progress, no busy
-// indicator, and the button inviting you to start a second run.
-//
-// Living at module scope, this survives every open and close for the life of
-// the session. The panel subscribes when it mounts and picks up whatever is
-// already in flight.
+// What a long operation is doing, held outside React. Closing the Quick Access
+// panel unmounts the component tree, so useState is lost while the work (a
+// promise) carries on. living at module scope this survives every open and close
+// for the session; the panel subscribes on mount and picks up whatever is running.
 
 export type Job = {
   busy: boolean;
   message: string;
-  /** Fraction 0..1 while syncing, for the header bar. */
+  // fraction 0..1 while syncing, for the header bar.
   progress: number | null;
-  /** Bumped when a job finishes, so an open panel knows to refresh its counts. */
+  // bumped when a job finishes, so an open panel refreshes its counts.
   completed: number;
 };
 
@@ -27,19 +19,13 @@ const IDLE: Job = { busy: false, message: "", progress: null, completed: 0 };
 let job: Job = IDLE;
 const listeners = new Set<() => void>();
 
-/** Replace the job snapshot and wake every subscriber.
- *
- * A new object each time, never a mutation: useSyncExternalStore compares
- * snapshots by identity, so mutating in place would leave the panel showing
- * stale text forever.
- */
+// Replace the job snapshot and wake every subscriber. A new object each time,
+// never a mutation: useSyncExternalStore compares snapshots by identity, so
+// mutating in place would leave the panel showing stale text forever.
 export function setJob(patch: Partial<Job>): void {
-  // A run that is STARTING must start un-cancelled, wherever it was started
-  // from. Cancellation belongs to one run, and it used to be cleared only by
-  // runJob — which doSync and doAddOwned do not go through. So one press of
-  // Cancel left the flag set for the life of the session and every later sync
-  // stopped at its first tile: the panel reported success, and the library
-  // stayed at however many tiles existed when Cancel was pressed.
+  // a starting run must start un-cancelled, wherever it was started from.
+  // cancelling was cleared only by runJob, which doSync and doAddOwned skip, so
+  // one press of Cancel used to stop every later sync at its first tile.
   if (patch.busy === true && !job.busy) cancelling = false;
   job = { ...job, ...patch };
   listeners.forEach((listener) => listener());
@@ -56,20 +42,16 @@ export function getJob(): Job {
   return job;
 }
 
-/** Mark a job finished, and let any open panel re-read its counts. */
+// Mark a job finished, and let any open panel re-read its counts.
 let clearTimer: ReturnType<typeof setTimeout> | null = null;
 
 export function finishJob(message?: string): void {
-  // The cancellation belonged to the run that just ended, so it ends with it.
-  //
-  // It used to be cleared only by runJob, and by setJob on a false->true busy
-  // transition. The BACKGROUND sync goes through neither: the poll calls
-  // runSync directly. So one press of Cancel left the flag set for the life of
-  // the Steam session, and every background sync afterwards stopped at its
-  // first tile -- silently, because stopping early is a normal outcome.
+  // the cancellation belonged to the run that just ended, so clear it here too.
+  // the background sync goes through neither runJob nor setJob's busy transition,
+  // so without this one Cancel would stop every later background sync.
   cancelling = false;
   if (clearTimer) clearTimeout(clearTimer);
-  // A run that ended on its own must not be reset again ten seconds later.
+  // a run that ended on its own must not be reset again ten seconds later.
   if (forceTimer) { clearTimeout(forceTimer); forceTimer = null; }
   setJob({
     busy: false,
@@ -85,7 +67,7 @@ export function finishJob(message?: string): void {
   }
 }
 
-/** Reset to idle. Tests only — the plugin never goes back to a clean slate. */
+// Reset to idle. Tests only, the plugin never goes back to a clean slate.
 export function resetJob(): void {
   if (forceTimer) { clearTimeout(forceTimer); forceTimer = null; }
   onAbandoned = null;
@@ -97,52 +79,32 @@ export function resetJob(): void {
 
 // ----------------------------------------------------------------- cancelling
 
-// "Add all my games" walks a whole Steam library, which on a large account is
-// thousands of tiles and many minutes. There was no way to stop it: the only
-// exits were letting it finish or killing Steam, and closing the panel does
-// not help because the run deliberately survives that.
+// "Add all my games" walks a whole Steam library, thousands of tiles and many
+// minutes. it needs a way to stop, and closing the panel does not help since the
+// run survives that on purpose.
 let cancelling = false;
 
-/** Told when Cancel gives up waiting and resets the panel regardless.
- *
- *  The run itself is still going at that point -- it is unreachable, not
- *  stopped -- so whoever holds it has to let go of it. Without that, the next
- *  sync ADOPTS the abandoned run through the shared in-flight promise and
- *  reports its outcome as its own, which is how a cancelled run came back to
- *  life and announced itself as a fresh one.
- *
- *  A callback rather than an import, because the holder is index.tsx and this
- *  module is imported BY it. */
+// Called when Cancel gives up waiting and resets the panel anyway. the run is
+// still going (unreachable, not stopped), so the holder must let go of it, else
+// the next sync adopts the abandoned run and reports its outcome as its own.
+// a callback, not an import, because index.tsx holds it and imports this module.
 let onAbandoned: (() => void) | null = null;
 
 export function setAbandonHandler(handler: (() => void) | null): void {
   onAbandoned = handler;
 }
 
-/** How long Cancel waits to be honoured before it resets the panel anyway. */
+// How long Cancel waits to be honoured before it resets the panel anyway.
 const FORCE_IDLE_AFTER = 10000;
 let forceTimer: ReturnType<typeof setTimeout> | null = null;
 
-/** Ask the running job to stop at its next clean point.
- *
- *  ...and if nobody is listening, stop waiting for them.
- *
- *  Asking politely is right while something is actually running: it stops at a
- *  tile boundary and leaves the library consistent. But it assumes a loop is
- *  going round to notice, and that assumption fails exactly when it matters.
- *  A backend call that never returns leaves `await` suspended forever, so the
- *  run's own success AND failure paths are both unreachable, `busy` is never
- *  cleared, and every button in the panel stays disabled. The store is at
- *  module scope so closing the panel does not help either: it is stranded for
- *  the life of the Steam session, with nothing running to cancel.
- *
- *  That happened -- a sync blocked writing thousands of controller layouts,
- *  and Cancel could not free it because Cancel was a flag the blocked code
- *  was never going to read. So Cancel now has a deadline: honoured normally,
- *  and after ten seconds it takes the panel back regardless. Worst case a
- *  dead run is still writing somewhere; the single-flight guards stop a
- *  second one starting on top of it, and a usable panel beats a truthful one.
- */
+// Ask the running job to stop at its next clean point, and if nobody is listening
+// stop waiting for them. asking politely stops at a tile boundary and leaves the
+// library consistent, but it needs a loop going round to notice. a backend call
+// that never returns leaves `await` stuck forever, so `busy` is never cleared and
+// the whole panel stays disabled. so Cancel has a deadline: after ten seconds it
+// takes the panel back regardless. the single-flight guards stop a second run
+// starting on top, and a usable panel beats a truthful one.
 export function cancelJob(): void {
   if (!job.busy) return;
   cancelling = true;
@@ -151,31 +113,23 @@ export function cancelJob(): void {
   forceTimer = setTimeout(() => {
     forceTimer = null;
     if (job.busy && cancelling) {
-      // Let go of the run FIRST. finishJob clears `cancelling`, and a new sync
-      // starting after that must build its own promise rather than wait on the
-      // one nobody can reach.
+      // let go of the run first. finishJob clears `cancelling`, and a new sync
+      // after that must build its own promise, not wait on the one nobody reaches.
       try { onAbandoned?.(); } catch { /* never block the reset */ }
       finishJob("Stopped responding, so the panel was reset.");
     }
   }, FORCE_IDLE_AFTER);
 }
 
-/** Whether a stop has been asked for. Read by the loops that can honour it. */
+// Whether a stop has been asked for. Read by the loops that can honour it.
 export function cancelRequested(): boolean {
   return cancelling;
 }
 
-/** Run a long operation, and guarantee the UI is left idle afterwards.
- *
- * Every button in the panel is disabled while `busy`, so a path that returns
- * without clearing it strands the whole UI for the life of the session with
- * nothing actually running. That is not hypothetical: "Remove all games" had
- * four exits and only three of them finished the job, so emptying the library
- * — the one that works — left sync greyed out until the plugin was reloaded.
- *
- * One entry and one exit, so a `return` added inside the body later cannot
- * reintroduce it.
- */
+// Run a long operation and always leave the UI idle afterwards. every panel
+// button is disabled while `busy`, so a path that returns without clearing it
+// strands the whole UI. one entry and one exit, so a `return` added inside the
+// body later can not bring that back.
 export async function runJob(body: () => Promise<string | void>): Promise<void> {
   cancelling = false;
   setJob({ busy: true, progress: null });
