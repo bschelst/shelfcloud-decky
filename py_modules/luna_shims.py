@@ -62,69 +62,6 @@ VIRTUAL_GAMEPAD_JS = """
 """
 
 
-REINDEX_GAMEPAD_JS = """
-// Steam Input gives the browser a virtual Xbox pad, but it lands at gamepad
-// slot 1 with slot 0 empty. Boosteroid, GeForce NOW and Xbox Cloud read slot 0
-// only, so the controller does nothing even though the pad is there and its
-// buttons register.
-//
-// This does NOT fake a pad (that broke real detection before, see
-// VIRTUAL_GAMEPAD_JS). It only re-shows the REAL live pad at slot 0 when slot 0
-// is empty, so the player finds it where it looks. Runs at document start, so
-// the player sees it from the first scan.
-(() => {
-  if (window.__shelfcloudGamepadReindex) return;   // once is enough
-  window.__shelfcloudGamepadReindex = true;
-  try {
-    const orig = navigator.getGamepads
-      ? navigator.getGamepads.bind(navigator) : null;
-    if (!orig) return;
-
-    const firstReal = (pads) => {
-      for (let i = 0; i < pads.length; i++) {
-        if (pads[i] && pads[i].connected) return pads[i];
-      }
-      return null;
-    };
-
-    navigator.getGamepads = function() {
-      let pads;
-      try { pads = orig(); } catch (e) { return orig(); }
-      if (!pads) return pads;
-      const list = Array.prototype.slice.call(pads);
-      if (!list[0]) {
-        const real = firstReal(list);
-        if (real) list[0] = real;    // the live pad itself, never a copy
-      }
-      return list;
-    };
-
-    // A player that binds on the event, not by polling, needs a nudge too. When
-    // a real pad connects somewhere other than slot 0 and slot 0 is still empty,
-    // we fire the connect event once more with the REAL pad. Handlers that react
-    // by calling getGamepads() then re-scan through the wrap above and find it at
-    // slot 0. A flag stops the event from feeding itself.
-    let bouncing = false;
-    window.addEventListener('gamepadconnected', function(ev) {
-      if (bouncing) return;
-      try {
-        const g = ev.gamepad;
-        if (!g || g.index === 0) return;
-        const pads = orig();
-        if (pads && pads[0]) return;         // slot 0 taken, nothing to do
-        bouncing = true;
-        try {
-          window.dispatchEvent(new GamepadEvent('gamepadconnected', {gamepad: g}));
-        } finally {
-          bouncing = false;
-        }
-      } catch (e) { /* a listener must never throw */ }
-    }, true);
-  } catch (e) { /* best effort, never break the page */ }
-})();
-"""
-
-
 FULLSCREEN_CHECK_JS = """
 (() => {
     var buttons = document.querySelectorAll("button, [role=button]");

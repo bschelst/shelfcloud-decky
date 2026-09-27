@@ -39,8 +39,7 @@ from autoplay import (  # noqa: E402
     provider_profile,
 )
 from luna_shims import (  # noqa: E402
-    NEUTRALISE_APP_HANDOFF_JS, VIRTUAL_GAMEPAD_JS, REINDEX_GAMEPAD_JS,
-    FULLSCREEN_CHECK_JS,
+    NEUTRALISE_APP_HANDOFF_JS, VIRTUAL_GAMEPAD_JS, FULLSCREEN_CHECK_JS,
 )
 
 CDP_PORT = 9223
@@ -325,10 +324,6 @@ def resolve_launch(game_id: str, fallback_url: str, provider: str = "") -> tuple
 WEBSITE_PROVIDERS = weburl.WEBSITE_PROVIDERS
 is_allowed_website_url = weburl.is_allowed_website_url
 
-# The players that read gamepad slot 0 only and get the controller reindex.
-# Not Luna (its own shim hides the real pad on purpose) and not a website tile.
-STREAMING_PROVIDERS = {"boosteroid", "geforce_now", "xbox_cloud"}
-
 
 def build_website_command(app_id: str, profile: str, url: str) -> list:
     """Chromium command line for a page, not the one a game gets.
@@ -523,45 +518,6 @@ def hold_platform_override(url: str, provider: str = ""):
     log(f"{profile['label']}: reporting {profile.get('platform', 'Windows')} "
         "for this session")
     return held
-
-
-def hold_gamepad_reindex(url: str, provider: str = ""):
-    """Put the real controller back at gamepad slot 0, for the whole session.
-
-    Steam Input hands the browser a virtual Xbox pad, but it lands at slot 1 with
-    slot 0 empty, and the streaming players read slot 0 only, so the pad does
-    nothing. A manual reload with the pad already active fixes it, but that shows
-    a popup. Instead we inject REINDEX_GAMEPAD_JS, which re-shows the REAL pad at
-    slot 0 (never a fake one), and reload once through CDP so it lands before the
-    player's own code. The reload accepts the page's "leave site?" guard so no
-    popup shows. A short stream reconnect is the only cost.
-
-    The browser opens straight at the game URL, so add_startup_script alone would
-    miss the document already loading, hence the reload. Returns the held socket
-    the caller keeps alive (the startup script lives as long as this session), or
-    None for a provider that wants nothing. Best effort: a failure never stops the
-    game.
-    """
-    if provider not in STREAMING_PROVIDERS:
-        return None
-
-    profile = provider_profile(provider)
-    marker = profile.get("page_match") or (url.split("/")[2] if "//" in url else url)
-    target = cdp.wait_for_page(CDP_PORT, marker, timeout=PAGE_TIMEOUT)
-    if not target or not target.get("webSocketDebuggerUrl"):
-        log(f"page never appeared for the gamepad reindex (looked for {marker!r})")
-        return None
-
-    held = cdp.open_session(target["webSocketDebuggerUrl"])
-    try:
-        cdp.add_startup_script(held, REINDEX_GAMEPAD_JS)
-        # add_startup_script turned Page on; this reload also drains that stream.
-        cdp.reload_dismissing_dialogs(held)
-        log(f"{profile['label']}: controller reindexed to slot 0 for this session")
-        return held
-    except Exception:
-        held.close()
-        raise
 
 
 def _click_fullscreen_if_needed(ws_url, timeout=15):
@@ -829,14 +785,6 @@ def main() -> int:
     except Exception as exc:  # never let automation break the launch
         log(f"platform override failed, continuing: {exc}")
 
-    # Same pattern: pad_fix is the open socket, and the reindex shim lives exactly
-    # as long as this reference. Only the streaming providers get one.
-    pad_fix = None
-    try:
-        pad_fix = hold_gamepad_reindex(url, provider)
-    except Exception as exc:  # never let automation break the launch
-        log(f"gamepad reindex failed, continuing: {exc}")
-
     if autoplay:
         try:
             try_autoplay(url, provider)
@@ -865,8 +813,6 @@ def main() -> int:
     code = browser.wait()
     if held is not None:
         held.close()
-    if pad_fix is not None:
-        pad_fix.close()
     log(f"--- session ended after {int(time.monotonic() - started)}s "
         f"(browser exit {code})")
     return code
