@@ -4,7 +4,7 @@
 // name must match main.py exactly: it writes the layout, this selects it.
 
 /** The directory name Steam uses for a shortcut's controller config. Lower case,
- *  minus every character Windows forbids in a filename and the full stop too.
+ *  minus every character Windows forbids in a filename and the full stop to.
  *  Must match _layout_key in main.py, else Steam silently never applies the
  *  layout.
  *

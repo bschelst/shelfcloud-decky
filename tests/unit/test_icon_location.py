@@ -73,7 +73,7 @@ def test_it_falls_back_when_steam_cannot_be_found():
 
 @pytest.fixture
 def grid(tmp_path):
-    """A grid folder holding Steam's artwork and one icon of ours."""
+    """A grid folder holding Steam's artwork and one icon of ours"""
     folder = tmp_path / "grid"
     folder.mkdir()
     steams = {
@@ -89,7 +89,7 @@ def grid(tmp_path):
 
 
 def test_uninstall_deletes_only_our_own_icons(grid, tmp_path):
-    """This used to be `for name in listdir: remove`, which here is every
+    """This used to be `for name in listdir: remove`, wich here is every
     game's artwork on the device."""
     folder, steams = grid
     settings = tmp_path / "settings-icons"

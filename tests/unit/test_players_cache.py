@@ -58,7 +58,7 @@ def test_a_good_count_is_reused_for_the_full_fifteen_minutes(monkeypatch):
     monkeypatch.setattr(main.Plugin, "_fetch_players", staticmethod(fetch))
 
     run(instance.current_players(APPID))
-    # Fourteen minutes later it is still good.
+    # Fourteen minutes later it is still good
     stamp, value = instance._players_cache[APPID]
     instance._players_cache[APPID] = (stamp - 14 * 60, value)
     run(instance.current_players(APPID))
@@ -94,7 +94,7 @@ def test_a_failure_is_remembered_briefly(monkeypatch):
 
 
 def test_a_failure_does_not_outlast_the_outage(monkeypatch):
-    """The point of splitting them. A minute of bad connectivity used to leave
+    """The point of splitting them. A minute of bad conectivity used to leave
     a dash on that game for the full fifteen minutes."""
     instance = plugin()
     fetch, calls = _answering(RuntimeError("no route to host"))

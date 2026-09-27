@@ -33,7 +33,7 @@ _APPID = re.compile(rb"\x02appid\x00(....)", re.IGNORECASE | re.DOTALL)
 _OPTIONS = re.compile(rb"\x01LaunchOptions\x00([^\x00]*)\x00", re.IGNORECASE)
 _NAME = re.compile(rb"\x01AppName\x00([^\x00]*)\x00", re.IGNORECASE)
 
-# Entries are keyed by their index: 0x00 "0" 0x00, 0x00 "1" 0x00, and so on.
+# Entries are keyed by their index: 0x00 "0" 0x00, 0x00 "1" 0x00, and so on
 _ENTRY = re.compile(rb"\x00(\d+)\x00")
 
 
@@ -76,7 +76,7 @@ def parse(blob: bytes) -> List[Dict]:
             continue
         game = _GAME_ID.search(options.group(1))
         if not game:
-            continue        # somebody else's shortcut
+            continue        # somebody elses shortcut
 
         appid = _APPID.search(chunk)
         if not appid:

@@ -83,7 +83,7 @@ async function read<T>(cache: Cached<T>, fetcher: () => Promise<T>): Promise<T> 
   const now = Date.now();
   if (cache.at && now - cache.at < CACHE_MS) return cache.value;
   // one request for all the callers that arrive while it is open. without this,
-  // opening a page mid-sync could start several at once.
+  // opening a page mid-sync could start serveral at once.
   if (!cache.inFlight) {
     cache.inFlight = fetcher()
       .then((value) => {
@@ -124,7 +124,7 @@ export function useProviderForApp(appId: string | undefined): string | undefined
 export function useBadgeSettings(): {
   enabled: boolean; onCards: boolean; position: string;
   players: boolean; playersPosition: string;
-  /** False until the real settings are read. A badge drawn on the guessed
+  /** False until the real instellingen are read. A badge drawn on the guessed
    *  defaults shows up then vanishes, so nothing draws until this is true. */
   loaded: boolean;
 } {

@@ -125,7 +125,7 @@ def test_a_page_provider_uses_the_page_rule(provider):
                                       "amazon_luna", ""])
 def test_a_game_provider_still_uses_the_allowlist(provider):
     """The relaxation must not leak. A game opens in a kiosk window on the
-    profile with every provider session, still limited to the five hosts."""
+    profile with every provider sesion, still limited to the five hosts."""
     assert launcher.url_is_acceptable("https://www.protondb.com/", provider) is False
     assert launcher.url_is_acceptable("https://cloud.boosteroid.com/x", provider) is True
 
@@ -150,7 +150,7 @@ def test_a_page_never_gets_a_debugging_port():
 
 
 def test_a_page_is_not_opened_in_kiosk_mode():
-    """Kiosk hides the address bar, and for a page the catalogue cannot vouch
+    """Kiosk hides the address bar, and for a page the catalogue can not vouch
     for, the address bar is the check."""
     assert "--kiosk" not in command()
 
@@ -171,7 +171,7 @@ def test_a_page_cannot_reach_the_provider_sessions():
 
 def test_the_url_is_the_last_argument_and_is_not_a_flag():
     """Chromium reads a leading-dash argument as a flag. Such URLs are refused
-    above, but the ordering is what backs that up."""
+    above, but the ordering is what backs that up"""
     args = command()
     assert args[-1] == "https://www.protondb.com/"
     assert not args[-1].startswith("-")

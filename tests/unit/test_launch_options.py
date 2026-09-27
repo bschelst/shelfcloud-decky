@@ -15,7 +15,7 @@ import sys
 import types
 from unittest import mock
 
-# Decky's runtime is not importable off-device; stub what main.py touches.
+# Decky's runtime is not importable off-device; stub what main.py touches
 decky = types.ModuleType("decky")
 decky.DECKY_PLUGIN_DIR = "/plugins/Shelfcloud"
 decky.DECKY_PLUGIN_SETTINGS_DIR = "/settings/Shelfcloud"
@@ -63,7 +63,7 @@ def test_the_launcher_receives_every_argument():
 
 
 def test_the_url_survives_its_ampersand():
-    """Truncation loses &lang=en_US and would silently change the page."""
+    """Truncation looses &lang=en_US and would silently change the page."""
     assert GFN_URL in through_shell(_shell_join(PARTS))
 
 

@@ -4,7 +4,7 @@
 Just enough CDP to find a page and run JavaScript in it, so we can press the Play
 button after the browser opens. The streaming URL has a server-made session id,
 so we cannot link to it directly. Built on stdlib sockets because Decky's Python
-has no guaranteed websocket library.
+has no guaranteed websocket library
 """
 
 import base64

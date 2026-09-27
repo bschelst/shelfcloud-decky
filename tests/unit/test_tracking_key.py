@@ -69,7 +69,7 @@ def test_migration_runs_once_and_then_leaves_it_alone():
 
 def test_an_entry_with_no_provider_keeps_its_old_key():
     # Guessing one would point the tile at a service it does not launch, and a
-    # tile that matches nothing desired is deleted — losing its playtime.
+    # tile that matches nothing desired is deleted — loosing its playtime.
     state = {"42": {"app_id": 7}}
     assert Plugin._migrate_keys(state) == state
 

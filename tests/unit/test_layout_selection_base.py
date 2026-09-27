@@ -56,7 +56,7 @@ def test_it_points_at_the_signed_in_account(deck):
 
 
 def test_the_fullest_directory_does_not_win(deck):
-    """The bug: every other account here holds more layouts than ours."""
+    """The bug: every other acount here holds more layouts than ours."""
     plugin, configs = deck
     base = run(plugin.layout_selection_base())["base"]
 
@@ -67,7 +67,7 @@ def test_the_fullest_directory_does_not_win(deck):
 
 
 def test_it_falls_back_when_not_signed_in(deck):
-    """No Steam ID stored yet. Still has to answer with something usable."""
+    """No Steam ID stored yet. Still it has to answer with something usable."""
     plugin, _ = deck
     plugin._settings = {}
     result = run(plugin.layout_selection_base())

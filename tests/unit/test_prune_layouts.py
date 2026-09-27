@@ -25,7 +25,7 @@ def deck(tmp_path, monkeypatch):
     cfg = root / "steamapps" / "common" / "Steam Controller Configs" / "123" / "config"
     cfg.mkdir(parents=True)
     # expanduser, not realpath: the code resolves the symlink itself, and
-    # patching realpath would defeat the containment guard we want to exercise.
+    # patching realpath would defeat the containment guard we want to exercice.
     monkeypatch.setattr(os.path, "expanduser",
                         lambda p: str(root) if p.startswith("~/.steam") else p)
     plugin = main.Plugin()
@@ -83,7 +83,7 @@ def test_it_leaves_directories_that_are_not_ours(deck):
 
 
 def test_a_name_that_needed_no_change_is_left_alone(deck):
-    """Its current spelling IS its own name, so there is nothing stale."""
+    """Its current spelling IS its own name, so there is nothing stale"""
     plugin, cfg = deck
     track(plugin, "valheim (boosteroid)")
     d = make(cfg, "valheim (boosteroid)")

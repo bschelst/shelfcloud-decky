@@ -12,7 +12,7 @@ import ipaddress
 import urllib.parse
 
 # Providers whose tiles open a page. Their URLs use the rule below; everything
-# else on this device still uses the five-host provider allowlist.
+# else on this device still uses teh five-host provider allowlist.
 WEBSITE_PROVIDERS = ("shelfcloud", "custom")
 
 # Names that mean this machine or the network it is on. A tile opens in the
@@ -61,7 +61,7 @@ def is_allowed_website_url(url) -> bool:
     """
     if not url or not isinstance(url, str):
         return False
-    # Check the raw string first. .strip() would drop a trailing newline that
+    # Controle the raw string first. .strip() would drop a trailing newline that
     # is itself the attack.
     if any(c in url for c in "\\\t\r\n"):
         return False

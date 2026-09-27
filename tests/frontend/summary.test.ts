@@ -15,7 +15,7 @@ const result = (over: Partial<SyncResult> = {}): SyncResult => ({
 
 describe("the finished-sync line", () => {
   it("reports a total that includes the skipped entries", () => {
-    // the exact case from the Deck: 392 in library, 7 unusable, 385 added.
+    // the exact case from the Deck: 392 in library, 7 unusable, 385 added
     expect(syncSummary(392, result({ added: 385 }), 7))
       .toBe("392 games — 385 added (7 skipped)");
   });
@@ -52,14 +52,14 @@ describe("the finished-sync line", () => {
   });
 
   it("leaves out the kinds that did not happen", () => {
-    // a run that only removed should not read "0 added, 3 removed".
+    // a run wich only removed should not read "0 added, 3 removed".
     expect(changeSummary(result({ removed: 3 }))).toBe("3 removed");
   });
 });
 
 describe("the toast", () => {
   it("carries the changes without the totals", () => {
-    // it can appear over a game in progress, so it stays short.
+    // it can appear over a game in progress, so it stays short
     const line = changeSummary(result({ added: 385 }));
     expect(line).toBe("385 added");
     expect(line).not.toContain("games");

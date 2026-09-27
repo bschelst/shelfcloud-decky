@@ -12,7 +12,7 @@ def shell_join(parts: List[str]) -> str:
     Steam runs a shortcut through `/bin/sh -c "<exe> <options>"`, so every
     argument must survive the shell. A GeForce NOW URL ends
     `?game-id=<uuid>&lang=en_US`, and that unquoted `&` is a shell operator: sh
-    would run the rest as a second command. So the quoting matters, do not
+    would run the rest as a second command. So the quoting matters, dont
     simplify it away.
     """
     return " ".join(shlex.quote(part) for part in parts)

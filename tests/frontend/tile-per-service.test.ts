@@ -41,7 +41,7 @@ describe("switching it on", () => {
 
   it("stores the setting BEFORE fetching them", async () => {
     // the fetch ends in a sync; a sync reading the old value would fan nothing
-    // out and the games arrive in the shape the option meant to change.
+    // out and the games arrive in the shape the option meant to change
     const d = deps();
     await applyTilePerService(true, d);
     expect(d.order).toEqual(["set", "add"]);
@@ -81,7 +81,7 @@ describe("a panel that passes no callback", () => {
 describe("while a sync is already running", () => {
   it("still stores the setting", async () => {
     // the toggle used to be disabled during a sync, so a tap at the wrong
-    // moment did nothing silently -- looked like a setting that won't turn on.
+    // moment did nothing silently -- looked like a setting that wont turn on.
     const d = deps();
     await applyTilePerService(true, { ...d, busy: true });
     expect(d.setSetting).toHaveBeenCalledWith("sync_all_providers", true);

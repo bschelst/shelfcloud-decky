@@ -14,13 +14,13 @@ beforeEach(() => resetJob());
 
 describe("surviving the panel closing", () => {
   it("still reports a running job after unsubscribe and resubscribe", () => {
-    // panel open, user presses "Add all my games".
+    // panel open, user press "Add all my games".
     const openPanel = vi.fn();
     const closePanel = subscribeJob(openPanel);
     setJob({ busy: true, message: "Reading your Steam library…" });
     expect(getJob().busy).toBe(true);
 
-    // panel closed. the work keeps going and keeps reporting.
+    // panel closed. the work keeps going and keeps reporting
     closePanel();
     setJob({ message: "Adding Fortnite (12/124)", progress: 12 / 124 });
 
@@ -59,7 +59,7 @@ describe("snapshot identity", () => {
   });
 
   it("returns a stable object between changes", () => {
-    // a snapshot that differs on every read makes React re-render in a loop.
+    // a snapshot wich differs on every read makes React re-render in a loop.
     setJob({ message: "settled" });
     expect(getJob()).toBe(getJob());
   });

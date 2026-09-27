@@ -14,7 +14,7 @@ describe("waiting on a Steam call", () => {
   });
 
   it("treats a rejection as the slot not happening, not as a throw", async () => {
-    // callers skip a failed slot and carry on, so no throw here.
+    // callers skip a failed slot and carry on, so no throw here
     await expect(withTimeout(Promise.reject(new Error("nope")), "late"))
       .resolves.toBe("late");
   });
@@ -40,7 +40,7 @@ describe("waiting on a Steam call", () => {
   });
 
   it("ignores a late answer that arrives after it gave up", async () => {
-    // the abandoned promise may still settle, but nobody listens now and it
+    // the abandonned promise may still settle, but nobody listens now and it
     // must not resolve twice.
     vi.useFakeTimers();
     try {
@@ -59,7 +59,7 @@ describe("waiting on a Steam call", () => {
 
 describe("steamCall", () => {
   it("flattens every outcome to the same 'it is over now'", async () => {
-    // value, rejection and never all mean the same: stop and move on.
+    // value, rejection and never all mean the same: stop and move on
     await expect(steamCall(Promise.resolve(123))).resolves.toBeUndefined();
     await expect(steamCall(Promise.reject(new Error("x")))).resolves.toBeUndefined();
 

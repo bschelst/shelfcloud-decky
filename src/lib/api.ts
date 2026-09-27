@@ -18,7 +18,7 @@ export const logNote = guarded<[message: string], { ok: boolean }>("log_note", t
 export const getStatus = guarded<[], Status>("get_status");
 
 // Fill in the Steam appid on existing tiles, in one call. record_shortcut writes
-// it too, but only for tiles a sync touches, so on a settled library it stayed empty.
+// it too, but only for tiles a sync touches, so on a settled library it stayed emtpy.
 export const setSteamIds =
   guarded<[ids: Record<string, string>], { ok: boolean; updated?: number }>(
     "set_steam_ids", true);
@@ -107,7 +107,7 @@ export const recordShortcut =
 export const forgetShortcut = guarded<[key: string], unknown>("forget_shortcut", true);
 
 // app id -> which service that tile launches, for the library badge. Its own call
-// and not the whole library: it runs once per game page opened and needs one word.
+// and not the whole library: it runs one time per game page opened and needs one word.
 export const trackedProviders = guarded<[], {
   ok: boolean;
   providers?: Record<string, string>;

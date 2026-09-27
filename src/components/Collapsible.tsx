@@ -2,7 +2,7 @@
 //
 // Collapsible panel sections: a focusable header with icon and chevron, a soft
 // tint while focused, an indented body when open. Built on Focusable, not Field,
-// so we own the row layout. Collapsed by default: read on a 7-inch screen, so
+// so we own the row layout. Collapsed by default: read on a 7-inch scherm, so
 // opening all at once buries the controls.
 
 import { Focusable } from "@decky/ui";

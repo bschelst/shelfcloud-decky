@@ -38,7 +38,7 @@ describe("fitting the name onto a capsule", () => {
   });
 
   it("has more room to wrap than the logo does", () => {
-    // the capsule is tall, so a long name gets three lines, not a tiny size.
+    // the capsule is tall, so a long name gets three lines, not a tiny size
     const layout = capsuleLayout("The Hitchhikers Guide To The Galaxy Wiki", measure);
     expect(layout.lines.length).toBeGreaterThan(1);
     expect(layout.lines.length).toBeLessThanOrEqual(3);
@@ -67,7 +67,7 @@ describe("staying inside the tile", () => {
     for (const name of NAMES) {
       const layout = capsuleLayout(name, measure);
       expect(widthOf(layout)).toBeLessThanOrEqual(layout.textWidth + 0.5);
-      // set centred, so both halves have to clear the edge.
+      // set centred, so both halfs have to clear the edge.
       expect(layout.centreX - layout.textWidth / 2).toBeGreaterThanOrEqual(0);
       expect(layout.centreX + layout.textWidth / 2).toBeLessThanOrEqual(CAPSULE_W);
     }
@@ -84,7 +84,7 @@ describe("staying inside the tile", () => {
   });
 
   it("never draws the name over the mark", () => {
-    // one stacked group: words above the mark's bottom edge would overlap it.
+    // one stacked group: words above the mark its bottom edge would overlap it.
     for (const name of NAMES) {
       const layout = capsuleLayout(name, measure);
       expect(layout.textTop).toBeGreaterThanOrEqual(layout.mark.y + layout.mark.size);

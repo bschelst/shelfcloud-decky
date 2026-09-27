@@ -2,7 +2,7 @@
 //
 // Artwork ordering and concurrency.
 //
-// Four art slots per tile, each a separate backend download. Two things must
+// Four art slots per tile, each a seperate backend download. Two things must
 // hold: the capsule (only slot shown in the grid) goes on first, and the
 // downloads overlap. Applying stays sequential on purpose.
 
@@ -92,7 +92,7 @@ beforeEach(() => {
 describe("ordering", () => {
   it("applies the capsule before the slots behind it", async () => {
     await syncLibrary([GAME], {}, callbacks());
-    // The tile in the grid shows the capsule; it must not wait on the rest.
+    // The tile in the grid shows the capsule; it must not wait on the rest
     expect(appliedOrder[0]).toBe(CAPSULE);
     expect(appliedOrder).toHaveLength(4);
   });
@@ -202,7 +202,7 @@ describe("resilience", () => {
   });
 
   it("a slot with neither a URL nor a proxy is simply left empty", async () => {
-    // empty logo is on purpose: Steam then draws the name. Must be a quiet
+    // empty logo is on purpose: Steam draws then the name. Must be a quiet
     // no-op, not a failed download.
     vi.mocked(fetchArtwork).mockImplementation(async () => ({
       ok: true, base64: "aGk=", kind: "png",
@@ -321,7 +321,7 @@ describe("resilience", () => {
 
 describe("the icon", () => {
   // An icon is NOT a library asset: it goes through SetShortcutIcon with a file
-  // path, not SetCustomArtworkForApp. Writing it as an asset once wiped tiles.
+  // path, not SetCustomArtworkForApp. Writting it as an asset once wiped tiles.
 
   it("never goes through the custom-artwork call", async () => {
     await syncLibrary([GAME], {}, callbacks());
@@ -458,7 +458,7 @@ describe("when artwork counts as finished", () => {
 
 describe("a slot the gateway no longer offers", () => {
   // Steam draws the logo instead of the title, so a dropped logo slot must be
-  // cleared, not just skipped — else the old mark stays where the name should be.
+  // cleared, not just skipped — else teh old mark stays where the name should be.
   const noLogo = {
     ...GAME,
     artwork: { capsule: GAME.artwork!.capsule, header: GAME.artwork!.header, hero: GAME.artwork!.hero },
@@ -474,7 +474,7 @@ describe("a slot the gateway no longer offers", () => {
 
   it("does not clear a slot whose download merely failed", async () => {
     // opposite case: clear on what the entry offers, not on a failed download,
-    // or a network hiccup would wipe good artwork.
+    // or a network hiccup would wipe the good artwork.
     vi.mocked(fetchArtwork).mockImplementation(async (url: string) =>
       url.includes("hero") ? { ok: false } : { ok: true, base64: "aGk=", kind: "jpg" });
 
@@ -486,7 +486,7 @@ describe("a slot the gateway no longer offers", () => {
 });
 
 describe("the icon has its own slot", () => {
-  // icon used to come from the logo, which tied them together and hid the name.
+  // icon used to come from the logo, wich tied them together and hid the name.
   // Gateway now serves a separate square icon, so the two can differ.
   const withIcon = {
     ...GAME,

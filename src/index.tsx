@@ -66,7 +66,7 @@ const IDLE_INSTALL: InstallState = {
 };
 
 /** Start a browser install and show it right away. The backend returns once the
- *  download starts, so we refresh once to pick up `running: true` and start the poll. */
+ *  download starts, so we refresh one time to pick up `running: true` and start the poll. */
 async function startBrowserInstall(appId: string): Promise<Status | null> {
   const started = await installBrowser(appId);
   if (!started.ok) {
@@ -136,7 +136,7 @@ async function runSync(
   if (running) {
     // Wait for the run in progress and report its outcome, but mark that this
     // caller did not do it. Without `owned` every waiter would fire its own
-    // toast - six poll ticks in one long sync means six copies.
+    // toast - six poll ticks in one long sync means six copies
     return { ...(await running), owned: false };
   }
 
@@ -153,7 +153,7 @@ async function runSync(
 }
 
 /** Is this entry complete enough to build a Steam shortcut from? A half-formed
- *  entry makes a broken tile with no error, so we check before SteamClient. */
+ *  entry makes a broken tile with no error, so we do the controle before SteamClient. */
 function isUsableGame(game: unknown): game is DesiredGame {
   const g = game as DesiredGame;
   return !!g && typeof g === "object"
@@ -174,7 +174,7 @@ async function performSync(onProgress?: (message: string) => void): Promise<Sync
     if (lastLibrary) {
       library = lastLibrary.body;
     } else {
-      // We claimed a version we do not have. Ask again without one instead of
+      // We claimed a version we do not have. Ask opnieuw without one instead of
       // syncing against nothing.
       library = await getDesiredLibrary();
     }
@@ -186,7 +186,7 @@ async function performSync(onProgress?: (message: string) => void): Promise<Sync
     lastLibrary = { version: library.version, body: library };
   }
 
-  // Never hand SteamClient something malformed, whatever the gateway said.
+  // never hand SteamClient something malformed, whatever the gateway said.
   const all = Array.isArray(library.desired) ? library.desired : [];
   const desired = all.filter(isUsableGame);
   const unusable = all.length - desired.length;
@@ -461,7 +461,7 @@ function Content() {
     }
     // Freeze the denominator for the run. It is owned-not-yet-added plus
     // already-tracked; only the second half is refreshed here. Left alone it
-    // would climb with the count, and adding games does not change how many are
+    // would climb with the count, and adding games doesnt change how many are
     // playable.
     if (totalWhenSyncStarted.current === null) {
       totalWhenSyncStarted.current = (owned ?? 0) + (status?.tracked ?? 0);

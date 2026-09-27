@@ -40,7 +40,7 @@ export function patchLibraryApp(): LibraryPatch {
             Array.isArray((x as any)?.props?.children)
             && (x as any)?.props?.className?.includes(appDetailsClasses.InnerContainer),
         );
-        // Steam changed the tree, or this page is shaped differently.
+        // Steam changed teh tree, or this page is shaped differently.
         // Returning it untouched only loses the badge.
         if (typeof container !== "object" || container === null) return ret;
 

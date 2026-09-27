@@ -31,7 +31,7 @@ export default function HeroBadge(
   { position, accent, children }:
   { position: string; accent: string; children: ReactNode },
 ): ReactElement {
-  // Visible by default: opening a page is not a mutation, so nothing would
+  // Visible by standaard: opening a page is not a mutation, so nothing would
   // ever turn it on if it started off.
   const [show, setShow] = useState(true);
   const [heroHeight, setHeroHeight] = useState<number | null>(null);

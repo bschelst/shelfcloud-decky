@@ -126,7 +126,7 @@ def test_rejects_an_oversized_image(tmp_path):
 
 
 def test_rejects_a_game_id_that_is_not_a_number(tmp_path):
-    """The id becomes a filename, so it must never carry a path separator."""
+    """The id becomes a filename, so it must never carry path separator."""
     result = asyncio.run(plugin(tmp_path).save_icon("../../etc/passwd", PNG, "png"))
     assert result["ok"] is False
 
@@ -162,7 +162,7 @@ def test_forgetting_a_shortcut_with_no_icon_is_not_an_error(tmp_path):
 #
 # save_icon takes base64, so the frontend pushes the whole picture over Decky's
 # websocket. aiohttp closes a socket on a message over 4 MB rather than raising,
-# which silences the call: the promise never settles. It hit ordinary games,
+# which silences the call: the promise never setles. It hit ordinary games,
 # because the icon falls back to the 600x900 capsule. The backend already
 # downloaded the image (it served the slices), so the icon is named, not shipped.
 

@@ -143,7 +143,7 @@ CLICK_PLAY_JS = """
 })()
 """
 
-# Play words per language. xbox.com localises by IP, so an english-only list
+# Play words per language. xbox.com localises by IP, so a english-only list
 # silently fails: a Belgian browser gets "NU SPELEN", not "PLAY". Single words
 # only, matched inside the button's first line, shared by every provider.
 PLAY_WORDS = [
@@ -202,7 +202,7 @@ DENY_PHRASES = [
 
 # Is the game really running yet? Not just "is there a <video>": Luna's page has
 # a paused 0x0 trailer, so that check said yes before we clicked anything. A real
-# stream is playing and has real width and height.
+# stream is playing and has real width and height
 IS_STREAMING_JS = """
 (() => {
   if (location.href.includes('streaming')) return true;

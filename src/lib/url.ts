@@ -1,6 +1,6 @@
 // Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 //
-// Whether an address from outside is safe to hand to Steam. In lib/ so it can be
+// Whether an adress from outside is safe to hand to Steam. In lib/ so it can be
 // tested (index.tsx imports @decky/ui, which only loads inside Steam).
 
 /**

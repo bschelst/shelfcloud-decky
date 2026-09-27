@@ -27,7 +27,7 @@ def test_a_rotated_panel_reads_the_same():
 
 
 def test_a_television_is_scaled_too():
-    # 1080p is usually a room away, so 1:1 is not readable enough
+    # 1080p is usualy a room away, so 1:1 is not readable enough
     assert display.auto_scale(1920, 1080) == 1.25
 
 
@@ -68,7 +68,7 @@ def test_a_missing_xrandr_does_not_raise():
 
 def test_the_drm_fallback_skips_a_connected_but_disabled_panel(tmp_path):
     """A docked Deck keeps its dark panel connected; sizing off it would use a
-    screen nobody looks at."""
+    scherm nobody looks at."""
     panel = tmp_path / "card0-eDP-1"
     tv = tmp_path / "card0-DP-1"
     for folder, enabled, mode in ((panel, "disabled", "800x1280"),

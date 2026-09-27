@@ -1,6 +1,6 @@
 // Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 //
-// Only one panel section open at a time. On a 7-inch screen two open sections
+// Only one panel section open at a time. On a 7-inch scherm two open sections
 // push the control below off the bottom while you reach for it. The component
 // pulls in @decky/ui (needs a `window` we lack here), so the rule lives in a
 // pure function, same split as the logo and badge layouts.
@@ -15,7 +15,7 @@ describe("choosing which section is open", () => {
   });
 
   it("closes the previous one when another is opened", () => {
-    // expand Settings, then Links, and Settings folds away.
+    // expand Settings, then Links, and Settings folds away
     expect(nextOpenId("Settings", "Links")).toBe("Links");
     expect(nextOpenId("Links", "About")).toBe("About");
   });
@@ -26,7 +26,7 @@ describe("choosing which section is open", () => {
   });
 
   it("never reports two open at once", () => {
-    // walked over a real sequence: the answer is always one section or none.
+    // walked over a real seqence: the answer is always one section or none.
     let open: string | null = null;
     for (const pressed of ["Settings", "Links", "Links", "About", "Settings"]) {
       open = nextOpenId(open, pressed);

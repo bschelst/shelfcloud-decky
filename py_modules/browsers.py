@@ -31,7 +31,7 @@ KNOWN_BROWSERS = [
     },
 ]
 
-# Each flag hides something that would sit on top of the game in Game Mode.
+# Each flag hides someting that would sit on top of the game in Game Mode.
 BASE_FLAGS = [
     "--no-first-run",
     "--no-default-browser-check",
@@ -44,7 +44,7 @@ BASE_FLAGS = [
     # cloud streams must start without the user clicking the page.
     "--autoplay-policy=no-user-gesture-required",
     # Hardware video decode with VA-API. Without it the CPU decodes and we lose
-    # frames and battery. SteamOS gives flatpak the GPU drivers, so this works.
+    # frames and battery. SteamOS gives flatpak the GPU drivers, so this works
     "--enable-features=VaapiVideoDecodeLinuxGL",
 ]
 

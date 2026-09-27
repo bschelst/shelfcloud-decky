@@ -59,7 +59,7 @@ export function LibrarySummary({
           fontWeight: 700,
           lineHeight: 1,
           color: theme.accent,
-          fontVariantNumeric: "tabular-nums",   // digits stop jittering as it counts
+          fontVariantNumeric: "tabular-nums",   // digits stopp jittering as it counts
         }}>
           {synced}
         </div>

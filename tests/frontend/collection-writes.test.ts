@@ -47,7 +47,7 @@ beforeEach(() => {
       return { Save: async () => { record.saves += 1; } };
     },
   };
-  // the sync passes app ids; the store turns them into overviews.
+  // the sync passes app ids; the store turns them into overviews
   (globalThis as Record<string, unknown>).appStore = {
     GetAppOverviewByAppID: (appid: number) => ({ appid }),
   };
@@ -82,7 +82,7 @@ describe("a collection is only written when something is actually new", () => {
   });
 
   it("still re-files a game the user removed by hand", async () => {
-    // genuinely absent, so not a redundant write. only no-op writes are skipped.
+    // genuinely absent, so not a redundent write. only no-op writes are skipped.
     collections.push(collection(BOOSTEROID, [1, 2]));
 
     await addToProviderCollections([{ appId: 3, provider: "boosteroid" }]);
@@ -119,7 +119,7 @@ describe("a collection is only written when something is actually new", () => {
   });
 
   it("a whole no-op sync writes nothing at all", async () => {
-    // the bug: 388 tiles all already filed, pushed in batches of 12, 33 saves.
+    // the bug: 388 tiles all already filed, pushed in batches of 12, 33 saves
     const ids = Array.from({ length: 388 }, (_, i) => i + 1);
     collections.push(collection(BOOSTEROID, ids));
 

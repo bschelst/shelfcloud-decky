@@ -21,13 +21,13 @@ describe("offering a corner for a badge", () => {
 
   it("offers all six when the other badge is switched off", () => {
     // `undefined` means "nothing taken" -- an undrawn badge cannot overlap, so
-    // hiding a corner then would drop a choice for no reason.
+    // hiding a corner then would drop a choice for no reason
     expect(data(cornersExcept(undefined, "tr"))).toEqual(all);
   });
 
   it("keeps my own corner even when it is the one that collides", () => {
     // a Dropdown whose selectedOption is not in its own list renders BLANK, so
-    // an already-colliding setting must still show what it is set to -- else the
+    // an already-coliding setting must still show what it is set to -- else the
     // control for fixing the overlap is the one that looks broken.
     expect(data(cornersExcept("tr", "tr"))).toEqual(all);
   });

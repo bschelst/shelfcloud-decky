@@ -94,13 +94,13 @@ def test_a_short_interval_still_respects_the_floor():
 
 def test_the_startup_spread_is_capped():
     """A fleet should disperse immediately, but a user on a long interval must
-    not wait that whole interval for their first sync."""
+    not wait that whole interval for his first sync."""
     assert main.STARTUP_SPREAD_MAX_SECONDS <= 60
     longest = main.STARTUP_SETTLE_SECONDS + main.STARTUP_SPREAD_MAX_SECONDS
     assert longest <= 90
 
 
 def test_steam_still_gets_time_to_settle_before_the_first_sync():
-    """Adding shortcuts while Steam's library is still loading is the original
+    """Adding shortcuts while Steam's library is still loading is the orginal
     reason this delay exists; jitter must not erode it."""
     assert main.STARTUP_SETTLE_SECONDS >= 20

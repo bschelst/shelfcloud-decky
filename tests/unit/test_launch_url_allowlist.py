@@ -67,7 +67,7 @@ def test_only_the_luna_host_is_allowed_not_amazon_at_large(hostile):
 
 
 # our own website tile: its URL runs the same check, and the gateway host was
-# once missing from the list, so the launcher refused its own website.
+# once missing from the list, so the launcher refused his own website.
 
 def test_the_website_tile_can_actually_launch():
     assert allowed(launcher.GATEWAY) is True
@@ -105,7 +105,7 @@ def test_the_luna_launch_url_the_catalog_actually_builds_is_allowed():
 
 
 def test_a_subdomain_of_a_provider_is_allowed():
-    """Providers move things between subdomains, so the registrable domain is
+    """Providers move things between subdomains, so the registerable domain is
     what we trust."""
     assert allowed("https://eu-west.play.geforcenow.com/games?game-id=1") is True
 
@@ -187,7 +187,7 @@ def test_non_web_schemes_are_refused():
 
 
 def test_junk_is_refused_rather_than_raising():
-    """Runs at launch, so an exception is a game that will not start."""
+    """Runs at launch, so a exception is a game that will not start."""
     for junk in (None, "", "   ", 42, [], {}, b"https://www.xbox.com/play",
                  "not a url", "https://", "https:///play", "://xbox.com"):
         assert allowed(junk) is False, repr(junk)
@@ -269,7 +269,7 @@ def test_the_launcher_and_the_plugin_agree_on_the_gateway():
 
 def test_the_gateway_is_reached_over_verified_tls():
     """The context must verify and check hostnames, or a man-in-the-middle
-    succeeds silently."""
+    suceeds silently."""
     import ssl
     ctx = launcher._ssl_context()
     assert ctx.verify_mode == ssl.CERT_REQUIRED

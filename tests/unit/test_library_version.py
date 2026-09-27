@@ -80,7 +80,7 @@ def test_a_changed_library_is_sent_in_full(tmp_path):
 
 def test_a_changed_tracking_record_also_counts_as_changed(tmp_path):
     """`tracked` is half the version, so a newly recorded tile must not be
-    withheld."""
+    witheld."""
     p = plugin(tmp_path)
     first = library(p)
 
@@ -98,7 +98,7 @@ def test_an_unknown_version_gets_the_whole_thing(tmp_path):
 
 
 def test_no_version_at_all_gets_the_whole_thing(tmp_path):
-    """An older frontend sends nothing, and must still work."""
+    """An older frontend sends nothing, and must still work"""
     reply = library(plugin(tmp_path), "")
     assert not reply.get("unchanged")
     assert reply["desired"]

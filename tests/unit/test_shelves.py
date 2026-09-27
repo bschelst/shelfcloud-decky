@@ -34,7 +34,7 @@ import main  # noqa: E402
 
 
 def plugin(responses):
-    """A plugin whose gateway answers from a {path: payload} map. An Exception
+    """A plugin whose gateway answers from a {path: payload} map. A Exception
     payload is raised instead of returned, to drive the failure paths."""
     instance = main.Plugin()
     instance._settings = {"gateway_url": "http://gw:8000", "api_token": "t"}
@@ -126,7 +126,7 @@ def test_a_gateway_error_is_reported_not_raised():
 
 def test_an_unexpected_response_shape_does_not_crash_the_panel():
     """The gateway is a separate service that can be mid-deploy, behind a proxy
-    returning an error page, or simply older than this plugin."""
+    returning an error page, or simply older then this plugin."""
     for junk in ("not json", [], None, 42):
         p = plugin({"/api/me/shelves": junk, "/api/me/devices": DEVICES})
         assert asyncio.run(p.get_shelves())["ok"] is False
@@ -201,7 +201,7 @@ def test_a_list_field_that_is_not_a_list_is_rejected_not_iterated():
 def test_ids_that_arrive_as_strings_are_usable():
     """A proxy that re-serialises JSON can turn every number into a string.
     Coercing keeps the picker working; refusing would be a dead panel for a
-    response that is merely ugly."""
+    response that is merely ugly"""
     shelves = {"shelves": [{"id": "3", "name": "Handheld", "games": "7"}]}
     devices = {"devices": [{"id": "7", "shelf_id": "3"}], "this_device": "7"}
     result = asyncio.run(plugin({"/api/me/shelves": shelves,
@@ -274,7 +274,7 @@ def test_a_device_id_of_zero_is_a_device(record_posts):
 
 def test_an_unreadable_choice_does_not_become_the_shared_library(record_posts):
     """None is a real choice here, so coercion failure must not collapse into
-    it: that would silently empty the device's library instead of erroring."""
+    it: that would silently empty the device's library instead of eroring."""
     p, sent = record_posts(SHELVES, DEVICES)
     result = asyncio.run(p.set_shelf("not-an-id"))
     assert result["ok"] is False

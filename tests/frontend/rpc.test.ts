@@ -81,7 +81,7 @@ describe("a socket that has died", () => {
   });
 
   it("still calls when Decky exposes no socket to inspect", async () => {
-    // no socket to inspect must not count as broken: that would disable the
+    // no socket to controle must not count as broken: that would disable the
     // plugin over an internal it cannot see.
     const { guarded, socketUsable } = await freshRpc();
     socket(undefined);
@@ -92,7 +92,7 @@ describe("a socket that has died", () => {
   });
 
   it("frees its slot even when the call is refused", async () => {
-    // failures must not permanently cost slots, or the plugin wedges.
+    // failures must not permanetly cost slots, or the plugin wedges.
     vi.useFakeTimers();
     try {
       const { guarded, rpcLoad } = await freshRpc();
@@ -111,7 +111,7 @@ describe("a socket that has died", () => {
 
 describe("a call that never comes back", () => {
   it("gives its slot back instead of holding it forever", async () => {
-    // the freeze in one test: withTimeout gives up waiting but cannot cancel, so
+    // the freeze in one test: withTimeout gives up waiting but cant cancel, so
     // an abandoned call kept its permit. Four of those and everything queued behind.
     vi.useFakeTimers();
     try {
@@ -150,7 +150,7 @@ describe("a call that never comes back", () => {
 describe("a message too big for the socket", () => {
   it("is refused rather than sent", async () => {
     // aiohttp CLOSES a websocket on a message over 4 MB instead of raising, and
-    // nothing reports it: every outstanding promise then hangs forever.
+    // nothing reports it: every outstanding promise then hangs forever
     const { guarded } = await freshRpc();
     const huge = "x".repeat(4 * 1024 * 1024);
     await expect(guarded("save_icon")(1, huge)).rejects.toThrow(/save_icon/);
@@ -198,7 +198,7 @@ describe("the panel never queues behind a sync", () => {
     void panel();
     await settle();
 
-    // The panel's call went out rather than joining the queue.
+    // The panel's call went out rather than joining queue.
     expect(calls.some((c) => c.name === "get_status")).toBe(true);
     expect(rpcLoad().active).toBe(4);
   });
@@ -220,7 +220,7 @@ describe("not posting faster than the socket can answer", () => {
     for (let i = 0; i < 20; i++) void fn();
     await settle();
 
-    // The whole point: twenty asked for, a handful actually posted.
+    // The whole point: twenty asked for, a handful actualy posted.
     expect(calls.length).toBeLessThanOrEqual(4);
     expect(rpcLoad().active).toBeLessThanOrEqual(4);
     expect(rpcLoad().waiting).toBeGreaterThan(0);

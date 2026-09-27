@@ -86,7 +86,7 @@ describe("a game that moved provider leaves the old collection", () => {
 
 describe("what it must not touch", () => {
   it("leaves a game the user filed there by hand", async () => {
-    // 99 is not ours: somebody dragged their own game in here.
+    // 99 is not ours: somebody draged their own game in here.
     collections.push(collection(LUNA, [42, 99]));
 
     await pruneProviderCollections([{ appId: 42, provider: "geforce_now" }],
@@ -97,7 +97,7 @@ describe("what it must not touch", () => {
   });
 
   it("leaves collections that are not ours", async () => {
-    // a bare provider name is the user's own collection, so ours carry a suffix.
+    // a bare provider name is the user's own collection, so ours carry a suffix
     collections.push(collection("Amazon Luna", [42]));
     collections.push(collection("Favourites", [42]));
 
@@ -110,7 +110,7 @@ describe("what it must not touch", () => {
   });
 
   it("removes nothing when the sync filed nothing and tracked nothing", async () => {
-    // an empty managed set means "we know of no apps"; a failed sync must not
+    // an empty managed set means "we know of no apps"; a failed sync may not
     // read as "empty every collection".
     collections.push(collection(LUNA, [42, 43]));
 

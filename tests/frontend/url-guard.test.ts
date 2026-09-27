@@ -14,7 +14,7 @@ describe("addresses that are fine", () => {
   });
 
   it("accepts a hostname with a hyphen", () => {
-    // an early version rejected these: its char class "\s -" ate the hyphen.
+    // an early version rejected these: its char class "\s -" ate the hyphen
     expect(isSafeExternalUrl("https://my-gateway.example.com/sign-in")).toBe(true);
   });
 
@@ -42,7 +42,7 @@ describe("addresses that are not", () => {
 
   it("accepts an empty authority, which the parser normalises away", () => {
     // new URL() turns "https:///nowhere" into host "nowhere", a real https
-    // address, so refusing it would be wrong not strict.
+    // adress, so refusing it would be wrong not strict.
     expect(isSafeExternalUrl("https:///nowhere")).toBe(true);
   });
 
@@ -62,7 +62,7 @@ describe("addresses that are not", () => {
 });
 
 describe("values that are not even strings", () => {
-  // the gateway can answer with anything, not only strings.
+  // the gateway can answer with anything, not only with strings.
   it("refuses them without throwing", () => {
     for (const value of [null, undefined, 0, 1, {}, [], true, NaN]) {
       expect(isSafeExternalUrl(value)).toBe(false);

@@ -39,7 +39,7 @@ describe("fitting the name", () => {
   });
 
   it("never lets the words run past the canvas", () => {
-    // Steam clips with no warning, leaving the name half there.
+    // Steam clips with no warning, leaving the name half there
     for (const name of [
       "Wiki",
       "Schelstraete Bart",
@@ -68,13 +68,13 @@ describe("fitting the name", () => {
     const layout = logoLayout("Anything", measure);
     const bottom = layout.mark.y + layout.mark.size;
     expect(bottom / LOGO_H).toBeGreaterThan(0.8);
-    // symmetric: the mark is centred, so the same holds above it.
+    // symetric: the mark is centred, so the same holds above it.
     expect(layout.mark.y / LOGO_H).toBeLessThan(0.2);
   });
 
   it("centres the mark and words as one group in the canvas", () => {
     // the mark used to be pinned left, so a short name sat off to one side and
-    // the provider chip floated wrong. A name that fits should sit dead centre.
+    // the provider chip floated not right. A name that fits should sit dead centre.
     const layout = logoLayout("Wiki", measure);
     const left = layout.mark.x;
     const right = layout.textLeft + layout.textWidth;

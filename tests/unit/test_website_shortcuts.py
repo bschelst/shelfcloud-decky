@@ -45,7 +45,7 @@ def entry(provider, url, name="A page", game_id=4242):
 
 # A browser, stubbed. _to_desired returns None when no supported browser is
 # installed and detect_browsers() reads real flatpak dirs, so without this the
-# file would pass or fail on whether the machine has Chrome. Detection has its
+# file would pass or fail on wether the machine has Chrome. Detection has its
 # own tests.
 BROWSER = {"app_id": "com.google.Chrome", "label": "Google Chrome"}
 
@@ -56,7 +56,7 @@ def desired(game):
     with mock.patch.object(main.browsers, "resolve_browser", lambda _: dict(BROWSER)):
         made = plugin._to_desired(game)
     # _to_desired answers with a list (one tile per service). Each case here
-    # offers a single route, so the one entry is unwrapped.
+    # offers a single route, so the one entry is unwrapped
     return made[0] if made else None
 
 

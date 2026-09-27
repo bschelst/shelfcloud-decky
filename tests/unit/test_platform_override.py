@@ -107,7 +107,7 @@ def test_the_override_alone_enables_no_domain(fake):
 
 def test_a_startup_script_must_enable_the_page_domain(fake):
     """Without Page.enable first the script never runs, yet every signal still
-    says success. So the enable must come before the script."""
+    says sucess. So the enable must come before the script."""
     held = cdp.hold_platform("ws://127.0.0.1:9223/x", UA, "Windows")
     cdp.add_startup_script(held, "window.x = 1;")
     methods = [m["method"] for m in held.sent]
@@ -203,7 +203,7 @@ def test_the_handoff_stub_supplies_the_id_luna_looks_for():
 
 def test_the_stub_swallows_the_href_assignment():
     """openUriWithHiddenFrame ends in `frame.contentWindow.location.href = uri`.
-    A setter that does nothing is what turns that into silence."""
+    A setter that does nothing is what turns that in silence."""
     js = launcher.NEUTRALISE_APP_HANDOFF_JS
     assert "set href" in js
 
@@ -295,7 +295,7 @@ def test_pad_names_are_kept_not_just_paths(monkeypatch, tmp_path):
 
 
 def test_the_diagnostic_never_breaks_a_launch(monkeypatch):
-    """A diagnostic that can abort a game is worse than no diagnostic."""
+    """A diagnostic that can abort a game is worse than no diagnostic"""
     monkeypatch.setattr(cdp, "wait_for_page", lambda *a, **k: None)
     launcher.log_browser_gamepads("https://luna.amazon.com/game/x", "amazon_luna")
 
@@ -353,7 +353,7 @@ def test_no_controller_at_all_is_not_an_error(monkeypatch):
 
 
 def test_it_cannot_wait_forever(monkeypatch):
-    """Pads that keep churning must not hold a launch open indefinitely."""
+    """Pads that keep churning must not hold a launch open indefinetly."""
     churn = [["a"], ["a", "b"], ["a"], ["a", "b"], ["a"]] * 20
     clock = _with_pads(monkeypatch, churn)
     launcher.wait_for_gamepad(timeout=3.0)

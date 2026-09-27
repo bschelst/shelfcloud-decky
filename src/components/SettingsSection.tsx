@@ -86,7 +86,7 @@ export const SettingsSection: FC<SettingsSectionProps> = ({
 
     <PanelSectionRow>
       {/* Padded top and bottom, unlike the rows around it: this one ends in a
-          paragraph, which otherwise runs into the labels above and below it. */}
+          paragraph, which otherwise runs into the labels above and below. */}
       <div style={{ padding: "10px 0" }}>
         <ToggleField
           label="A tile per service"

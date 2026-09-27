@@ -41,7 +41,7 @@ describe("what a cancelled run hands back", () => {
   });
 
   it("never takes a web page", () => {
-    // pages are exempt from cancel, so it must not reach them by the back door.
+    // pages are exemt from cancel, so it must not reach them by the back door.
     const desired = [
       game(30, "shelfcloud"),
       game(31, "custom"),
@@ -52,7 +52,7 @@ describe("what a cancelled run hands back", () => {
 
   it("removes nothing when the library could not be read", () => {
     // null is "unknown" not "empty"; treating it as empty would take the whole
-    // library away.
+    // library away
     const desired = [game(40), game(41), game(42)];
     expect(untiledFromRun(null, desired, {})).toEqual([]);
   });
@@ -71,7 +71,7 @@ describe("what a cancelled run hands back", () => {
 
   it("survives rows that are not objects at all", () => {
     // `desired` reaches this function as the RAW gateway list, so a null row
-    // must not throw and must not become a removal.
+    // may not throw and may not become a removal.
     const desired = [null, undefined, 0, "x", [], { no: "id" }, game(70)] as never;
     expect(untiledFromRun(new Set(), desired, {})).toEqual([70]);
   });
@@ -84,7 +84,7 @@ describe("what a cancelled run hands back", () => {
 
   it("matches tracked ids across the string/number boundary", () => {
     // tracked is keyed by STRING in synced.json, desired carries numbers; a
-    // mismatch would hand back every tile just made.
+    // missmatch would hand back every tile just made.
     const desired = [game(60), game(61)];
     const tracked = { "60": {}, "61": {} };
     expect(untiledFromRun(new Set(), desired, tracked)).toEqual([]);

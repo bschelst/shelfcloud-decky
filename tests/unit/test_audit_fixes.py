@@ -17,7 +17,7 @@ main = harness.main
 
 def test_a_name_with_braces_is_never_written_into_the_configset(tmp_path):
     """The key is a game name landing in an account-wide file. A brace in it
-    would close the entry and break the parse for everything after."""
+    would close the entry and break teh parse for everything after."""
     configset = tmp_path / "configset_controller_neptune.vdf"
     configset.write_text('"controller_config"\n{\n\t"existing"\n\t{\n\t\t"autosave" "1"\n\t}\n}\n')
     before = configset.read_text()
@@ -110,7 +110,7 @@ def test_the_fallback_refuses_redirects():
 
 def test_the_layout_key_matches_what_steam_asks_for():
     """Steam lowercases the name and strips the chars Windows forbids plus the
-    dot. Checked against its own answer on a real device."""
+    dot. Checked against its own answer on a real device"""
     assert main._layout_key("R.E.P.O. (Boosteroid)") == "repo (boosteroid)"
     assert main._layout_key("BLiNX: The Time Sweeper (Xbox Cloud)") \
         == "blinx the time sweeper (xbox cloud)"

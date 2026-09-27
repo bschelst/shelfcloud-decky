@@ -2,7 +2,7 @@
 """The install state machine in main.py.
 
 The panel renders straight from this state: a `running` never cleared is a
-forever spinner, a failure not recorded is a button pressed again.
+forever spinner, a failure not recorded is a button pressed agian.
 """
 
 import asyncio
@@ -127,7 +127,7 @@ def test_the_remote_is_ensured_before_installing():
         return calls
     calls = run(scenario())
 
-    # assert the order, not the command count: a pinned count breaks when an
+    # assert the order, not the command count: a pinned count breaks when a
     # unrelated step is added, which says nothing about ordering
     flat = [" ".join(argv) for argv in calls]
     remote_add = next(i for i, c in enumerate(flat) if "remote-add" in c)

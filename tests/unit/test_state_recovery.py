@@ -87,7 +87,7 @@ def test_first_run_stays_empty(plugin, monkeypatch):
 
 
 def test_tiles_the_user_deleted_stay_deleted(plugin, monkeypatch):
-    """Recovery reads what Steam HAS, so a removed tile cannot come back."""
+    """Recovery reads what Steam HAS, so a removed tile can not come back."""
     monkeypatch.setattr(plugin.shortcuts, "shelfcloud_shortcuts",
                         lambda *a, **k: [TILES[0]])
     assert list(plugin.Plugin._load_state()) == ["1196"]
@@ -95,7 +95,7 @@ def test_tiles_the_user_deleted_stay_deleted(plugin, monkeypatch):
 
 def test_duplicates_recover_to_the_oldest(plugin, monkeypatch):
     """Steam stores oldest first, and the oldest tile is the one holding the
-    playtime and the controller layout — same rule duplicates() documents."""
+    playtime and the controler layout — same rule duplicates() documents."""
     monkeypatch.setattr(plugin.shortcuts, "shelfcloud_shortcuts", lambda *a, **k: [
         {"game_id": 1196, "app_id": 111},     # oldest
         {"game_id": 1196, "app_id": 222},

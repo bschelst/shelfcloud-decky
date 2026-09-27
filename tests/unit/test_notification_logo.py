@@ -53,7 +53,7 @@ def toast_blocks():
 
 
 def test_there_are_toasts_to_check():
-    """Guards the guard: a regex that matches nothing would pass everything."""
+    """Guards the guard: a regex that matches nothing would pass everyting."""
     assert len(list(toast_blocks())) >= 5
 
 
@@ -67,7 +67,7 @@ def test_every_notification_carries_the_mark():
 
 
 def test_the_new_games_notification_carries_it_on_every_branch():
-    """Three return shapes, one per game count, and an early return is the
+    """Three return shapes, one per game count, and a early return is the
     easy branch to miss."""
     source = read(INDEX)
     body = source[source.index("function newGamesToast"):]

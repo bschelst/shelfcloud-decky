@@ -60,7 +60,7 @@ describe("a collection named after a label we no longer use", () => {
   });
 
   it("is deleted even when it still holds the tiles we manage", async () => {
-    // games are not lost, the same sync filed them under the current name.
+    // games are not lost, the same sync filed them under the curent name.
     // only the grouping goes.
     const stale = collection(RETIRED, [11, 22]);
     collections.push(stale);
@@ -81,7 +81,7 @@ describe("what it must not touch", () => {
   });
 
   it("leaves collections that are not ours alone", async () => {
-    // no " (Shelfcloud)" suffix, so not ours however odd the name.
+    // no " (Shelfcloud)" suffix, so not ours however odd the name
     for (const name of ["custom", "Websites", "Favourites", "custom (Shelfcloud) "]) {
       collections.push(collection(name, [1]));
     }
@@ -91,7 +91,7 @@ describe("what it must not touch", () => {
 
   it("keeps a retired collection that holds a game we do not manage", async () => {
     // somebody dragged their own game in. deleting would throw away a grouping
-    // they made by hand, which is not ours to do.
+    // they made by hand, wich is not ours to do.
     const stale = collection(RETIRED, [11, 999]);
     collections.push(stale);
     const gone = await removeRetiredCollections(new Set([11]));

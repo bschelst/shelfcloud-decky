@@ -96,7 +96,7 @@ describe("a website tile gets its name on the tile", () => {
   });
 
   it("draws the mark from the icon, never from the capsule", async () => {
-    // draw from the icon (256px square mark), not the capsule (600x900), which
+    // draw from the icon (256px square mark), not the capsule (600x900), wich
     // would squash the cloud into a box.
     await syncLibrary([page()], {}, callbacks());
     expect(renderPageCapsule).toHaveBeenCalledWith(
@@ -108,7 +108,7 @@ describe("a website tile gets its name on the tile", () => {
 
 describe("reaching tiles that are already on a shelf", () => {
   it("changes a website tile's fingerprint", async () => {
-    // same nameless capsule at the same URL, so the fingerprint would not move.
+    // same nameless capsule at the same URL, so the fingerprint would not move
     // without our own marker, already-synced website tiles keep the blank capsule.
     const before = `${ART_REVISION}|||||`;         // the shape before this change
     expect(artworkFingerprint(page())).not.toBe(before);
@@ -146,7 +146,7 @@ describe("what it leaves alone", () => {
   });
 
   it("keeps the gateway capsule when there is no icon to draw with", async () => {
-    // a missing icon is a failed download; keep the old tile over a markless one.
+    // a missing icon is a failed download; keep old tile over a markless one.
     const noIcon = page();
     delete (noIcon.artwork_proxy as Record<string, string>).icon;
     await syncLibrary([noIcon], {}, callbacks());
@@ -155,7 +155,7 @@ describe("what it leaves alone", () => {
   });
 
   it("keeps the gateway capsule when drawing fails", async () => {
-    // canvas refused; the tile still gets a picture, just the old one.
+    // canvas refused; teh tile still gets a picture, just the old one.
     vi.mocked(renderPageCapsule).mockResolvedValue(undefined);
     await syncLibrary([page()], {}, callbacks());
     expect(capsuleBytes).toBe("bytes:capsule");

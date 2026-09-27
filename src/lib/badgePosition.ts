@@ -25,7 +25,7 @@ const CENTRED = { left: "50%", transform: "translateX(-50%)" } as const;
 export const BADGE_HEIGHT = 26;
 
 /** Used until the hero is measured. Roughly where a hero ends at the Deck's
- *  resolution, so the badge does not visibly jump once the real height comes. */
+ *  resolution, so the badge doesnt visibly jump once the real height comes. */
 export const FALLBACK_HERO_HEIGHT = 290;
 
 /** How far the hero ARTWORK reaches below the capsule that holds it. Measured

@@ -3,7 +3,7 @@
 // A capsule for a website tile, drawn from the page's name. The capsule is the
 // tile you look at on the shelf. The gateway ships one image for every website
 // tile: our cloud on navy, no words. A shelf of them is a wall of the same
-// square, and the only way to tell them apart is to hover and read the title
+// square, and the only way to tell them apart is hover and read the title
 // Steam prints elsewhere. So the name goes on the capsule, same ground and mark
 // with the page's own name under it. Covers BOTH website providers, the
 // published Shelfcloud page included, its capsule is the bare mark too.

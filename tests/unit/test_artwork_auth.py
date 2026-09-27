@@ -64,7 +64,7 @@ def fetch(instance, url, response=None):
 
     def fake_open(url, headers=None, method="GET", body=None, timeout=None):
         # Signature must match _open exactly. A wrong arg raises inside the try
-        # and comes back as {"ok": False}, which looks like a refused fetch.
+        # and comes back as {"ok": False}, wich looks like a refused fetch.
         # headers is a dict, not a urllib Request, since we use the shared pool.
         sent["request"] = {"url": url, "headers": dict(headers or {})}
         return response or FakeResponse()
@@ -75,7 +75,7 @@ def fetch(instance, url, response=None):
 
 
 def header_of(request, name):
-    """One header from the captured call, matched case-insensitively."""
+    """One header from the captured call, matched case-insensitive."""
     if not request:
         return None
     for key, value in request["headers"].items():

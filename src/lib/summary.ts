@@ -8,7 +8,7 @@ import type { SyncResult } from "./types";
 /**
  * The one-line result shown when a sync finishes. `total` must be the WHOLE
  * library -- added, unchanged and skipped alike. It shipped once as
- * "385 games -- 385 added (7 skipped)", where the 7 were not inside the 385.
+ * "385 games -- 385 added (7 skipped)", where the 7 were not inside of the 385.
  */
 export function syncSummary(
   total: number,

@@ -1,5 +1,5 @@
 # Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
-"""JavaScript shims injected into Luna's page via CDP startup scripts."""
+"""JavaScript shims injected into Luna's page via CDP startup scripts"""
 
 NEUTRALISE_APP_HANDOFF_JS = """
 (() => {

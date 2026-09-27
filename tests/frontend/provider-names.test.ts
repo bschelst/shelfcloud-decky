@@ -10,7 +10,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 // lib/api does not resolve outside the Steam client. Only names are tested
-// here, so the boundary is stubbed.
+// here, so the boundary is stubbed
 vi.mock("../../src/lib/api", () => ({ layoutSelectionBase: vi.fn(async () => ({ ok: false })), logNote: vi.fn(async () => ({ ok: true })),
   fetchArtwork: vi.fn(async () => ({ ok: false })),
   saveIcon: vi.fn(async () => ({ ok: false })),
@@ -47,7 +47,7 @@ describe("every provider has a name written for a person", () => {
   });
 
   it("includes the two website providers, which were the ones missed", () => {
-    // named explicitly too: a future tidy-up dropping them would otherwise just
+    // named explicitely too: a future tidy-up dropping them would otherwise just
     // shrink the sweep and pass.
     expect(KNOWN_PROVIDERS).toContain("shelfcloud");
     expect(KNOWN_PROVIDERS).toContain("custom");
@@ -71,7 +71,7 @@ describe("collection names", () => {
   });
 
   it("does not leave a provider's own collection empty by filing it elsewhere", () => {
-    // the rule: every provider's tiles go to the collection named after it.
+    // the rule: every provider its tiles go to the collection named after it.
     for (const provider of KNOWN_PROVIDERS) {
       expect(collectionName(provider)).toBe(`${providerLabel(provider)} (Shelfcloud)`);
     }

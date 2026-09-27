@@ -2,7 +2,7 @@
 """The About box reports the version Decky provides, or admits it does not know.
 
 _version() reads decky.DECKY_PLUGIN_VERSION rather than parsing package.json
-again — Decky already exposes it as an env variable.
+again — Decky already exposes it as a env variable.
 """
 
 import os

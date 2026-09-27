@@ -1,6 +1,6 @@
 // Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 //
-// Settings behaviour that is more than "store what the control says". in lib/ and
+// Settings behaviour that is more than "store what the controle says". in lib/ and
 // not next to the panel because SettingsSection imports @decky/ui, which only
 // loads inside Steam, so anything in that file can not be reached from a test.
 

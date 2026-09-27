@@ -90,7 +90,7 @@ def _install_for_real(name, tmp_path):
         '"controller_mappings"\n{\n\t"controller_type"\t\t"controller_neptune"\n}\n')
 
     plugin = main.Plugin.__new__(main.Plugin)
-    plugin._settings = {}          # extra pad types off, the default
+    plugin._settings = {}          # extra pad types off, the standaard
     with mock.patch.object(main.os.path, "expanduser", return_value=str(steam)):
         result = asyncio.run(plugin.install_controller_layout(
             name, "template://controller_neptune_gamepad+mouse.vdf"))
@@ -99,7 +99,7 @@ def _install_for_real(name, tmp_path):
 
 def test_a_title_with_a_slash_nests_instead_of_being_refused(tmp_path):
     """"Disney/Pixar WALL-E" is a real game. Steam keys config by name and a
-    slash just nests one level, so refusing every separator broke real games.
+    slash just nests one level, so refusing every seperator broke real games.
     """
     result, cfg = _install_for_real("Disney/Pixar WALL-E (Amazon Luna)", tmp_path)
     assert "unsafe" not in str(result.get("error", "")), result

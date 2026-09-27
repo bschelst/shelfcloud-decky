@@ -40,7 +40,7 @@ export const theme = {
 /** Provider colours, from each service's own branding. Identity, not decoration,
  *  so they never double as status colours. */
 // Colours only. The label comes from types.ts, the one place a provider is
-// named -- two copies is what shipped "Fortnite (amazon_luna)" when Luna landed.
+// named -- two copys is what shipped "Fortnite (amazon_luna)" when Luna landed.
 const PROVIDER_COLORS: Record<string, string> = {
   boosteroid: "#7b61ff",
   geforce_now: "#76b900",

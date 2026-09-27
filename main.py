@@ -5,7 +5,7 @@ A sync agent, not a game browser: games are picked on the web, this keeps the
 Deck's Steam library matching. Python does the network, credentials, disk state
 and the poll loop; the frontend does anything that touches SteamClient. So this
 side decides what the library should hold and emits an event, and the frontend
-makes the shortcuts match. Stdlib only, Decky does not promise extra packages.
+makes the shortcuts match. Stdlib only, Decky doesnt promise extra packages.
 """
 
 import asyncio
@@ -44,7 +44,7 @@ SSL_CTX = get_ssl_context()
 
 DEFAULT_GATEWAY = "https://shelfcloud.cc"
 
-# No install started. Also the shape the frontend reads, so the keys are always
+# No install started. also the shape the frontend reads, so the keys are always
 # there and it does not have to check each one.
 IDLE_INSTALL = {
     "running": False, "app_id": None, "label": None,
@@ -60,7 +60,7 @@ _LAYOUT_CACHE_TTL = 600
 
 # path -> (etag, raw json text). The library is polled on a timer but changes
 # hardly at all, so without this the same few hundred KB came down every sync to
-# say nothing changed. Raw text, not the parsed object: two callers sharing one
+# say nothing changed. raw text, not the parsed object: two callers sharing one
 # dict would see each other's edits, and re-parsing is cheaper than the transfer.
 _ETAG_CACHE: Dict[str, Any] = {}
 _ETAG_CACHE_MAX = 8
@@ -112,7 +112,7 @@ def _safe_layout_name(shortcut_name: str) -> bool:
     back the same way -- that is fine. Only a part that means something to the
     filesystem is refused: ".." climbs, "" is a leading or doubled slash (join()
     on an absolute path throws away everything before it), "." is the directory
-    itself. The resolved-path check at the destination is the one that has to be
+    itself. The resolved-path controle at the destination is the one that has to be
     right; this just makes the refusal early and clear.
     """
     if not shortcut_name or not shortcut_name.strip():
@@ -150,7 +150,7 @@ def _sized(fn):
 # One connection pool for every call this plugin makes. urlopen opens a new TCP
 # connection, plus a TLS handshake, for every request, and a sync makes hundreds
 # of them to the same two or three hosts. urllib3 keeps them alive and hands the
-# same one back. Decky already ships it, so no new dependency.
+# same one back. Decky already ships it, so no new dependancy.
 try:
     import urllib3 as _urllib3
 except Exception:                       # pragma: no cover - urllib3 is present
@@ -457,7 +457,7 @@ def as_id(value: Any) -> Optional[int]:
     that rewrites bodies, a float from a language whose numbers are all floats, or
     a dict from an error document. Everything downstream wants an int or nothing,
     so convert once, here. bool is rejected before int because it is a subclass of
-    int -- without that line `True` quietly becomes the id 1, which is a real shelf.
+    int -- without that line `True` quietly becomes the id 1, wich is a real shelf.
     """
     if value is None or isinstance(value, bool):
         return None
@@ -701,7 +701,7 @@ class Plugin:
 
     @staticmethod
     def _write_json(path: str, data: Dict) -> None:
-        # Write-then-rename so a crash mid-write cannot leave unreadable state.
+        # Write-then-rename so a crash mid-write cant leave unreadable state.
         temporary = path + ".tmp"
         with open(temporary, "w", encoding="utf-8") as handle:
             json.dump(data, handle, indent=2)
@@ -1349,7 +1349,7 @@ class Plugin:
             try:
                 entries = self._to_desired(game)
             except Exception as exc:
-                # One bad row must never cost the user their whole library.
+                # One bad row must never cost teh user their whole library.
                 decky.logger.warning("Skipping a malformed game entry: %s", exc)
                 entries = []
             if entries:
@@ -1474,7 +1474,7 @@ class Plugin:
             decky.logger.warning("could not read shortcuts.vdf: %s", exc)
             return 0
         # An empty read means the file could not be parsed, not that Steam has no
-        # shortcuts. Forgetting everything then would rebuild the whole library
+        # shortcuts. forgetting everything then would rebuild the whole library
         # under new app ids and lose every playtime and layout.
         if not found:
             return 0
@@ -1523,7 +1523,7 @@ class Plugin:
 
         # `or []` is not enough: it rescues null, but a number or string reaches
         # the loop and raises -- a string iterates one char at a time, an int not
-        # at all.
+        # at all
         shelf_rows = shelves.get("shelves")
         device_rows = devices.get("devices")
         if not isinstance(shelf_rows, list) or not isinstance(device_rows, list):
@@ -2140,7 +2140,7 @@ class Plugin:
         return {"ok": True}
 
     # How long a player count may be reused. A badge on a game page is opened over
-    # and over on a Deck, so the cache is the difference between one request per game
+    # and over on a Deck, so the cache is the diffrence between one request per game
     # and one per press of the A button. Fifteen minutes because this number is
     # context, not a readout -- nobody cares that a game went from 61,000 to 60,400.
     PLAYERS_CACHE_SECONDS = 900.0
@@ -2569,7 +2569,7 @@ class Plugin:
             except Exception as exc:
                 decky.logger.warning("Poll failed: %s", exc)
 
-            # Read the interval each tick, not once, so changing the setting takes
+            # Read the interval each tick, not once, so changing the instellingen takes
             # effect on the next tick without a plugin reload.
             await asyncio.sleep(next_poll_delay(
                 max(MIN_SYNC_SECONDS, self._sync_minutes() * 60)

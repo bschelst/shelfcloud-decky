@@ -14,7 +14,7 @@ export interface Png {
   kind: "png";
 }
 
-/** An image already downloaded for another slot, ready to draw. */
+/** An image already downloaded for an other slot, ready to draw. */
 export interface SourceImage {
   data: string;
   kind: "png" | "jpg";

@@ -3,7 +3,7 @@
 // A small mark on a game's page saying which service streams it. Shaped after
 // the ProtonDB medal, which solves the same placement problem on the same page.
 // Shown only for tiles this plugin made, so on anything else it draws nothing --
-// which is what makes it mean "this one is a cloud game".
+// wich is what makes it mean "this one is a cloud game".
 
 import { type ReactElement } from "react";
 import { FaAmazon, FaCloud, FaXbox } from "react-icons/fa";
@@ -38,7 +38,7 @@ export default function ProviderBadge(): ReactElement {
   const { enabled, position, loaded } = useBadgeSettings();
 
   // Nothing unless this is one of ours (a badge on every game would say
-  // nothing), and nothing until the settings are read -- drawing on the default
+  // nothing), and nothing until the instellingen are read -- drawing on the default
   // and fixing it a moment later is how a switched-off badge still flashed up.
   if (!loaded || !enabled || !provider) return <></>;
 

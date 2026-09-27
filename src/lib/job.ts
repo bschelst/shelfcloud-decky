@@ -25,7 +25,7 @@ const listeners = new Set<() => void>();
 export function setJob(patch: Partial<Job>): void {
   // a starting run must start un-cancelled, wherever it was started from.
   // cancelling was cleared only by runJob, which doSync and doAddOwned skip, so
-  // one press of Cancel used to stop every later sync at its first tile.
+  // one press of Cancel used to stop every later sync on its first tile.
   if (patch.busy === true && !job.busy) cancelling = false;
   job = { ...job, ...patch };
   listeners.forEach((listener) => listener());
@@ -80,7 +80,7 @@ export function resetJob(): void {
 // ----------------------------------------------------------------- cancelling
 
 // "Add all my games" walks a whole Steam library, thousands of tiles and many
-// minutes. it needs a way to stop, and closing the panel does not help since the
+// minutes. it needs a way to stop, and closing the panel doesnt help since the
 // run survives that on purpose.
 let cancelling = false;
 

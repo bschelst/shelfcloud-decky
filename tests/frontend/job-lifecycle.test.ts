@@ -23,7 +23,7 @@ describe("a job always ends", () => {
   });
 
   it("clears busy when the body returns nothing at all", async () => {
-    // the bug's exact shape: work done, nothing reported, panel not put back.
+    // the bug's exact shape: work done, nothing reported, panel not put back
     await runJob(async () => { /* worked, said nothing */ });
     expect(getJob().busy).toBe(false);
   });
@@ -85,7 +85,7 @@ describe("cancelling", () => {
   });
 
   it("does nothing when nothing is running", () => {
-    // else a stale press would arm cancel for whatever runs next.
+    // else a stale knop press would arm cancel for whatever runs next.
     cancelJob();
     expect(cancelRequested()).toBe(false);
     expect(getJob().busy).toBe(false);
@@ -107,7 +107,7 @@ describe("cancelling", () => {
 
   it("does not leak into a run started WITHOUT runJob", () => {
     // what shipped: doSync set busy without runJob, so cancel was never cleared
-    // and stopped every later sync at its first tile while reporting success.
+    // and stopped every later sync at its first tile while reporting succes.
     setJob({ busy: true });
     cancelJob();
     expect(cancelRequested()).toBe(true);
@@ -145,7 +145,7 @@ describe("the panel keeps seeing a run it did not start", () => {
 describe("a run that stops responding", () => {
   it("still gives the panel back when Cancel is not honoured", () => {
     // the body never settles, so nothing clears `busy`. The store is module
-    // scope, so closing the panel does not help. A layout-blocked sync did this.
+    // scope, so closing the panel doesnt help. A layout-blocked sync did this.
     vi.useFakeTimers();
     try {
       setJob({ busy: true, message: "Syncing…" });

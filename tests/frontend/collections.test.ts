@@ -69,7 +69,7 @@ beforeEach(() => {
 describe("filing as the sync runs", () => {
   it("files a batch before the sync has finished", async () => {
     await syncLibrary(games(BATCH * 3), {}, callbacks());
-    // three full batches, one call each, not one call at the end.
+    // three full batches, one call each, not one call at the end
     expect(vi.mocked(addToProviderCollections).mock.calls.length).toBeGreaterThanOrEqual(3);
   });
 
@@ -82,7 +82,7 @@ describe("filing as the sync runs", () => {
 
   it("does not re-send earlier batches", async () => {
     // flushing the whole accumulated list each time would re-save every tile so
-    // far, so cost grows per batch.
+    // far, so the cost grows per batch.
     await syncLibrary(games(BATCH * 2), {}, callbacks());
     const sizes = vi.mocked(addToProviderCollections).mock.calls.map(([m]) => m.length);
     expect(sizes.every((n) => n <= BATCH)).toBe(true);
@@ -101,7 +101,7 @@ describe("filing as the sync runs", () => {
 
 describe("surviving an interruption", () => {
   it("keeps the tiles filed before the failure", async () => {
-    // fail on the 20th shortcut: the first batch of 12 is already filed.
+    // fail on the 20th shortcut: the first batch of 12 is allready filed.
     installSteamClient(20);
     const result = await syncLibrary(games(30), {}, callbacks());
 

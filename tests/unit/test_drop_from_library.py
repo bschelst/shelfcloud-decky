@@ -58,7 +58,7 @@ def test_one_batch_goes_in_one_call():
 
 
 def test_a_large_run_is_split_under_the_cap():
-    """The gateway refuses more than 500 in one change."""
+    """The gateway refuses more then 500 in one change."""
     sent = []
     ids = list(range(1000))
     result = asyncio.run(plugin(sent).drop_from_library(ids))
@@ -96,7 +96,7 @@ def test_a_failure_is_reported_never_raised():
 
 
 def test_a_failure_part_way_reports_what_did_go():
-    """So the count shown to the person matches what actually happened."""
+    """So the count shown to the person matches with what actually happened."""
     sent = []
     instance = main.Plugin()
     instance._settings = {}

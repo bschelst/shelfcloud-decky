@@ -1,7 +1,7 @@
 // Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 //
 // Shown when no supported browser is installed, the one state where Shelfcloud
-// cannot work. We install one from Flathub as `deck` (a --user install needs no
+// cant work. We install one from Flathub as `deck` (a --user install needs no
 // root, and Game Mode cannot show a password prompt). Desktop Mode instructions
 // stay below the buttons for when the install fails or there is no network.
 

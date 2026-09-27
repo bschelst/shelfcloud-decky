@@ -5,7 +5,7 @@
 // slot, which started 404ing for catalogue games; the mark then fell through to
 // the gateway's default tile, which is fully opaque, so Decimated got its name
 // beside a black rectangle. A fallback chain was the wrong shape: this is one
-// fixed image that must never be swapped, so it is compiled in.
+// fixed image that must never be swaped, so it is compiled in.
 //
 // 256x256 with a real alpha channel, the same file the gateway serves at
 // /static/img/tiles/shelfcloud-icon.png. If that art is ever redrawn, this has

@@ -19,7 +19,7 @@ export const RPC_TIMEOUT = 20000;
 
 // How long ONE game may take before the sync drops it and moves on. a backstop,
 // not a budget: every call in a game's turn has its own deadline, so reaching this
-// means something is hanging that none of those cover. bounding the iteration
+// means something is hanging what none of those cover. bounding the iteration
 // means whatever hangs, the library still finishes and the log names the game.
 export const PER_GAME_TIMEOUT = 40000;
 

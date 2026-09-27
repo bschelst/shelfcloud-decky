@@ -59,7 +59,7 @@ STREAM_STATS_TIMEOUT = 180.0
 # tests/unit/test_gateway_default.py checks they agree.
 GATEWAY = "https://shelfcloud.cc"
 
-# Where the gateway used to live, still allowed during the changeover, see below.
+# Where the gateway used to live, still allowed during the changeover, see below
 LEGACY_HOST = "shelfcloud.schelstraete.org"
 
 # The only places a game may launch. Checked HERE on the device, not just on
@@ -117,7 +117,7 @@ def is_allowed_launch_url(url) -> bool:
     """
     if not url or not isinstance(url, str):
         return False
-    # On the RAW string: .strip() would drop a trailing newline that is part of the attack.
+    # On the RAW string: .strip() would drop a trailing newline thats part of the attack.
     if any(c in url for c in "\\\t\r\n"):
         return False
     try:
@@ -172,7 +172,7 @@ def stored_fallback(game_id: str, provider: str = "") -> str:
 
 # Steam catches none of this script's output, so we keep our own log. A silent
 # fallback to the stored URL is otherwise invisible: the game starts either way,
-# only the log says whether the gateway was ever reached.
+# only the log says wether the gateway was ever reached.
 _PLUGIN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _HOMEBREW_DIR = os.path.dirname(os.path.dirname(_PLUGIN_DIR))
 LOG_FILE = os.path.join(_HOMEBREW_DIR, "logs", "Shelfcloud", "shelfcloud-launch.log")
@@ -210,7 +210,7 @@ def configured_scale():
     """What the user chose for the interface scale, or "auto".
 
     Read at launch, not baked into the shortcut: else changing one number would
-    mean re-syncing hundreds of shortcuts.
+    mean re-syncing hundreds of shortcuts opnieuw.
     """
     try:
         with open(SETTINGS_FILE, encoding="utf-8") as handle:
@@ -720,7 +720,7 @@ def main() -> int:
             argv = argv[:index] + argv[index + 2:]
 
     args = [a for a in argv if not a.startswith("--")]
-    # The URL is optional now and usually absent: a game tile carries --game-id
+    # The URL is optional now and usualy absent: a game tile carries --game-id
     # and we resolve from the gateway. Only an old shortcut and the website tile
     # still pass one positionally.
     if len(args) < 2:
@@ -802,7 +802,7 @@ def main() -> int:
         log(f"gamepad diagnostic failed, continuing: {exc}")
 
     # In the background: it waits for a first frame and a queue can be minutes.
-    # The browser is already up, and a daemon thread won't outlive the session.
+    # the browser is already up, and a daemon thread won't outlive the session.
     try:
         threading.Thread(target=_safely, args=(log_stream_resolution, url, provider),
                          name="stream-stats", daemon=True).start()

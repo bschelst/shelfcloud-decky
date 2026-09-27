@@ -9,7 +9,7 @@
 import { callable } from "@decky/api";
 
 // kept small: these calls are local and fast, and the freeze we guard against
-// came from having hundreds open at once.
+// came from having hundreds open on the same moment.
 const MAX_IN_FLIGHT = 4;
 
 // one slot is always kept free for the panel, so get_status does not wait behind
@@ -86,7 +86,7 @@ async function waitForSocket(): Promise<boolean> {
   const until = Date.now() + RECONNECT_WAIT;
   let asked = 0;
   while (Date.now() < until) {
-    // ask again every couple of seconds: the first try can land while the old
+    // ask again every couple of seconds: the first try can land wile the old
     // connection is still being torn down.
     if (Date.now() >= asked) {
       reconnect();

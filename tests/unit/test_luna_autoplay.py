@@ -115,7 +115,7 @@ def test_a_page_with_no_video_at_all_is_not_streaming():
 
 
 def test_a_streaming_url_still_counts_even_before_the_video_exists():
-    """GeForce NOW puts 'streaming' in the URL before the video element appears."""
+    """GeForce NOW puts 'streaming' in the URL before the video element apears."""
     assert _run_js(launcher.IS_STREAMING_JS, {
         "href": "https://play.geforcenow.com/streaming/session", "videos": [],
     }) is True
@@ -139,7 +139,7 @@ def test_the_selector_cannot_match_the_signed_out_upsell():
 
 def test_the_signed_out_check_uses_ids_not_words():
     """Luna localises by IP (a Belgian browser gets "Inloggen"), so a text
-    check would pass for anyone abroad."""
+    controle would pass for anyone abroad."""
     signed_out = LUNA["signed_out"]
     assert "item_secondary_nav_button_sign_in" in signed_out
     assert "primary_entitled_button_log_in" in signed_out
@@ -174,7 +174,7 @@ def test_controls_that_must_never_be_clicked(label):
 @pytest.mark.parametrize("label", ["add to favourites", "share", "report issue",
                                    "add to desktop", "gamenight", "my stuff"])
 def test_the_rest_of_lunas_page_is_ignored(label):
-    """Read off the live page, so this is the real surrounding furniture."""
+    """Read off the live page, so this is the real surrounding furniture"""
     assert _matcher()(label, 2) is False
 
 

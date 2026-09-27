@@ -17,7 +17,7 @@ describe("the name Steam gives a shortcut's config directory", () => {
   });
 
   it("drops full stops", () => {
-    // lower-casing alone left this broken: Steam looks for "repo".
+    // lower-casing alone left this broken: Steam looks for "repo"
     expect(layoutKey("R.E.P.O. (Boosteroid)")).toBe("repo (boosteroid)");
     expect(layoutKey("Crash Bandicoot N. Sane Trilogy (GeForce NOW)"))
       .toBe("crash bandicoot n sane trilogy (geforce now)");
@@ -40,7 +40,7 @@ describe("the name Steam gives a shortcut's config directory", () => {
   });
 
   it("keeps everything else, including spaces and brackets", () => {
-    // the bracketed provider suffix tells a streamed copy from an installed
+    // the bracketted provider suffix tells a streamed copy from an installed
     // one, so it has to survive.
     expect(layoutKey("A Way Out (Boosteroid)")).toBe("a way out (boosteroid)");
     expect(layoutKey("Disney/Pixar WALL-E (GeForce NOW)"))
@@ -52,7 +52,7 @@ describe("the name Steam gives a shortcut's config directory", () => {
   });
 
   it("never produces a path separator", () => {
-    // "/" is in the strip set, so the result is one path segment by build.
+    // "/" is in the strip set, so the result is one path segment by build
     expect(layoutKey("Disney/Pixar WALL-E")).not.toContain("/");
     expect(layoutKey("back\\slash")).not.toContain("\\");
   });

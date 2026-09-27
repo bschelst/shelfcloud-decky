@@ -90,7 +90,7 @@ def test_a_missing_state_file_is_not_an_error(tmp_path, monkeypatch):
 
 def parse_argv(argv):
     """Mirror main()'s parsing: flag pairs removed first, so their values never
-    reach the positional list."""
+    reach to the positional list."""
     argv = list(argv)
     for flag in ("--provider", "--game-id"):
         if flag in argv:
@@ -107,7 +107,7 @@ def test_a_game_tile_passes_no_url_at_all():
             "--provider", "amazon_luna"]
     args = parse_argv(argv)
     assert args == ["com.microsoft.Edge", "/profile"]
-    assert len(args) >= 2                # accepted; would have been rejected before
+    assert len(args) >= 2                # acepted; would have been rejected before
     assert not any("http" in a for a in argv)
 
 

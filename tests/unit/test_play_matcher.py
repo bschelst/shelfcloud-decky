@@ -117,7 +117,7 @@ def test_cjk_labels_match_as_substrings():
 # --------------------------------------------------- labels that must NOT fire
 
 def test_navigation_links_are_not_clicked():
-    """Every one of these was on the live Xbox page beside the Play button."""
+    """Every one of these was on the live Xbox page beside the Play button"""
     for label in ("Overslaan naar hoofdinhoud", "Meer informatie over Cloud Gaming",
                   "PEGI 7", "XBOX-games", "XBOX Game Pass", "Microsoft-account",
                   "Bestellingen volgen", "Communautaire voorschriften",
@@ -150,7 +150,7 @@ def test_other_commerce_labels_containing_a_play_word():
 def test_the_deny_list_does_not_reject_the_xbox_button():
     """Xbox's sub-label says "Inbegrepen in je abonnement", and "abonnement" is
     a deny word — but it describes the game as included, not an offer. Deny must
-    judge only the leading words, not the whole label."""
+    only judge the leading words, not the whole label."""
     assert "abonnement" in DENY
     assert hits("NU SPELEN\nInbegrepen in je abonnement")
     assert hits("NU SPELEN Inbegrepen in je abonnement")
@@ -183,7 +183,7 @@ def test_other_category_phrases_are_refused():
 
 
 def test_phrases_do_not_swallow_real_play_labels():
-    """The denial is phrase-level, so a bare instruction is untouched."""
+    """The denial is phrase-level, so a bare instructon is untouched."""
     for label in ("Play", "Play now", "NU SPELEN", "Jouer maintenant"):
         assert round_of(label) is not None, label
 
@@ -199,7 +199,7 @@ def test_hyphenation_does_not_break_real_labels():
     assert hits("Play now")
     assert hits("NU SPELEN")
     assert words_of("nu spelen") == ["nu", "spelen"]
-    # Punctuation around a word is trimmed, so these still read as Play.
+    # Punctuation around a word is trimmed, so these read still as Play.
     for label in ("Play!", "(Play)", "» Play", "Play…"):
         assert hits(label), label
 
@@ -250,7 +250,7 @@ def test_a_label_with_a_sub_label_falls_to_round_two():
 
 
 def test_a_bare_play_button_beats_a_long_one_wherever_it_sits():
-    """The regression, stated directly: a plain Play button must win."""
+    """The regresion, stated directly: a plain Play button must win."""
     stray = "Play more games with a subscription"
     real = "Play"
     assert round_of(stray) == 2

@@ -35,7 +35,7 @@ def test_the_two_copies_agree():
 
 
 def test_the_default_is_https():
-    """The bearer token rides on this, so plain HTTP would leak it."""
+    """The bearer token rides on this, so plain HTTP would leak him."""
     assert backend_default().startswith("https://")
 
 

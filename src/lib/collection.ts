@@ -101,7 +101,7 @@ export async function addToProviderCollections(members: CollectionMember[]): Pro
       if (existing) {
         // Adopt it under the current spelling instead of making a second one
         // beside it - see findCollection. Assigning displayName because there
-        // is no SetName; it is an accessor with a setter behind it.
+        // is no SetName; it is an acessor with a setter behind it.
         let renamed = false;
         if (existing.displayName !== name) {
           try {
@@ -187,7 +187,7 @@ export async function removeRetiredCollections(
 
 /**
  * Remove from each provider collection the games that no longer belong. Filing
- * only ever adds, so a tile stayed put after its provider changed. Scoped to
+ * only ever adds, so a tile stayed put after his provider changed. Scoped to
  * "… (Shelfcloud)" names and apps we manage, since emptying the wrong thing is
  * worse than a misfiled tile. `members` must be the WHOLE sync, not a batch -
  * a slice cannot answer "what should be in you".

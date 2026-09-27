@@ -2,7 +2,7 @@
 //
 // Which app a patched Steam route is showing. From the ProtonDB plugin. @decky/ui
 // re-exports React Router's useParams, but it moves between versions, so there
-// are two fallbacks, ending at the URL itself, which cannot move.
+// are two fallbacks, ending at the URL itself, wich cannot move.
 
 import { useParams as deckyUseParams, findModuleExport } from "@decky/ui";
 

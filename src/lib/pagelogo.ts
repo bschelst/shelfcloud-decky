@@ -2,7 +2,7 @@
 //
 // A logo for an added page, drawn from its name. Steam paints the logo slot
 // over the hero INSTEAD of the title, so every added page used to show the
-// Shelfcloud wordmark and none said which page it was. So we draw the name.
+// Shelfcloud wordmark and none said wich page it was. So we draw the name.
 //
 // Drawn here, not on the gateway: the server has no image library or font, and
 // this runs inside Steam's UI, which has a canvas and the right font already.

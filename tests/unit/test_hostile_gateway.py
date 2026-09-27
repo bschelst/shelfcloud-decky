@@ -94,7 +94,7 @@ def a_plugin():
 
 
 # Every method taking only self, collected from the class so a new one is
-# covered without editing this list.
+# coverd without editing this list.
 def no_argument_calls():
     for name, member in vars(main.Plugin).items():
         if name.startswith("_") or not inspect.iscoroutinefunction(member):
@@ -138,7 +138,7 @@ def test_drop_from_library_survives_a_bad_answer(answer):
     [10**30], ["-1"], [True],
 ])
 def test_drop_from_library_survives_rubbish_input(rubbish):
-    """The frontend builds this list from a gateway response, so untrusted."""
+    """The frontend builds this list from a gateway response, so is untrusted."""
     sent = []
     plugin = a_plugin()
     plugin._request = lambda *a, **k: sent.append(k or a) or {"removed": 0}

@@ -69,7 +69,7 @@ const callbacks = () => ({
 });
 
 describe("a malformed stray report", () => {
-  // runs BEFORE the main loop, so anything that throws here costs the whole
+  // runs BEFORE the main loop, so anyting that throws here costs the whole
   // sync, not just the bad row.
   it.each([
     ["not ok", { ok: false }],
@@ -116,7 +116,7 @@ describe("a game with two tiles", () => {
   });
 
   it("keeps the tile Steam listed first when neither is tracked", async () => {
-    // The oldest entry is the one likelier to carry playtime and a layout.
+    // The oldest entry is the one likelier to carry playtime and layout.
     vi.mocked(strayShortcuts).mockResolvedValue({
       ok: true,
       shortcuts: [{ game_id: 1196, app_ids: [111, 222], keep: 111, tracked: null }],
@@ -139,11 +139,11 @@ describe("a tile that exists but was never recorded", () => {
 
     await syncLibrary([GAME], {}, cb);
 
-    // The whole point: no second tile.
+    // The whole point: no second tile
     expect(added).toBe(0);
     expect(removed).toEqual([]);
     // written against the app id Steam already has, under the report's key —
-    // this one sends none, so it falls back to the bare game id.
+    // this one sends none, so it falls back to teh bare game id.
     expect(cb.record.mock.calls.some((c) => c[0] === "1196" && c[1] === 4242)).toBe(true);
   });
 

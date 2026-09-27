@@ -55,7 +55,7 @@ def server():
     _Handler.status = 200
     srv = _CountingServer(("127.0.0.1", 0), _Handler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
-    # A fresh pool per test, or reuse from an earlier one skews the count.
+    # A fresh pool per test, or reuse from a earlier one skews the count.
     main._POOL = None
     yield srv, "http://127.0.0.1:%d/x" % srv.server_address[1]
     srv.shutdown()
@@ -97,7 +97,7 @@ def test_a_non_2xx_raises_HTTPError_with_its_code(server, code):
 
 def test_an_unreachable_host_raises_URLError_not_urllib3s_error(server):  # noqa: ARG001
     """_request's SSL diagnostic catches URLError only. urllib3 raises
-    MaxRetryError here, which would sail past it untranslated."""
+    MaxRetryError here, wich would sail past it untranslated."""
     with pytest.raises(urllib.error.URLError):
         main._open("http://127.0.0.1:1/nope", timeout=2).read()
 

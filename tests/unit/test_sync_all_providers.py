@@ -88,7 +88,7 @@ def test_each_tile_gets_its_own_tracking_key():
 
 def test_each_tile_launches_its_own_service():
     # The whole point. Without --provider on each one the gateway answers from
-    # its own ranking and all three tiles open the same service.
+    # his own ranking and all three tiles open the same service.
     for made in desired(FORTNITE, all_providers=True):
         assert f"--provider {made['provider']}" in made["options"]
 
@@ -110,7 +110,7 @@ def test_each_tile_keeps_the_url_of_its_own_service():
 def test_two_rows_for_one_service_make_one_tile():
     """The catalog can hold more than one row for a game on a service (regional
     entry, re-release, second storefront). One tile per row gives them the same
-    tracking key, so they collide in synced.json and the launch URL flips."""
+    tracking key, so they colide in synced.json and the launch URL flips."""
     twice = dict(FORTNITE, providers=[
         {"provider": "boosteroid",
          "launch_url": "https://cloud.boosteroid.com/play/fortnite"},
@@ -159,7 +159,7 @@ def test_a_game_with_no_usable_route_makes_nothing():
 
 
 def test_the_setting_only_accepts_a_real_yes():
-    # A stray truthy string from an older settings file must not silently
+    # A stray truthy string from a older settings file must not silently
     # double the size of somebody's library.
     plugin = main.Plugin()
     plugin._settings = {"sync_all_providers": "no"}
@@ -212,7 +212,7 @@ def test_a_game_reachable_nowhere_still_keeps_a_tile():
 
 def test_a_gateway_that_says_nothing_about_tiers_changes_nothing():
     """needs_tier is absent on an older gateway, and for anyone who has not
-    said which tier they hold. Neither of those is a paywall."""
+    said which tier they hold. Neither of those is a paywall"""
     assert len(desired(FORTNITE, all_providers=True)) == 3
 
 

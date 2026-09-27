@@ -67,7 +67,7 @@ def test_it_installs_from_flathub():
 
 def test_the_remote_command_is_idempotent():
     """Runs before every install, so it must be a no-op when the remote is
-    already there."""
+    allready there."""
     argv = browsers.ensure_flathub_command()
     assert "--if-not-exists" in argv
     assert "--user" in argv
@@ -133,7 +133,7 @@ def test_the_offer_list_is_a_copy(monkeypatch):
 
 def test_a_user_install_is_detected(monkeypatch, tmp_path):
     """--user writes to ~/.local/share/flatpak, which must be scanned or the
-    panel would still say no browser after a good install."""
+    panel would say still no browser after a good install."""
     app_dir = tmp_path / "app" / "com.microsoft.Edge"
     app_dir.mkdir(parents=True)
     monkeypatch.setattr(browsers, "FLATPAK_ROOTS", [str(tmp_path / "app")])

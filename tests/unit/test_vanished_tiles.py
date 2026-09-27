@@ -55,7 +55,7 @@ def _run(plugin, steam_has):
 
 def test_a_tile_steam_no_longer_has_is_forgotten():
     plugin = _plugin(TRACKED)
-    # Steam has only the second one. The first pass suspects, the second acts.
+    # Steam has only the second one. The first pass suspects, the second acts
     assert _run(plugin, [4001205961]) == 0
     assert _run(plugin, [4001205961]) == 1
     assert "570:boosteroid" not in plugin._synced
@@ -98,7 +98,7 @@ def test_nothing_happens_when_every_tile_is_still_there():
 def test_an_unreadable_shortcuts_file_forgets_nothing():
     """The guard that matters most. An empty read means the file could not be
     parsed, not that Steam has no shortcuts. Acting on it would forget every
-    tile and rebuild the whole library under new app ids."""
+    tile and rebuild the whole libary under new app ids."""
     plugin = _plugin(TRACKED)
     assert _run(plugin, []) == 0
     assert len(plugin._synced) == 2

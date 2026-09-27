@@ -49,7 +49,7 @@ function trackedFor(
   const exact = tracked[trackingKey(game)];
   if (exact) return exact;
   const legacy = tracked[String(game.game_id)];
-  // only if it names no provider. one that does belongs to another tile.
+  // only if it names no provider. one that does belongs to an other tile.
   return legacy && !legacy.provider ? legacy : undefined;
 }
 
@@ -174,7 +174,7 @@ async function clearSlot(appId: number, assetType: number): Promise<void> {
   try {
     await steamCall(SteamClient.Apps.ClearCustomArtworkForApp(appId, assetType as never));
   } catch {
-    /* already gone, or Steam refused this slot; the others still matter */
+    /* already gone, or Steam refused this slot; the others still mater */
   }
 }
 
@@ -508,7 +508,7 @@ async function adoptStrayShortcuts(
       app_id: entry.keep,
       name: known?.name ?? "",
       launch: known?.launch ?? "",
-      art: "",            // unknown; let the next pass re-apply artwork
+      art: "",            // unknown; let the next pass re-apply artwork opnieuw
     };
     tracked[key] = adopted;
     try {
@@ -554,7 +554,7 @@ export interface SyncCallbacks {
 //   8->9 name sat beside a black rectangle, mark compiled in now.
 export const ART_REVISION = "9";
 
-// Bump when what we DRAW for a website tile changes. Separate from ART_REVISION,
+// Bump when what we DRAW for a website tile changes. Seperate from ART_REVISION,
 // which sits in every fingerprint and would re-download the whole library; this
 // is only mixed in for a website tile. Appended to the first field so it does not
 // change the string shape for games. 0->1: capsule drawn with the page's name.
@@ -634,7 +634,7 @@ export async function syncLibrary(
   const total = toChange + toRemove;
   let done = 0;
   // Names vary a lot in length, and a message that wraps to two lines and back
-  // makes the whole panel jump as it ticks through hundreds of games. Truncating
+  // makes the whole panel to jump as it ticks through hundreds of games. Truncating
   // keeps every progress line the same height.
   const MAX_NAME_LEN = 22;
   const shorten = (name: string) => (name.length > MAX_NAME_LEN ? `${name.slice(0, MAX_NAME_LEN - 1)}…` : name);
@@ -792,7 +792,7 @@ export async function syncLibrary(
           SteamClient.Apps.SetShortcutStartDir(existing.app_id, START_DIR);
           SteamClient.Apps.SetShortcutLaunchOptions(existing.app_id, game.options);
         }
-        // Do not re-attempt art already known unavailable this session.
+        // Do not re-attempt art already known unavailable this session
         const tryArt = artChanged && !artUnavailable.has(game.game_id);
 
         let appliedArt: ArtworkOutcome = { applied: 0, visible: false, logoSettled: true };

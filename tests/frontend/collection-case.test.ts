@@ -68,7 +68,7 @@ beforeEach(() => {
       return made;
     },
   };
-  // Every app id used here is one Steam knows about.
+  // Every app id used here is one Steam knows about
   (globalThis as Record<string, unknown>).appStore = {
     GetAppOverviewByAppID: (appid: number) => ({ appid }),
   };
@@ -107,7 +107,7 @@ describe("filing into a collection spelled differently", () => {
   });
 
   it("writes the rename even when there is nothing to add", async () => {
-    // else the rename is never saved and the old name comes back next sync.
+    // else the rename is never saved and teh old name comes back next sync.
     const existing = collection(LOWER, [TILE]);
     collections.push(existing);
 
@@ -169,7 +169,7 @@ describe("pruning", () => {
     const luna = collection("Amazon Luna (Shelfcloud)", [TILE]);
     collections.push(luna);
 
-    // The tile launches through Boosteroid now, so it does not belong here.
+    // The tile launches through Boosteroid now, so it belongs here not.
     await pruneProviderCollections(
       [{ appId: TILE, provider: "boosteroid" }], new Set([TILE]));
 

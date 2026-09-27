@@ -73,7 +73,7 @@ export interface InstallableBrowser {
   recommended: boolean;
 }
 
-// Progress of a browser install. kept in the backend so closing the panel does not lose it.
+// Progress of a browser install. kept in the backend so closing the panel loses it not.
 export interface InstallState {
   running: boolean;
   app_id: string | null;
@@ -141,7 +141,7 @@ export interface SyncResult {
   removed: number;
   updated: number;
   failed: number;
-  // names of the newly added games, so a notification can say which, not just how many.
+  // names of the newly added games, so a notification can say wich, not just how many.
   addedNames: string[];
   // true when the run was asked to stop, not because it ran out. the counts above still hold.
   cancelled?: boolean;

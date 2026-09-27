@@ -14,7 +14,7 @@ STARTUP_SPREAD_MAX_SECONDS = 60
 def next_poll_delay(base_seconds: float, rng=None) -> float:
     """Seconds to wait before the next poll, jittered around `base_seconds`.
 
-    Kept apart from the loop so it can be tested. A jitter bug is invisible on
+    Kept apart from the loop so it can be tested. a jitter bug is invisible on
     one device and only shows up as a thundering herd once there are many.
     """
     if rng is None:

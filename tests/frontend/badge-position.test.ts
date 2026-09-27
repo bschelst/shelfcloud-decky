@@ -36,7 +36,7 @@ describe("the bottom corners", () => {
   });
 
   it("measures from the BOTTOM edge, not the top of the badge", () => {
-    // old code put the badge's TOP an inset up, so its edge sat a height too high.
+    // old code put the badge's TOP an inset up, so its edge sat a height too high
     expect(topOf(badgePosition("bl", CAPSULE))).toBe(ART_BOTTOM - INSET - BADGE_HEIGHT);
   });
 
@@ -49,7 +49,7 @@ describe("the bottom corners", () => {
 describe("the top corners", () => {
   it("keeps the two corners at DIFFERENT heights", () => {
     // on purpose: the top-right of the page has its own furniture, so a badge
-    // there sits lower. Flattening the two put the badge over the page controls.
+    // there sits lower. Flatening the two put the badge over the page controls.
     expect(badgePosition("tl", CAPSULE).top).toBe(`${TOP_INSET.tl}px`);
     expect(badgePosition("tr", CAPSULE).top).toBe(`${TOP_INSET.tr}px`);
     expect(badgePosition("tl", CAPSULE).top)
@@ -94,7 +94,7 @@ describe("the middle positions", () => {
   });
 
   it("sits the bottom-middle at the same height as the bottom corners", () => {
-    // only the horizontal placement differs; the height is what the eye compares.
+    // only the horizontal placement differ; the height is what the eye compares.
     expect(badgePosition("bm", CAPSULE).top).toBe(badgePosition("bl", CAPSULE).top);
     expect(badgePosition("bm", CAPSULE).top).toBe(badgePosition("br", CAPSULE).top);
   });

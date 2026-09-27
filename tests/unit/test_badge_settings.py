@@ -39,7 +39,7 @@ TRACKED = {
 
 
 def _plugin(tracked=None, settings=None):
-    # `is None` not `or`: an empty library is a real case, `or` would swap it
+    # `is None` not `or`: a empty library is a real case, `or` would swap it
     # for the full one.
     plugin = main.Plugin.__new__(main.Plugin)
     plugin._synced = dict(TRACKED if tracked is None else tracked)
@@ -67,7 +67,7 @@ def test_the_keys_are_strings_because_they_cross_to_javascript():
 
 
 def test_an_entry_with_no_provider_is_left_out():
-    # It would badge a tile with nothing to say, which is worse than no badge.
+    # It would badge a tile with nothing to say, wich is worse than no badge.
     out = asyncio.run(_plugin({"9:x": {"app_id": 5}}).tracked_providers())
     assert out["providers"] == {}
 

@@ -39,7 +39,7 @@ export function fitText(
   }
 
   // nothing fit even at the smallest size — one long unbroken word, or a script
-  // this font sets wide. cut it rather than overflow, Steam gives no room to spill.
+  // this font sets wide. cut it rather then overflow, Steam gives no room to spill.
   return { size: smallest, lines: [ellipsise(clean, options.width, smallest, measure)] };
 }
 

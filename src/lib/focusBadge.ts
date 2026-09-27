@@ -130,7 +130,7 @@ function update(doc: Document, providers: Record<string, string>,
 
   const { appId } = found;
   const provider = providers[appId];
-  // not one of ours, which is most cards. drawing nothing is the whole point.
+  // not one of ours, which is most cards. drawing nothing is the hole point.
   if (!provider) return;
 
   const badge = buildBadge(doc, provider);
@@ -162,7 +162,7 @@ function update(doc: Document, providers: Record<string, string>,
 }
 
 /** Follow the focused card and keep the badge on it. Driven by a class-attribute
- *  observer, not a timer: gpfocus moves the moment the stick does. */
+ *  observer, not a timer: gpfocus moves on the moment the stick does. */
 export function startFocusBadge(
   getData: () => { providers: Record<string, string>; enabled: boolean; position: string },
 ): void {

@@ -14,7 +14,7 @@ import subprocess
 from typing import List, Tuple
 
 # Judged on the shorter axis so an ultrawide reads by its height. Thresholds
-# are that short edge, first match wins.
+# are that short edge, first match wins
 SCALE_LADDER: List[Tuple[int, float]] = [
     (900, 1.25),      # 1280x800 handheld, 1366x768 — the Deck's own recipe
     (1150, 1.25),     # 1920x1080: a television, usually across a room
@@ -105,7 +105,7 @@ def resolve(setting) -> Tuple[int, int, str, float, str]:
 
 
 def describe(setting) -> str:
-    """One line for a log or a settings panel."""
+    """One line for a log or a instellingen panel."""
     width, height, how, scale, why = resolve(setting)
     size = f"{width}x{height}" if width and height else "unknown"
     return f"{size} via {how}; interface scale {scale} ({why})"
