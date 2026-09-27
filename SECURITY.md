@@ -8,7 +8,7 @@
 | 0.2.x   | :x: Upgrade recommended |
 | 0.1.x   | :x: Upgrade recommended |
 
-Only the latest release receives security updates. Older versions should be upgraded.
+Only the latest release recieves security updates. Older versions should be upgraded.
 
 ## Reporting a Vulnerability
 
@@ -41,8 +41,8 @@ The following components are in scope:
 
 ### What Shelfcloud stores
 
-- **API token** — stored in `~/homebrew/settings/Shelfcloud/settings.json`. Used to authenticate with the gateway.
-- **Synced state** — which games have been added as Steam shortcuts, including their last known launch URL for offline use. No credentials, no personal data beyond game IDs, names, and provider URLs.
+- **API token** — stored in `~/homebrew/settings/Shelfcloud/settings.json`, locked to the deck user (`chmod 0600`) so an other plugin on the same account can not read it. Used to authenticate with the gateway.
+- **Synced state** — which games have been added as Steam shortcuts, including their last known launch URL for offline use. no credentials, no personal data beyond game ids, names and provider urls.
 - **Icon files** — artwork images on disk, referenced by Steam. No executable content.
 
 ### What Shelfcloud does NOT store or transmit
@@ -67,7 +67,7 @@ The following components are in scope:
 - URLs containing a backslash, tab, carriage return or newline are refused before parsing. Python and Chromium disagree about where the hostname ends in those, and the browser is the one that opens the page.
 - Credentials in the URL authority (`https://cloud.boosteroid.com@evil.example/`) are refused: they name one host while reading as another.
 - Browser profiles are isolated per-browser (Chrome and Edge get separate profiles)
-- Launch commands are shell-quoted via `shlex.quote` to prevent injection via special characters in URLs
+- Launch commands are shell-quoted trough `shlex.quote`, so special characters in a URL can not inject anything
 - The install script validates browser app IDs against a known allowlist before installing anything
 
 This check exists because the gateway is a server, and servers get compromised. A launch URL it returns is opened in a kiosk-mode browser holding live provider sessions, with no address bar and no tab strip to show where it went — a phishing page in that window is indistinguishable from the real sign-in.
@@ -77,5 +77,5 @@ This check exists because the gateway is a server, and servers get compromised. 
 
 - **Keep Decky and the plugin updated** — security fixes ship as new versions
 - **Don't share your settings.json** — it contains your API token
-- **Use the official install method** — manual installs that skip `install-to-deck.sh` may leave file permissions wrong
+- **Use the official install method** — manual installs that skip `install-to-deck.sh` can leave the file permissions wrong
 - **Review launch logs** if a game behaves unexpectedly: `~/homebrew/logs/Shelfcloud/shelfcloud-launch.log`
