@@ -1,27 +1,11 @@
 #!/usr/bin/env python3
 # Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
-"""Every call the plugin makes, against a gateway that answers badly.
+"""Every plugin call against a gateway that answers badly.
 
-The plugin talks to one HTTP service and then hands what comes back to Steam.
-Between those two points there is no schema — `_request` does `json.loads` and
-returns whatever that produced — so "the response is a dict with the fields I
-expect" is an assumption, not a fact, and the ways it breaks are ordinary:
-
-  * the proxy in front of the gateway replaces an origin 404 with its own
-    branded page and serves it as **HTTP 200, text/html**, so a missing route
-    arrives as a JSON parse error rather than a 404
-  * a captive portal or a Cloudflare error page does the same
-  * a half-deployed gateway answers 200 with an older shape
-  * a connection drops mid-read
-
-None of those may raise out of a plugin method. Decky surfaces an exception
-from a callable as a dead panel, and the user has no way to see why.
-
-So this is a sweep rather than a list of cases: every public method is called
-against every hostile answer, and the only assertion is that it returns rather
-than raises. A method added later is covered the day it is written.
-
-Run: python3 -m pytest tests/unit
+`_request` just json.loads whatever comes back, so a proxy error page, a stale
+shape or a dropped connection must not raise -- Decky turns an exception into a
+dead panel. This is a sweep: every public method against every bad answer, and
+the only check is that it returns rather than raises.
 """
 
 import asyncio
@@ -94,13 +78,8 @@ FAILURES = {
 
 @pytest.fixture(autouse=True)
 def _off_the_real_machine(tmp_path, monkeypatch):
-    """Keep the sweep off real directories.
-
-    Some of these calls write files: an icon, the settings, the tracked state.
-    Left alone they reach DECKY_PLUGIN_SETTINGS_DIR and Steam's own userdata on
-    whatever machine runs the tests, and a PermissionError there looks exactly
-    like the crash this file is hunting for.
-    """
+    """Keep the sweep off real dirs. Some calls write files, and a
+    PermissionError on the real machine would look like the crash we hunt."""
     monkeypatch.setattr(main.decky, "DECKY_PLUGIN_SETTINGS_DIR", str(tmp_path))
     monkeypatch.setattr(main.shortcuts, "shortcuts_files", lambda *a, **k: [])
 
@@ -114,8 +93,7 @@ def a_plugin():
     return instance
 
 
-# The methods that take no argument but a self, which is every call the
-# frontend makes with no input. Collected from the class so a new one is
+# Every method taking only self, collected from the class so a new one is
 # covered without editing this list.
 def no_argument_calls():
     for name, member in vars(main.Plugin).items():
@@ -160,8 +138,7 @@ def test_drop_from_library_survives_a_bad_answer(answer):
     [10**30], ["-1"], [True],
 ])
 def test_drop_from_library_survives_rubbish_input(rubbish):
-    """The frontend builds this list from a gateway response, so it is only as
-    trustworthy as that response was."""
+    """The frontend builds this list from a gateway response, so untrusted."""
     sent = []
     plugin = a_plugin()
     plugin._request = lambda *a, **k: sent.append(k or a) or {"removed": 0}
@@ -194,10 +171,8 @@ def test_fetch_artwork_refuses_anything_but_https(url):
 # ------------------------------------------------------- the response itself
 
 def test_a_reply_is_read_with_a_ceiling():
-    """`_request` used to read the whole body however long it was, trusting
-    whatever answered to be reasonable about size. The biggest thing it asks
-    for is a catalogue of a few megabytes; a captive portal answering a stream
-    should fail rather than fill the Deck's memory."""
+    """`_request` caps the read: a portal answering an endless stream should
+    fail, not fill the Deck's memory."""
     class Endless:
         def __enter__(self):
             return self
@@ -207,15 +182,13 @@ def test_a_reply_is_read_with_a_ceiling():
 
         @staticmethod
         def read(size=-1):
-            # Honours the argument, which is the point: an unbounded read here
-            # would hang this test rather than fail it.
+            # honour the size arg, else an unbounded read hangs the test
             return b"x" * (size if size and size > 0 else 1024)
 
         headers = {"Content-Type": "application/json"}
 
     plugin = a_plugin()
-    # Patched at _open, the shared connection pool every request now goes
-    # through -- the ceiling it is guarding is unchanged.
+    # patched at _open, the shared pool every request goes through
     with mock.patch.object(main, "_open", lambda *a, **k: Endless()):
         with pytest.raises(ValueError, match="more than"):
             plugin._request("/health", authenticated=False)

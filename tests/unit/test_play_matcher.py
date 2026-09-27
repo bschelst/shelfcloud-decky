@@ -1,23 +1,9 @@
 # Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """The Play-button matcher, against real labels from the live providers.
 
-Why this exists: a Belgian Deck opened Brawlhalla on Xbox Cloud and the stream
-never started. The button read
-
-    NU SPELEN
-    Inbegrepen in je abonnement
-
-and all three mechanisms missed it — "spelen" was already in the word list, but
-the matcher compared the button's ENTIRE text to one word and capped it at 14
-characters, so a two-line label failed twice over. Xbox's structural selector
-(a[href*='/play/launch/']) did not match either: on that page the control is a
-<button>, not an anchor.
-
-The rule now is "a word from the list appears in the button's first line",
-which is what these tests pin down — together with the labels that must NOT be
-clicked, since clicking the wrong control navigates away from the game.
-
-Run: python3 -m pytest tests/unit
+The rule is "a word from the list appears in the button's first line". These
+tests pin that down, together with the labels that must NOT be clicked, since
+the wrong control navigates away from the game.
 """
 
 import os
@@ -49,12 +35,9 @@ def flatten(line):
 
 
 def words_of(line):
-    """Split between words, never inside one — mirrors wordsOf in the JS.
-
-    Splitting on every non-alphanumeric turned "Free-to-Play" into
-    ["free","to","play"], which is how the launcher came to click GeForce
-    NOW's filter chip and land on the games browser.
-    """
+    """Split between words, never inside one — mirrors wordsOf in the JS. A
+    naive split turned "Free-to-Play" into three words and clicked the wrong
+    chip."""
     out = []
     for raw in re.split(r"[\s,;:|/·•—–]+", line):
         token = re.sub(r"^[^\w]+|[^\w]+$", "", raw, flags=re.UNICODE)
@@ -80,13 +63,9 @@ def hits(text, limit=4) -> bool:
 
 
 def round_of(text, tag="button"):
-    """Which round of the real matcher would take this label, if any.
-
-    Round 1 is the tight rule — a short label that is itself an instruction.
-    Round 2 is the fallback for a label carrying a sub-label after it. The
-    rounds run across the whole page in order, so a round-1 control anywhere
-    beats a round-2 one.
-    """
+    """Which round would take this label, if any. Round 1 is the tight rule (a
+    short label that is itself an instruction); round 2 is the fallback for a
+    label with a sub-label after it. Round 1 anywhere beats round 2."""
     line = (text or "").split("\n")[0].strip().lower()
     if not line:
         return None
@@ -154,13 +133,8 @@ def test_words_embedded_in_longer_words_do_not_match():
 
 
 def test_the_boosteroid_subscribe_button_is_not_a_play_button():
-    """Read straight out of the launcher log on the Deck:
-
-        19:23:09 [shelfcloud] clicked:subscribe and play
-
-    A play word in a button that takes money. It opened the account page.
-    Exactly 18 characters, so the length cap did not stop it either.
-    """
+    """A play word in a button that takes money — it opened the account page.
+    Exactly 18 chars, so the length cap did not stop it either."""
     assert len("subscribe and play") == 18
     assert not hits("Subscribe and Play")
     assert round_of("Subscribe and Play") is None
@@ -174,11 +148,9 @@ def test_other_commerce_labels_containing_a_play_word():
 
 
 def test_the_deny_list_does_not_reject_the_xbox_button():
-    """The trap this nearly fell into: Xbox's sub-label says "Inbegrepen in je
-    abonnement", and "abonnement" is a deny word. It describes the game as
-    included — it is not an offer to subscribe. Deny must judge only the
-    leading words it reads, not the whole label.
-    """
+    """Xbox's sub-label says "Inbegrepen in je abonnement", and "abonnement" is
+    a deny word — but it describes the game as included, not an offer. Deny must
+    judge only the leading words, not the whole label."""
     assert "abonnement" in DENY
     assert hits("NU SPELEN\nInbegrepen in je abonnement")
     assert hits("NU SPELEN Inbegrepen in je abonnement")
@@ -186,25 +158,18 @@ def test_the_deny_list_does_not_reject_the_xbox_button():
 
 
 def test_the_geforce_now_filter_chip_is_not_a_play_button():
-    """Photographed on the Deck: the launcher clicked this and landed on the
-    games browser showing "341 / 6001 games" with the filter applied.
-
-    Splitting on every non-alphanumeric made "Free-to-Play" three words, the
-    last of which is "play". A hyphenated compound is one word.
-    """
+    """The launcher clicked this filter chip and landed on the games browser.
+    Splitting made "Free-to-Play" three words ending in "play"; a hyphenated
+    compound is one word."""
     assert words_of("free-to-play") == ["free-to-play"]
     assert not hits("Free-to-Play")
     assert round_of("Free-to-Play") is None
 
 
 def test_the_chip_is_refused_however_it_is_spelled():
-    """The tokeniser fix only covered the hyphenated form. The second failure
-    came through the aria-label, where GeForce NOW spells it with spaces:
-
-        19:47:03 [shelfcloud] clicked:button[aria-label*='Play' i]
-
-    Every word in "free to play" is innocent, so only the phrase catches it.
-    """
+    """The tokeniser fix only covered the hyphenated form. GeForce NOW's
+    aria-label spells it with spaces, and every word in "free to play" is
+    innocent, so only the phrase catches it."""
     for label in ("Free to Play", "Free-to-Play", "FREE TO PLAY",
                   "free_to_play", "Free  to  Play"):
         assert not hits(label), label
@@ -269,11 +234,10 @@ def test_only_the_first_line_is_considered():
 
 # ------------------------------------------------------------- round ordering
 #
-# Widening the rule so Xbox's two-line button matched also let stray
-# long-labelled buttons match on other providers, and the first match wins —
-# which is how fixing Xbox broke GeForce NOW and Boosteroid. The tight rule now
-# sweeps the whole page before the loose one, so a real Play button is
-# preferred over something that merely contains the word, wherever each sits.
+# Widening the rule for Xbox's two-line button let stray long labels match on
+# other providers, and the first match wins. So the tight rule sweeps the whole
+# page before the loose one, and a real Play button is preferred over something
+# that merely contains the word.
 
 def test_a_bare_play_button_is_round_one():
     for label in ("Play", "PLAY", "NU SPELEN", "Jouer", "Spill nå", "ИГРАТЬ"):

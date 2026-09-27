@@ -1,17 +1,9 @@
 // Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 //
-// Tiles are filed into their provider's collection as the sync runs.
-//
-// It used to happen once, after the whole loop. Two consequences, one visible
-// and one not:
-//
-//   * a sync interrupted part way — panel closed, Steam restarted, an error —
-//     filed nothing at all, however many tiles it had already created
-//   * saving a collection is what makes Steam re-read its library, so a long
-//     "add all my games" did that once, at the very end
-//
-// Batched rather than per-game: Save() rewrites the whole collection, so one
-// call per tile would mean one full rewrite per tile.
+// Tiles are filed into their provider's collection as the sync runs. It used to
+// happen once after the whole loop, so an interrupted sync filed nothing and
+// the library re-read only at the very end. Batched, not per-game: Save()
+// rewrites the whole collection, so one call per tile is one rewrite per tile.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -77,7 +69,7 @@ beforeEach(() => {
 describe("filing as the sync runs", () => {
   it("files a batch before the sync has finished", async () => {
     await syncLibrary(games(BATCH * 3), {}, callbacks());
-    // Three full batches; one call each, not one call at the end.
+    // three full batches, one call each, not one call at the end.
     expect(vi.mocked(addToProviderCollections).mock.calls.length).toBeGreaterThanOrEqual(3);
   });
 
@@ -89,8 +81,8 @@ describe("filing as the sync runs", () => {
   });
 
   it("does not re-send earlier batches", async () => {
-    // The bug this guards: flushing the accumulated list each time would
-    // re-save every tile filed so far, so Save() cost would grow per batch.
+    // flushing the whole accumulated list each time would re-save every tile so
+    // far, so cost grows per batch.
     await syncLibrary(games(BATCH * 2), {}, callbacks());
     const sizes = vi.mocked(addToProviderCollections).mock.calls.map(([m]) => m.length);
     expect(sizes.every((n) => n <= BATCH)).toBe(true);
@@ -109,14 +101,14 @@ describe("filing as the sync runs", () => {
 
 describe("surviving an interruption", () => {
   it("keeps the tiles filed before the failure", async () => {
-    // Fail on the 20th shortcut: the first batch of 12 is already filed.
+    // fail on the 20th shortcut: the first batch of 12 is already filed.
     installSteamClient(20);
     const result = await syncLibrary(games(30), {}, callbacks());
 
     expect(result.failed).toBe(1);
     const filed = filedAppIds();
     expect(filed.length).toBeGreaterThanOrEqual(BATCH);
-    // The old behaviour filed nothing when anything went wrong mid-run.
+    // the old behaviour filed nothing when anything went wrong mid-run.
     expect(filed.length).toBeGreaterThan(0);
   });
 });
@@ -137,11 +129,8 @@ describe("grouping", () => {
 
 describe("a cancelled run does not re-sort the library", () => {
   it("skips the prune, because a slice cannot answer what belongs", async () => {
-    // pruneProviderCollections asks each collection "what should be in you"
-    // and answers from what THIS run filed — which is why its own docstring
-    // says the members must be the whole sync. A cancelled run filed only the
-    // part it reached, so pruning on one takes every tile it never got to out
-    // of its collection: a cancel quietly undoing the sorting already done.
+    // prune answers "what belongs here" from what THIS run filed, so pruning on
+    // a cancelled run (only part filed) would drop every tile it never reached.
     let seen = 0;
     const result = await syncLibrary(games(6, "geforce_now"), {}, {
       ...callbacks(),

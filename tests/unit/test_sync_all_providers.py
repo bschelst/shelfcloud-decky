@@ -1,20 +1,10 @@
 # Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """One tile per service, for people who want to choose at launch time.
 
-Off, a game gets the single route its preferred service gives it, which is what
-almost everyone wants. On, it gets one tile per service it plays on, so it
-turns up in each of those collections and the library says where a game can
-actually be played rather than only where this device would have picked.
-
-The two rules that matter and are easy to get wrong:
-
-  - each tile has to carry its OWN provider on the command line, because all
-    of them share a game id and the gateway would otherwise answer from its
-    ranking and open the same service three times;
-  - each tile needs its own tracking key, or the record keeps one of them and
-    the rest become orphans nothing will ever clean up.
-
-Run: python3 -m pytest tests/unit
+Off, a game gets its preferred service only. On, it gets one tile per service.
+Two rules matter: each tile must carry its own --provider (they share a game id,
+or the gateway ranks and opens the same service three times), and each tile
+needs its own tracking key, or the rest become orphans nothing cleans up.
 """
 
 import os
@@ -118,16 +108,9 @@ def test_each_tile_keeps_the_url_of_its_own_service():
 
 
 def test_two_rows_for_one_service_make_one_tile():
-    """The catalog holds more than one row for a game on a service.
-
-    A regional entry, a re-release, a second storefront. Measured on a real
-    account: 402 boosteroid rows across 316 games, and games listing six,
-    seven and eight "providers" when only five exist.
-
-    One tile per row gives them all the same tracking key, so they collide in
-    synced.json — the sync makes the tile, makes it again for the next row,
-    and the launch URL flips between the two.
-    """
+    """The catalog can hold more than one row for a game on a service (regional
+    entry, re-release, second storefront). One tile per row gives them the same
+    tracking key, so they collide in synced.json and the launch URL flips."""
     twice = dict(FORTNITE, providers=[
         {"provider": "boosteroid",
          "launch_url": "https://cloud.boosteroid.com/play/fortnite"},
@@ -185,14 +168,10 @@ def test_the_setting_only_accepts_a_real_yes():
 
 # ------------------------------------------- routes behind a paywall
 #
-# Reported from a Deck, twice. Sonic Frontiers is free on Boosteroid and
-# "Luna Premium" on Amazon; a Luna Prime account got BOTH tiles, and the Luna
-# one opened on "Included in Luna Premium, start your 7-day free trial".
-#
-# Ranking had been taught about rungs by then and could not help: ranking
-# chooses BETWEEN routes, and this mode keeps all of them. The gateway marks
-# each route with the rung it still needs, and a route the subscription cannot
-# reach is not a tile.
+# Sonic Frontiers is free on Boosteroid and "Luna Premium" on Amazon; a Luna
+# Prime account got both tiles. Ranking cannot help since this mode keeps every
+# route, so the gateway marks each with the rung it needs and a route the
+# subscription cannot reach is not a tile.
 
 SONIC = {
     "id": 457,
@@ -220,9 +199,9 @@ def test_it_still_applies_with_one_tile_per_game():
 
 
 def test_a_game_reachable_nowhere_still_keeps_a_tile():
-    """Every route behind a paywall is still a game the user deliberately
-    added. No tile at all looks like the sync lost it, so one is kept and the
-    gateway's needs_tier is what says it will ask for money."""
+    """Every route paywalled is still a game the user added. No tile looks like
+    the sync lost it, so one is kept and needs_tier says it will ask for
+    money."""
     gated = dict(SONIC, chosen_provider="amazon_luna", providers=[
         {"provider": "amazon_luna", "needs_tier": "Luna Premium",
          "launch_url": "https://luna.amazon.com/play/sonic"},
@@ -239,16 +218,10 @@ def test_a_gateway_that_says_nothing_about_tiers_changes_nothing():
 
 # ------------------------------------------- the Steam appid round trip
 #
-# The player badge asks Steam how many people are playing a game, which needs
-# the game's id ON STEAM. The gateway sends it; this plugin read it and then
-# dropped it here, so `game.steam_app_id` was undefined on the frontend, the
-# map the sync builds at the end of its run was always empty, and
-# set_steam_ids was never called at all.
-#
-# So the badge had nothing to ask about on any tile: inert by construction,
-# not merely unfinished. It appeared to work for a while only because a
-# hand-written synced.json was sitting there, and the next save -- which
-# writes the in-memory copy -- overwrote it.
+# The player badge needs the game's id on Steam. The gateway sends it, but this
+# plugin dropped it here, so steam_app_id was undefined on the frontend, the map
+# the sync builds was always empty, and set_steam_ids never ran. The badge had
+# nothing to ask about: inert by construction.
 
 def test_a_desired_tile_carries_the_games_steam_id():
     game = dict(FORTNITE, steam_app_id=1172470)
@@ -257,11 +230,7 @@ def test_a_desired_tile_carries_the_games_steam_id():
 
 
 def test_a_game_that_is_not_on_steam_carries_an_empty_string():
-    """About one in six of the catalogue.
-
-    An empty string rather than a missing key: the sync skips falsy values, so
-    both read the same to it, but a missing key would break anything that
-    indexes the field instead of getting it.
-    """
+    """Empty string, not a missing key: the sync skips falsy values so both read
+    the same, but a missing key breaks anything that indexes the field."""
     for made in desired(FORTNITE, all_providers=True):
         assert made["steam_app_id"] == ""

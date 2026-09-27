@@ -1,31 +1,11 @@
 # Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """Telling Luna the Deck is a supported OS, and keeping it told.
 
-Luna has TWO gates that read DIFFERENT things, which is why fixing the first
-one simply revealed the second:
-
-    "Unsupported Browser"  navigator.userAgent          --user-agent flag
-    "Unsupported OS"       navigator.platform / uaData  this override
-
-Measured on the device with the --user-agent flag already on:
-
-    ua         Windows NT 10.0; Win64; x64      <- flag worked
-    platform   Linux x86_64                     <- flag does not reach this
-    uaData     Linux                            <- nor this
-
-and --disable-features=UserAgentClientHint changed neither, so there is no
-command-line route. Emulation.setUserAgentOverride is the only thing that moves
-all of them together.
-
-The override belongs to the CDP SESSION that set it. Measured, same page:
-
-    held socket open, read from a SECOND socket   platform Windows
-    held socket closed                            platform Linux x86_64
-
-which is why hold_platform returns the live socket instead of closing it, and
-why main() keeps the reference until the browser exits.
-
-Run: python3 -m pytest tests/unit/test_platform_override.py
+Luna has two gates reading different things: the browser gate on userAgent (the
+--user-agent flag) and the OS gate on navigator.platform / uaData. Only
+Emulation.setUserAgentOverride moves all of them together. The override lives
+with the CDP session that set it, so hold_platform returns the live socket open
+and main() keeps it until the browser exits.
 """
 
 import importlib.util
@@ -126,14 +106,8 @@ def test_the_override_alone_enables_no_domain(fake):
 
 
 def test_a_startup_script_must_enable_the_page_domain(fake):
-    """Not optional, and it fails QUIETLY without it. Measured on the device:
-
-        enable -> script -> reload    script ran
-        script -> reload              script NEVER ran
-
-    and in the failing case the command still answered {"identifier": "1"} and
-    the reload genuinely happened, so every signal said success.
-    """
+    """Without Page.enable first the script never runs, yet every signal still
+    says success. So the enable must come before the script."""
     held = cdp.hold_platform("ws://127.0.0.1:9223/x", UA, "Windows")
     cdp.add_startup_script(held, "window.x = 1;")
     methods = [m["method"] for m in held.sent]
@@ -174,9 +148,8 @@ def test_luna_gets_one_and_the_page_is_reloaded(fake, monkeypatch):
 
     assert held is not None and held.closed is False
     methods = [m["method"] for m in held.sent]
-    # Order is the point: the startup scripts have to be registered BEFORE
-    # the reload, or the document that Luna actually runs in never receives
-    # them. The exact count of scripts can vary (handoff shim, gamepad fix).
+    # scripts must be registered before the reload, or Luna's document never
+    # gets them. count of scripts can vary (handoff shim, gamepad fix).
     assert methods[0] == "Emulation.setUserAgentOverride"
     assert "Page.enable" in methods
     assert "Page.addScriptToEvaluateOnNewDocument" in methods
@@ -198,9 +171,8 @@ def test_a_missing_page_is_survivable(monkeypatch):
 # ---------------------------------------------- it must outlive the setup
 
 def test_main_holds_the_override_until_the_browser_exits():
-    """`held` looks like an unused variable and is not: it IS the override.
-    Dropping it, or closing it before browser.wait(), reverts the platform
-    mid-session — measured, not assumed."""
+    """`held` looks unused but it IS the override. Dropping it, or closing it
+    before browser.wait(), reverts the platform mid-session."""
     import inspect
     source = inspect.getsource(launcher.main)
     hold = source.index("hold_platform_override")
@@ -237,10 +209,9 @@ def test_the_stub_swallows_the_href_assignment():
 
 
 def test_the_stub_waits_for_a_dom_to_attach_to():
-    """A start script runs before the page's own, when the document can be
-    genuinely empty — document.documentElement itself can be null. Luna only
-    looks for #hiddenIframe when Play is pressed, so DOMContentLoaded is early
-    enough by a wide margin."""
+    """A start script runs before the page's own, when documentElement can be
+    null. Luna only looks for #hiddenIframe on Play, so DOMContentLoaded is
+    early enough."""
     js = launcher.NEUTRALISE_APP_HANDOFF_JS
     assert "DOMContentLoaded" in js
     assert "document.body || document.documentElement" in js
@@ -260,8 +231,8 @@ def test_only_luna_gets_the_stub():
 
 
 def test_the_stub_runs_in_a_real_engine(tmp_path):
-    """Prove the shim actually swallows the assignment, rather than trusting
-    that it reads correctly. Mirrors what openUriWithHiddenFrame does."""
+    """Prove the shim really swallows the assignment. Mirrors what
+    openUriWithHiddenFrame does."""
     import json as _json, shutil, subprocess
     node = shutil.which("node")
     if not node:
@@ -298,10 +269,9 @@ console.log(JSON.stringify({ found: !!frame, threw, landed }));
 # ------------------------------------------------ gamepad diagnostics
 
 def test_pad_names_are_kept_not_just_paths(monkeypatch, tmp_path):
-    """Steam renumbers its virtual pads every session — the same controller was
-    event19 one night and event18 the next — so a path identifies nothing.
-    "pad 0"/"pad 1" is Steam's slot order, and slot order decides player one.
-    """
+    """Steam renumbers its virtual pads every session, so an event path
+    identifies nothing. "pad 0"/"pad 1" is Steam's slot order, and slot order
+    decides player one."""
     devices = tmp_path / "devices"
     devices.write_text(
         'I: Bus=0003\nN: Name="Microsoft X-Box 360 pad 0"\nH: Handlers=event18 js0\n'
@@ -365,9 +335,8 @@ def _with_pads(monkeypatch, sequence):
 
 
 def test_it_waits_for_the_SECOND_pad_not_just_the_first(monkeypatch):
-    """The bug this replaces: returning on pad 0 could launch the browser
-    before pad 1 existed, and the external controller was then invisible for
-    the whole session — a symptom indistinguishable from a wrong slot."""
+    """Returning on pad 0 could launch before pad 1 existed, leaving the
+    external controller invisible for the whole session."""
     _with_pads(monkeypatch, [[], ["pad 0"], ["pad 0", "pad 1"]])
     assert launcher.wait_for_gamepad() == ["pad 0", "pad 1"]
 

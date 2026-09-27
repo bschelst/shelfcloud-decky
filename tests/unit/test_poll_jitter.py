@@ -1,20 +1,9 @@
 # Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """Poll jitter — spreading devices out so they do not arrive as one wall.
 
-A fixed interval keeps devices in whatever alignment they started with. A
-plugin update rolled out to a fleet starts every copy within seconds of the
-others, and they then hit the gateway in lockstep for as long as they run.
-
-It matters most for the one thing that makes every client act at once anyway:
-bumping the artwork revision re-applies art on every tile on every device. The
-gateway caches artwork so the repeat work is cheap, but only if the requests
-are not simultaneous.
-
-This is tested because a jitter bug is invisible in normal use — one device
-polling on a slightly wrong schedule looks exactly like one polling correctly,
-and the fault only appears at a scale you cannot reproduce by hand.
-
-Run: python3 -m pytest tests/unit
+A fixed interval keeps a fleet in lockstep, which hurts most when an artwork
+revision bump makes every device re-apply art at once. Tested because a jitter
+bug is invisible by hand: it only shows at a scale you cannot reproduce.
 """
 
 import os
@@ -71,12 +60,8 @@ def test_the_delays_actually_differ():
 
 
 def test_devices_starting_together_end_up_spread_out():
-    """Model 200 devices over an hour and check they drift apart.
-
-    Without jitter every device fires at exactly the same instants forever, so
-    the worst-case bucket holds all 200. With it, arrivals should spread across
-    the interval.
-    """
+    """Model 200 devices over an hour. Without jitter all 200 land in one
+    bucket forever; with it, arrivals spread across the interval."""
     horizon = 3600.0
     buckets = {}
     for device in range(200):

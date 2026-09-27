@@ -1,12 +1,6 @@
 # Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
-"""Findings from the security and error-handling audit, pinned.
-
-Each of these is a real defect that was reported, reproduced and fixed. They
-share a file because they share a cause: a value that came off the NETWORK --
-a catalogue game name, a provider key, a template filename -- was used as if
-this plugin had chosen it.
-
-Run: python3 -m pytest tests/unit/test_audit_fixes.py
+"""Fixes from the security audit. Each is a real defect: a value off the
+network (game name, provider key, template filename) trusted as if it was ours.
 """
 
 import os
@@ -22,9 +16,8 @@ main = harness.main
 # ------------------------------------------- the account-wide configset file
 
 def test_a_name_with_braces_is_never_written_into_the_configset(tmp_path):
-    """The key comes from a catalogue game NAME and lands in a file shared by
-    every game on the account. A brace closes the entry and opens a new block,
-    so one bad name breaks the parse for everything after it."""
+    """The key is a game name landing in an account-wide file. A brace in it
+    would close the entry and break the parse for everything after."""
     configset = tmp_path / "configset_controller_neptune.vdf"
     configset.write_text('"controller_config"\n{\n\t"existing"\n\t{\n\t\t"autosave" "1"\n\t}\n}\n')
     before = configset.read_text()
@@ -56,12 +49,9 @@ def test_a_newline_cannot_forge_an_entry(tmp_path):
 # --------------------------------------------- the template filename
 
 def test_a_template_name_cannot_escape_the_templates_directory(tmp_path):
-    """The gateway chooses this name and it went straight into os.path.join,
-    which discards everything before an absolute path -- so both "../../.." and
-    a leading "/" escaped, giving an arbitrary read as the `deck` user.
-
-    Exercised against the real templates directory: whatever the name, the
-    path that gets opened has to stay inside it.
+    """The gateway picks this name and it went into os.path.join, so "../.."
+    and a leading "/" escaped. Whatever the name, the path must stay inside
+    the templates dir.
     """
     templates = tmp_path / "controller_base" / "templates"
     templates.mkdir(parents=True)
@@ -71,21 +61,18 @@ def test_a_template_name_cannot_escape_the_templates_directory(tmp_path):
 
     for attempt in ("../secret.vdf", "../../secret.vdf", str(outside),
                     "/etc/passwd"):
-        # What install_controller_layout does with the name it was handed.
+        # What install_controller_layout does with the name it gets.
         resolved = os.path.join(str(templates), os.path.basename(attempt))
         assert os.path.realpath(resolved).startswith(
             os.path.realpath(str(templates)) + os.sep), attempt
-        # And specifically: it never resolves to the file next door.
         assert os.path.realpath(resolved) != os.path.realpath(str(outside))
 
 
 # ----------------------------------------------- the provider round trip
 
 def test_a_provider_key_that_could_not_round_trip_is_refused():
-    """The key is written through shlex quoting and read back with \\S+, so one
-    that needs quoting comes back as something else -- and a provider that does
-    not match synced.json makes the sync delete the tile and rebuild it on
-    every run."""
+    """Written with shlex quoting and read back with \\S+, so a key needing
+    quotes comes back wrong and the sync churns the tile every run."""
     assert main._PLAIN_KEY.match("amazon_luna")
     assert main._PLAIN_KEY.match("geforce_now")
     assert main._PLAIN_KEY.match("xbox-cloud.1")
@@ -114,29 +101,26 @@ def test_the_reader_understands_a_quoted_provider():
 # ------------------------------------------------------- the urllib fallback
 
 def test_the_fallback_refuses_redirects():
-    """urllib re-sends every header to the new location, Authorization with
-    it, so one redirect off the gateway hands the API token to whoever
-    answered."""
+    """urllib re-sends every header on a redirect, so one redirect off the
+    gateway would hand the API token to whoever answered."""
     handler = main._NoRedirects()
     assert handler.redirect_request(None, None, 302, "Found", {},
                                     "https://elsewhere.example/") is None
 
 
 def test_the_layout_key_matches_what_steam_asks_for():
-    """Steam lowercases the shortcut name and strips the characters Windows
-    forbids in a filename, plus the full stop. Verified against its own answer
-    for every tile on a real device."""
+    """Steam lowercases the name and strips the chars Windows forbids plus the
+    dot. Checked against its own answer on a real device."""
     assert main._layout_key("R.E.P.O. (Boosteroid)") == "repo (boosteroid)"
     assert main._layout_key("BLiNX: The Time Sweeper (Xbox Cloud)") \
         == "blinx the time sweeper (xbox cloud)"
     assert main._layout_key("Disney/Pixar WALL-E") == "disneypixar wall-e"
-    # And therefore never a path separator, whatever the catalogue says.
+    # so never a path separator, whatever the catalogue says
     assert "/" not in main._layout_key("a/b/c")
     assert "\\" not in main._layout_key("a\\b")
 
 
 def test_the_strip_set_is_the_one_steam_uses():
     assert set(main._STEAM_STRIPS) == set('\\/:*?"<>|.')
-    # The bracketed provider suffix must survive: it is what tells a streamed
-    # copy apart from an installed one.
+    # the bracketed provider suffix must survive: it marks a streamed copy
     assert re.search(r"\(boosteroid\)$", main._layout_key("X (Boosteroid)"))

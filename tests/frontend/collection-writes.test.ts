@@ -1,21 +1,10 @@
 // Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 //
-// Saving a collection is the expensive part of a sync.
-//
-// Save() rewrites the whole collection and makes Steam re-read its library —
-// measured at roughly half a second. Adding an app that is ALREADY filed still
-// costs a full Save, and the sync loop pushed every tile it walked past, not
-// only the ones it changed.
-//
-// So a sync that changed nothing still paid one Save per batch of 12. With 388
-// games that is ~33 of them: pressing "Sync now" took fifteen to twenty seconds
-// to do nothing at all, which is what sent someone looking.
-//
-// Measured on a real Deck, mid-sync:
-//     Boosteroid (Shelfcloud)   301 apps
-//     GeForce NOW (Shelfcloud)   84 apps
-//     Amazon Luna (Shelfcloud)    2 apps
-// — already complete, and re-saved on every sync regardless.
+// Saving a collection is the expensive part of a sync: Save() rewrites the
+// whole collection and makes Steam re-read its library, ~half a second, even
+// when the app is already filed. The loop pushed every tile it walked past, so
+// a no-op sync of 388 games still paid ~33 Saves and "Sync now" hung for
+// fifteen to twenty seconds doing nothing.
 
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -58,7 +47,7 @@ beforeEach(() => {
       return { Save: async () => { record.saves += 1; } };
     },
   };
-  // The sync passes app ids; the store turns them into overviews.
+  // the sync passes app ids; the store turns them into overviews.
   (globalThis as Record<string, unknown>).appStore = {
     GetAppOverviewByAppID: (appid: number) => ({ appid }),
   };
@@ -93,8 +82,7 @@ describe("a collection is only written when something is actually new", () => {
   });
 
   it("still re-files a game the user removed by hand", async () => {
-    // It is genuinely absent, so this is not a redundant write. Only writes
-    // that would change nothing are skipped.
+    // genuinely absent, so not a redundant write. only no-op writes are skipped.
     collections.push(collection(BOOSTEROID, [1, 2]));
 
     await addToProviderCollections([{ appId: 3, provider: "boosteroid" }]);
@@ -131,8 +119,7 @@ describe("a collection is only written when something is actually new", () => {
   });
 
   it("a whole no-op sync writes nothing at all", async () => {
-    // The shape of the bug: 388 tiles, every one already filed, pushed through
-    // in batches of 12. Thirty-three saves, nothing changed.
+    // the bug: 388 tiles all already filed, pushed in batches of 12, 33 saves.
     const ids = Array.from({ length: 388 }, (_, i) => i + 1);
     collections.push(collection(BOOSTEROID, ids));
 

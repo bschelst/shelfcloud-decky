@@ -2,26 +2,12 @@
 //
 // A collection that vanished and came back every few minutes.
 //
-// Observed on hardware, not reasoned about: the "Shelfcloud (Shelfcloud)"
-// collection took turns with a "shelfcloud (Shelfcloud)" one — same name, one
-// capital letter apart — and got a BRAND NEW id every time it came back. Seven
-// ids in twelve minutes. Steam's config had 941 shortcut-membership records
-// for thirteen collections; the rest were orphans, one per cycle.
+// Two collections one capital letter apart took turns, each cycle minting a
+// new id. The id matters: shortcut membership is stored locally keyed by it,
+// so a new id loses the members.
 //
-// The id is the part that matters. A collection's membership for SHORTCUTS is
-// stored locally, keyed by collection id, because shortcut app ids are
-// generated per machine and cannot roam — the cloud record for one of ours is
-// `"added":[]` by design. Mint a new id and the membership is left behind.
-//
-// Three places compared the name exactly, and each one broke on the mismatch:
-//
-//   - filing did not recognise the collection as ours, so it made a second
-//     one under the proper spelling, with a new id;
-//   - retiring saw a name that is not in the current set and deleted it;
-//   - pruning found nothing "wanted" under that name and stripped every
-//     managed tile out of it.
-//
-// The first two took turns forever. The third emptied it with no help at all.
+// Three places compared the name exactly and broke on the mismatch: filing
+// made a second collection, retiring deleted it, pruning emptied it.
 
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -31,12 +17,9 @@ import {
   removeRetiredCollections,
 } from "../../src/lib/collection";
 
-// Shaped like the real thing, which matters here more than usual: a
-// collection has NO SetName. Its only name member is displayName, an accessor
-// with a setter behind it — checked on hardware. The first attempt at this fix
-// called SetName behind a typeof guard, so it silently did nothing, and the
-// collection stayed under the old spelling. A fake that offered SetName would
-// have let that ship.
+// Shaped like the real thing on purpose: a collection has NO SetName, only a
+// displayName accessor. A first fix called SetName and silently did nothing;
+// a fake with SetName would have let that ship.
 type FakeCollection = {
   id: string;
   displayName: string;
@@ -124,8 +107,7 @@ describe("filing into a collection spelled differently", () => {
   });
 
   it("writes the rename even when there is nothing to add", async () => {
-    // Otherwise the new name is never saved, the old one comes back, and the
-    // collection is a stranger again on the very next sync.
+    // else the rename is never saved and the old name comes back next sync.
     const existing = collection(LOWER, [TILE]);
     collections.push(existing);
 
@@ -137,8 +119,7 @@ describe("filing into a collection spelled differently", () => {
   });
 
   it("does not save when the name was already right and nothing is new", async () => {
-    // Save makes Steam re-read the whole library; doing it for nothing is what
-    // made a no-op sync take fifteen seconds.
+    // Save makes Steam re-read the whole library; doing it for nothing was slow.
     const existing = collection(PROPER, [TILE]);
     collections.push(existing);
 

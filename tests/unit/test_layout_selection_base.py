@@ -1,21 +1,9 @@
 # Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """Which Steam user directory the layout selection points into.
 
-Steam keeps one controller-config directory per account that has ever signed in
-on the device. Only the SIGNED-IN one is read, and selecting a config that
-lives under any of the others does not merely fail: Steam clears the selection
-back to `default://<appid>`, which looks exactly like the layout never
-applying.
-
-The first version of this picked the directory with the most entries. Measured
-on a Deck with four accounts it chose one holding 1075 over the signed-in
-account's 911, and every tile lost its layout on the next sync.
-
-The account id is the low 32 bits of the Steam ID, which is precisely what
-Steam names the directory -- arithmetic on a value already stored, not a guess
-about the filesystem.
-
-Run: python3 -m pytest tests/unit/test_layout_selection_base.py
+Only the signed-in account's config dir may be used; anything else makes Steam
+clear the selection to default://<appid>. An earlier "most entries wins" rule
+picked the wrong account. The dir name is the low 32 bits of the Steam ID.
 """
 
 import asyncio
@@ -42,8 +30,7 @@ def deck(tmp_path, monkeypatch):
     configs = root / "steamapps" / "common" / "Steam Controller Configs"
     for account in (ACCOUNT,) + OTHERS:
         (configs / account / "config").mkdir(parents=True)
-    # Every other account gets more entries than ours, so a "fullest wins"
-    # rule picks the wrong one -- which is the bug this pins.
+    # every other account gets more entries, so "fullest wins" picks wrong
     for index, account in enumerate(OTHERS):
         for n in range(5 + index):
             (configs / account / "config" / ("game %d" % n)).mkdir()

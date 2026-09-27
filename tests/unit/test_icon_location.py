@@ -1,22 +1,10 @@
 #!/usr/bin/env python3
 # Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
-"""Where shortcut icons are written, and what uninstalling is allowed to delete.
+"""Where shortcut icons are written, and what uninstall may delete.
 
-Icons moved into Steam's own grid folder because one written anywhere else is
-not drawn: the file landed in shortcuts.vdf correctly, as a valid PNG the deck
-user could read, and Steam still rendered a broken image. Every other working
-shortcut on the same device keeps its icon inside that folder.
-
-That move makes two previously harmless things dangerous, and both are asserted
-here rather than trusted:
-
-  * `<appid>.png` in that folder is STEAM'S library art. Our game ids start at
-    1, so an icon named after a game id can land on the artwork of a real Steam
-    app with the same number and destroy it.
-  * uninstall used to empty the icon directory. Emptying Steam's grid folder
-    deletes the library artwork of every game on the machine.
-
-Run: python3 -m pytest tests/unit
+Icons live in Steam's grid folder, else Steam draws them broken. That makes two
+things dangerous: `<appid>.png` there is Steam's own art, so an icon named after
+a game id can overwrite it; and uninstall must not empty the whole folder.
 """
 
 import asyncio
@@ -49,19 +37,14 @@ import pytest  # noqa: E402
 # --------------------------------------------------------------- the name
 
 def test_the_icon_is_named_after_the_shortcut_not_the_game():
-    """The collision this prevents is silent and destroys somebody's artwork.
-
-    In Steam's grid folder `23101.png` is the library art of Steam app 23101.
-    Our game ids come from the same small range, so naming an icon after one
-    overwrites a real game's picture with our mark.
-    """
+    """`23101.png` is Steam app 23101's art; our ids share that range, so
+    naming an icon after a game id would overwrite it."""
     assert main._icon_name(23101, 2250922664, "png") == "2250922664_icon.png"
     assert "23101" not in main._icon_name(23101, 2250922664, "png")
 
 
 def test_without_an_app_id_it_falls_back_to_the_old_name():
-    """Only so icons written by an earlier version can still be found and
-    removed — nothing writes this shape any more."""
+    """Only so an older version's icons can still be found and removed."""
     assert main._icon_name(23101, None, "png") == "23101.png"
 
 
@@ -106,8 +89,8 @@ def grid(tmp_path):
 
 
 def test_uninstall_deletes_only_our_own_icons(grid, tmp_path):
-    """The guard that matters. This used to be `for name in listdir: remove`,
-    which in Steam's grid folder is every game's artwork on the device."""
+    """This used to be `for name in listdir: remove`, which here is every
+    game's artwork on the device."""
     folder, steams = grid
     settings = tmp_path / "settings-icons"
     settings.mkdir()
@@ -127,20 +110,10 @@ def test_uninstall_deletes_only_our_own_icons(grid, tmp_path):
 
 
 def test_uninstall_passes_the_real_game_id(grid, tmp_path):
-    """The game id comes from the KEY of the tracked map, not a field in it.
-
-    A tracked entry holds app_id, name, launch, art, provider and url — so
-    `entry.get("game_id")` is always None and the legacy half of the cleanup
-    silently does nothing.
-
-    The key is "<game id>:<provider>" now, so it is no longer the game id by
-    itself either: passed whole it matches no icon filename and the cleanup
-    does nothing just the same. It has to be taken back out.
-
-    Asserted on the CALL rather than on the files, deliberately. Checking the
-    files cannot see this: uninstall also empties the settings directory
-    wholesale, so a legacy icon disappears either way and the first version of
-    this test passed with the bug reintroduced.
+    """The game id comes from the map KEY ("<game id>:<provider>"), not a field.
+    It must be split back out, else the legacy cleanup matches nothing. Checked
+    on the call, not the files: uninstall wipes the settings dir either way, so
+    a files check would pass even with the bug back.
     """
     folder, _ = grid
     settings = tmp_path / "settings-icons"
@@ -163,8 +136,8 @@ def test_uninstall_passes_the_real_game_id(grid, tmp_path):
 
 
 def test_remove_icon_files_clears_both_naming_schemes(grid, tmp_path):
-    """What that game id is FOR: an icon written by an earlier version sits
-    under the game-id name, and only a real game id finds it."""
+    """What the game id is for: an older icon under the game-id name, which
+    only a real game id finds."""
     folder, _ = grid
     (folder / "23101.png").write_bytes(b"written by an older version")
 

@@ -1,14 +1,9 @@
 # Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """Choosing which shelf this device shows.
 
-A shelf is a named library on the gateway; this device points at one. The Deck
-does not create or delete shelves — that wants a real keyboard — it only picks
-which one it shows, which is the part you want to change while holding it.
-
-The cases worth testing are the ones a Deck actually hits: a gateway that
-answers with something unexpected, and a token issued before shelves existed.
-Neither should produce a traceback in a plugin whose failure mode is a panel
-that silently stops working.
+A shelf is a named library on the gateway; the Deck only picks which one it
+shows. The cases worth testing are a gateway answering with something odd and a
+token from before shelves existed — neither may crash the panel.
 """
 
 import asyncio
@@ -39,11 +34,8 @@ import main  # noqa: E402
 
 
 def plugin(responses):
-    """A plugin whose gateway answers from a {path: payload} map.
-
-    A payload that is an Exception is raised instead of returned, which is how
-    the failure paths are exercised.
-    """
+    """A plugin whose gateway answers from a {path: payload} map. An Exception
+    payload is raised instead of returned, to drive the failure paths."""
     instance = main.Plugin()
     instance._settings = {"gateway_url": "http://gw:8000", "api_token": "t"}
 
@@ -66,12 +58,9 @@ DEVICES = {"devices": [{"id": 7, "name": "Deck", "shelf_id": 1},
 
 @pytest.fixture
 def record_posts():
-    """A plugin whose writes are captured instead of sent.
-
-    Returns (plugin, sent). `sent` stays empty when no request was made, which
-    is the assertion that matters for everything the plugin should refuse:
-    "it returned an error" is weaker than "it never asked".
-    """
+    """A plugin whose writes are captured instead of sent. `sent` stays empty
+    when no request was made — "it never asked" is stronger than "it errored"
+    for everything the plugin should refuse."""
     def build(shelves, devices):
         sent = {}
         instance = plugin({"/api/me/shelves": shelves, "/api/me/devices": devices})
@@ -163,12 +152,8 @@ def test_setting_a_shelf_targets_this_device(record_posts):
 
 
 def test_choosing_shared_sends_null_not_zero(record_posts):
-    """0 is a plausible id; null is how "no shelf" is spelled. Sending 0 would
-    be a 404 for a shelf that does not exist.
-
-    The panel spells "shared" as the dropdown value 0 because a Steam Dropdown
-    needs a non-null key, and converts it back to null before calling here.
-    """
+    """null is how "no shelf" is spelled; 0 is a real id and would 404. The
+    panel uses 0 as the dropdown value and converts it back to null here."""
     p, sent = record_posts(SHELVES, DEVICES)
     asyncio.run(p.set_shelf(None))
     assert sent["body"] == {"shelf_id": None}
@@ -176,10 +161,7 @@ def test_choosing_shared_sends_null_not_zero(record_posts):
 
 def test_a_token_from_before_shelves_is_told_to_sign_in_again():
     """Such a token has no device attached, so there is nothing to point at.
-
-    Saying so is the whole value here: the alternative is a dropdown that
-    accepts a choice and silently changes nothing.
-    """
+    The alternative is a dropdown that accepts a choice and changes nothing."""
     devices = {"devices": [], "this_device": None}
     p = plugin({"/api/me/shelves": SHELVES, "/api/me/devices": devices})
     result = asyncio.run(p.set_shelf(1))
@@ -188,11 +170,8 @@ def test_a_token_from_before_shelves_is_told_to_sign_in_again():
 
 
 def test_a_shelf_that_no_longer_exists_is_refused_with_a_reason(record_posts):
-    """Deleted from the website while this panel sat open.
-
-    Refusing locally costs one comparison and produces a sentence; sending it
-    produces whatever the gateway says about an id it cannot find.
-    """
+    """Deleted from the website while the panel sat open. Refusing locally gives
+    a clear reason; sending it gives whatever the gateway says about a bad id."""
     p, sent = record_posts(SHELVES, DEVICES)
     result = asyncio.run(p.set_shelf(99))
     assert result["ok"] is False
@@ -202,18 +181,14 @@ def test_a_shelf_that_no_longer_exists_is_refused_with_a_reason(record_posts):
 
 # --------------------------------------------------------------- validation
 #
-# Everything below is about a gateway whose response is not what this plugin
-# expects: mid-deploy, behind a proxy that returns an error page, older than
-# the plugin, or simply wrong. None of it may raise, because an exception here
-# takes the whole Decky panel down with no message the user can act on.
+# Everything below is a gateway response the plugin does not expect: mid-deploy,
+# a proxy error page, older than the plugin, or just wrong. None may raise, or
+# the exception takes the whole panel down.
 
 def test_a_list_field_that_is_not_a_list_is_rejected_not_iterated():
-    """`or []` rescues null and nothing else.
-
-    A string iterates one character at a time and quietly yields an empty
-    result; an int raises TypeError. Both were live before the isinstance
-    check, and the int was a panel crash.
-    """
+    """`or []` rescues null and nothing else. A string iterates character by
+    character and yields empty; an int raises TypeError. The isinstance check
+    catches both."""
     for junk in (42, "oops", {"a": 1}, True):
         p = plugin({"/api/me/shelves": {"shelves": junk}, "/api/me/devices": DEVICES})
         assert asyncio.run(p.get_shelves())["ok"] is False
@@ -225,10 +200,8 @@ def test_a_list_field_that_is_not_a_list_is_rejected_not_iterated():
 
 def test_ids_that_arrive_as_strings_are_usable():
     """A proxy that re-serialises JSON can turn every number into a string.
-
-    Coercing means the picker still works; refusing would be a dead panel for
-    a response that is merely ugly.
-    """
+    Coercing keeps the picker working; refusing would be a dead panel for a
+    response that is merely ugly."""
     shelves = {"shelves": [{"id": "3", "name": "Handheld", "games": "7"}]}
     devices = {"devices": [{"id": "7", "shelf_id": "3"}], "this_device": "7"}
     result = asyncio.run(plugin({"/api/me/shelves": shelves,
@@ -246,12 +219,9 @@ def test_a_boolean_is_not_an_id():
 
 
 def test_a_shelf_with_no_name_keeps_its_place_in_the_list():
-    """Dropping it would be worse than naming it.
-
-    If the device points at that shelf, dropping it leaves the picker with a
-    selected value that matches no option, and Steam draws that as an empty
-    control.
-    """
+    """Dropping it is worse than naming it: if the device points at that shelf,
+    the picker gets a selected value matching no option and Steam draws an
+    empty control."""
     shelves = {"shelves": [{"id": 4, "games": 2}, {"id": 5, "name": "   "}]}
     result = asyncio.run(plugin({"/api/me/shelves": shelves,
                                  "/api/me/devices": DEVICES}).get_shelves())
@@ -268,9 +238,9 @@ def test_an_entry_with_no_id_is_dropped():
 
 
 def test_an_unreadable_device_id_does_not_match_a_device():
-    """Both sides go through the same coercion, so an unreadable this_device
-    must not match an equally unreadable row id by both being None — that
-    would adopt some other device's shelf."""
+    """Both sides use the same coercion, so an unreadable this_device must not
+    match an unreadable row id by both being None — that adopts another
+    device's shelf."""
     devices = {"devices": [{"id": {}, "shelf_id": 2}], "this_device": []}
     result = asyncio.run(plugin({"/api/me/shelves": SHELVES,
                                  "/api/me/devices": devices}).get_shelves())
@@ -280,12 +250,9 @@ def test_an_unreadable_device_id_does_not_match_a_device():
 
 
 def test_a_device_id_is_never_interpolated_into_the_url_unchecked(record_posts):
-    """The id goes straight into a request path.
-
-    Taken raw from JSON it is whatever the response said, and a string there
-    writes its own URL — reaching a different endpoint with this user's
-    bearer token attached.
-    """
+    """The id goes straight into a request path, so a hostile string from the
+    response could write its own URL and reach another endpoint with this
+    user's bearer token."""
     hostile = "7/../../api/catalog?x="
     devices = {"devices": [{"id": hostile, "shelf_id": 1}], "this_device": hostile}
     p, sent = record_posts(SHELVES, devices)

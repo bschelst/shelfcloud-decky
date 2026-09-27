@@ -2,20 +2,8 @@
 # Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """Handing games back after a cancelled bulk add.
 
-"Add all my games" adds every owned game in ONE server call and then builds
-tiles one at a time, so cancelling stopped the tiles and left the library
-holding hundreds of games that appeared on the next sync anyway. Cancel now
-means "stop, and forget the rest", and this is the call that does the forgetting.
-
-Two things are asserted rather than assumed, because both fail quietly:
-
-  * the gateway refuses a change carrying more than 500 entries, and a
-    cancelled bulk add is routinely larger than that — unbatched, the whole
-    call fails and the library keeps every game
-  * a failure here must not fail the sync. The tiles are already correct; this
-    is tidying the library behind them.
-
-Run: python3 -m pytest tests/unit
+drop_from_library forgets the rest. It must batch under the gateway's 500-entry
+cap, and a failure here must not fail the sync -- the tiles are already right.
 """
 
 import asyncio
@@ -70,8 +58,7 @@ def test_one_batch_goes_in_one_call():
 
 
 def test_a_large_run_is_split_under_the_cap():
-    """The gateway refuses more than 500 in one change. A cancelled add of a
-    three-hundred-game library is ordinary, and of a thousand is not rare."""
+    """The gateway refuses more than 500 in one change."""
     sent = []
     ids = list(range(1000))
     result = asyncio.run(plugin(sent).drop_from_library(ids))
@@ -81,8 +68,7 @@ def test_a_large_run_is_split_under_the_cap():
     assert len(sent) > 1
     for _, _, body in sent:
         assert len(body["remove"]) <= 500, "a batch would be refused whole"
-    # Every id goes exactly once — a batching slip that dropped or repeated a
-    # slice would still look like success.
+    # every id exactly once: a dropped or repeated slice would still look ok
     together = [i for _, _, body in sent for i in body["remove"]]
     assert together == ids
 
@@ -94,18 +80,15 @@ def test_nothing_to_drop_makes_no_call():
 
 
 def test_rubbish_ids_are_dropped_and_real_ones_kept():
-    """Via as_id, so the shapes JSON actually produces all arrive: an int, a
-    float from a language whose numbers are all floats, a string from a proxy
-    that rewrote the body. True is rejected — it is a subclass of int and would
-    otherwise become the id 1, which is a real game."""
+    """as_id accepts the shapes JSON produces (int, float, numeric string) but
+    rejects True, which is an int subclass and would become the real id 1."""
     sent = []
     asyncio.run(plugin(sent).drop_from_library([1, None, "2", {}, "x", 3.0, True, 4.5]))
     assert sent[0][2] == {"remove": [1, 2, 3]}
 
 
 def test_a_failure_is_reported_never_raised():
-    """This runs after the tiles are already right. Raising here would fail a
-    sync that actually succeeded."""
+    """Runs after the tiles are right, so raising would fail a good sync."""
     sent = []
     result = asyncio.run(plugin(sent, fail=True).drop_from_library([1, 2]))
     assert result["ok"] is False

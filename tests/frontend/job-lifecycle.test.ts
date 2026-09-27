@@ -2,18 +2,10 @@
 //
 // A job that starts must end, and a job that is running must be stoppable.
 //
-// Both of these are about the same field. Every button in the panel is
-// disabled while `busy`, so `busy` left true is not a cosmetic bug: the panel
-// is bricked for the rest of the session with nothing running behind it.
-//
-// That happened. "Remove all games" set busy itself and cleared it on three of
-// its four exits, and the one it missed was the path where everything worked —
-// so emptying the library, the case that succeeds, greyed out Sync and Remove
-// and left no way back but reloading the plugin. runJob exists so that shape
-// cannot come back: one entry, one exit, whatever the body does.
-//
-// The cancel half is the other end of the same story. "Add all my games" walks
-// a whole Steam library and there was no way to stop it short of killing Steam.
+// Every panel button is disabled while `busy`, so `busy` stuck true bricks the
+// panel. "Remove all games" once missed clearing it on its success path.
+// runJob guarantees one entry, one exit. Cancel is the other half: "Add all my
+// games" had no way to stop short of killing Steam.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -31,8 +23,7 @@ describe("a job always ends", () => {
   });
 
   it("clears busy when the body returns nothing at all", async () => {
-    // The exact shape of the bug: work done, nothing reported, and previously
-    // nothing to put the panel back.
+    // the bug's exact shape: work done, nothing reported, panel not put back.
     await runJob(async () => { /* worked, said nothing */ });
     expect(getJob().busy).toBe(false);
   });
@@ -94,8 +85,7 @@ describe("cancelling", () => {
   });
 
   it("does nothing when nothing is running", () => {
-    // Otherwise a stale press would arm cancellation for whatever ran NEXT,
-    // stopping a run the user never asked to stop.
+    // else a stale press would arm cancel for whatever runs next.
     cancelJob();
     expect(cancelRequested()).toBe(false);
     expect(getJob().busy).toBe(false);
@@ -116,11 +106,8 @@ describe("cancelling", () => {
   });
 
   it("does not leak into a run started WITHOUT runJob", () => {
-    // The shape that shipped. doSync and doAddOwned set busy themselves rather
-    // than going through runJob, so the flag was never cleared for them: one
-    // press of Cancel stopped every later sync at its first tile, for the life
-    // of the session, while the panel reported success each time. Observed as
-    // a library stuck at 15 tiles against 387 games, syncing "fine".
+    // what shipped: doSync set busy without runJob, so cancel was never cleared
+    // and stopped every later sync at its first tile while reporting success.
     setJob({ busy: true });
     cancelJob();
     expect(cancelRequested()).toBe(true);
@@ -131,8 +118,7 @@ describe("cancelling", () => {
   });
 
   it("does not re-arm on a message sent mid-run", () => {
-    // Only the transition into busy clears it. A progress line arriving after
-    // Cancel must not undo the cancel.
+    // only the move into busy clears cancel; a progress line must not undo it.
     setJob({ busy: true });
     cancelJob();
     setJob({ message: "Adding Fortnite (12/124)" });
@@ -158,12 +144,8 @@ describe("the panel keeps seeing a run it did not start", () => {
 
 describe("a run that stops responding", () => {
   it("still gives the panel back when Cancel is not honoured", () => {
-    // The failure this exists for: the body never settles, so neither its
-    // success nor its failure path runs, so nothing ever clears `busy`. The
-    // store is module scope, so closing the panel does not help -- every
-    // button stays disabled for the rest of the Steam session with nothing
-    // running to cancel. A sync blocked writing thousands of controller
-    // layouts did exactly this.
+    // the body never settles, so nothing clears `busy`. The store is module
+    // scope, so closing the panel does not help. A layout-blocked sync did this.
     vi.useFakeTimers();
     try {
       setJob({ busy: true, message: "Syncing…" });
@@ -185,8 +167,7 @@ describe("a run that stops responding", () => {
   });
 
   it("does not reset a job that stopped on its own in time", () => {
-    // The other half: honouring Cancel must not then be undone by a deadline
-    // firing later and clearing a DIFFERENT run that has since started.
+    // honouring Cancel must not be undone by a later deadline clearing a new run.
     vi.useFakeTimers();
     try {
       setJob({ busy: true, message: "Syncing…" });

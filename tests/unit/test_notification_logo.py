@@ -1,26 +1,10 @@
 # Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """Notifications carry the Shelfcloud mark, and carry it as a component.
 
-Steam's notifications showed no icon at all: toaster.toast() takes an optional
-`logo`, and none of the six call sites passed one.
-
-The part worth protecting is HOW. `logo` is a ReactNode, not a path and not a
-URL — and that is the only reason this works. This bundle runs inside Steam's
-client at https://steamloopback.host, so an <img> pointing into the plugin
-directory is a cross-origin request and does not load. It is the same rule that
-forced game artwork through the Python backend and back as base64. There is no
-image file to ship, and shipping one would be the mistake.
-
-Sizing follows Steam's own notification layout, matched against the
-steamstatus-decky plugin, which solved this first: a container fixed at 36px
-with the mark at 1em inside it. The em is what matters — Steam scales
-notification text with the system font size, so a hard pixel size is right on
-one device and wrong on another.
-
-Source-level tests: the assertions are about what the TSX says, because the
-failure mode is a call site that quietly forgets the logo.
-
-Run: python3 -m pytest tests/unit/test_notification_logo.py
+`logo` is a ReactNode, not a path or URL. An <img> into the plugin dir is
+cross-origin from steamloopback.host and would not load, so the mark ships as
+a component and is sized in em against a 36px base (like steamstatus-decky).
+Tests read the TSX, since the failure mode is a call site that forgets the logo.
 """
 
 import os
@@ -40,12 +24,8 @@ def read(path):
 
 
 def code(path):
-    """The source with comments removed.
-
-    These files EXPLAIN the rules they follow — the Logo docstring says why an
-    <img> cannot be used — so a naive substring search finds the prohibition
-    and calls it a violation. Strip the prose and assert against the code.
-    """
+    """The source with comments stripped, so prose about the rules is not
+    mistaken for a violation by a substring search."""
     source = read(path)
     source = re.sub(r"/\*.*?\*/", "", source, flags=re.S)       # block comments
     return "\n".join(re.sub(r"//.*$", "", line) for line in source.split("\n"))
@@ -62,18 +42,12 @@ def _tsx_files():
 
 
 def toast_blocks():
-    """Each toaster.toast(...) call across the frontend source.
-
-    Scans index.tsx and all component files so a toast in any of them
-    is covered by the logo check.
-    """
+    """Each toaster.toast(...) call across index.tsx and the components."""
     for path in _tsx_files():
         source = code(path)
         for match in re.finditer(r"toaster\.toast\(", source):
-            # Grab enough context to include the logo prop, which may be
-            # several lines past the opening paren.
+            # enough context to include the logo prop
             chunk = source[match.start():match.start() + 800]
-            # Find the matching close — first }); after the open.
             end = chunk.find("});")
             yield path, source[:match.start()].count("\n") + 1, chunk[:end + 3 if end > 0 else 240]
 
@@ -93,8 +67,8 @@ def test_every_notification_carries_the_mark():
 
 
 def test_the_new_games_notification_carries_it_on_every_branch():
-    """It returns three different shapes — one per game count — and an early
-    return is the easy one to miss."""
+    """Three return shapes, one per game count, and an early return is the
+    easy branch to miss."""
     source = read(INDEX)
     body = source[source.index("function newGamesToast"):]
     body = body[:body.index("\nexport default definePlugin")]
@@ -123,12 +97,8 @@ def test_no_toast_points_at_a_file():
 # ------------------------------------------------------------------- sizing
 
 def test_the_notification_logo_is_sized_in_em_against_a_36px_base():
-    """Matched against steamstatus-decky, which sizes its notification logo the
-    same way: a 36px container with the icon at 1em.
-
-    Pixels here would be wrong on a TV, where Steam scales notification text up
-    and a fixed size stays small next to it.
-    """
+    """36px container with the icon at 1em. Pixels would be wrong on a TV,
+    where Steam scales notification text up."""
     logo = read(LOGO)
     block = logo[logo.index("export function NotificationLogo"):]
     assert 'fontSize: "36px"' in block
@@ -144,17 +114,16 @@ def test_the_logo_component_accepts_an_em_size():
 
 
 def test_the_mark_is_cropped_so_a_given_size_looks_like_that_size():
-    """The 256x256 source is ~39% empty space, so an uncropped mark at size=20
-    draws about 12px of visible cloud and reads as undersized beside
-    react-icons, which fill their box."""
+    """The 256x256 source is ~39% empty space, so uncropped it reads as
+    undersized beside react-icons, which fill their box."""
     logo = read(LOGO)
     assert 'VIEW_BOX = "30 34 200 200"' in logo
 
 
 def test_the_coloured_mark_is_used_not_the_monochrome_one():
-    """LogoMono exists for Decky's plugin LIST, where neighbours recolour on
-    selection. Nothing in a notification recolours, and the coloured mark is
-    what makes a Shelfcloud toast recognisable among Steam's own."""
+    """LogoMono is for the plugin list, where neighbours recolour on select.
+    A notification never recolours, and the coloured mark is what makes a
+    Shelfcloud toast stand out among Steam's own."""
     logo = read(LOGO)
     block = logo[logo.index("export function NotificationLogo"):]
     assert "<Logo " in block

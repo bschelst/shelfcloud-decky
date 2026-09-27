@@ -1,28 +1,10 @@
 # Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
-"""Pressing Play on Amazon Luna, pinned against what the live page actually does.
+"""Pressing Play on Amazon Luna, pinned against the live page.
 
-Two bugs found by opening a real Luna game page on a Deck over CDP, both of
-which failed SILENTLY — the game simply never started and the log said
-something reassuring:
-
-  1. Luna's game detail page carries a TRAILER <video> (paused, muted, 0x0).
-     IS_STREAMING_JS asked "is there a video?", so it answered "already
-     streaming" and returned before looking for Play.
-
-  2. The launcher waited for a page whose URL contains the host it asked for,
-     luna.amazon.com — but Luna REDIRECTS to the viewer's own country. Belgium
-     goes to luna.amazon.com.be, which contains "luna.amazon.com" and matched
-     by accident; Germany (luna.amazon.de) and the UK (luna.amazon.co.uk) do
-     not, and would have waited out the timeout. The bug was invisible from
-     Belgium and broken everywhere else.
-
-The Play control itself was read off the live signed-in page rather than
-guessed:
-
-    primary_entitled_button_purchase_detail   signed in  -> "Play now"
-    primary_entitled_button_log_in            signed out -> "Play free with Prime"
-
-Run: python3 -m pytest tests/unit/test_luna_autoplay.py
+Two silent bugs: a trailer <video> made IS_STREAMING_JS think the game was
+already running, and page_match on "luna.amazon.com" only matched Belgium's
+redirect by accident while other countries timed out. The Play control ids
+were read off the live signed-in page rather than guessed.
 """
 
 import importlib.util
@@ -68,11 +50,8 @@ def test_the_page_is_recognised_in_every_luna_market(url):
 
 
 def test_the_old_host_marker_would_have_missed_most_markets():
-    """Guards the regression, and records why it looked fine from Belgium.
-
-    If someone "simplifies" page_match back to the launch URL's host, this
-    fails and says which countries it breaks.
-    """
+    """If someone simplifies page_match back to the URL host, this fails and
+    names the countries it breaks."""
     old = "luna.amazon.com"                      # url.split("/")[2]
     assert old in "https://luna.amazon.com.be/game/x"      # Belgium: by accident
     for broken in ("https://luna.amazon.de/game/x",
@@ -82,9 +61,8 @@ def test_the_old_host_marker_would_have_missed_most_markets():
 
 
 def test_providers_that_never_change_host_declare_no_marker():
-    """Boosteroid, GeForce NOW and Xbox stay on the host we asked for — Xbox
-    localises by PATH (/nl-BE/play/...), not by domain — so they fall back to
-    it rather than carrying a marker that could drift."""
+    """Boosteroid, GeForce NOW and Xbox stay on the host we asked for (Xbox
+    localises by path), so they need no marker that could drift."""
     for key in ("boosteroid", "geforce_now", "xbox_cloud"):
         assert "page_match" not in launcher.provider_profile(key)
 
@@ -116,8 +94,7 @@ STREAM = {"paused": False, "ended": False, "videoWidth": 1280, "videoHeight": 72
 
 
 def test_a_trailer_on_the_game_page_is_not_a_running_game():
-    """The exact bug. Measured on the device: one <video> from
-    m.media-amazon.com, paused, 0x0, beside an enabled "Play now"."""
+    """The exact bug: a paused 0x0 trailer <video> beside an enabled Play."""
     assert _run_js(launcher.IS_STREAMING_JS, {
         "href": "https://luna.amazon.com.be/game/fortnite?autoplay=1",
         "videos": [TRAILER],
@@ -138,8 +115,7 @@ def test_a_page_with_no_video_at_all_is_not_streaming():
 
 
 def test_a_streaming_url_still_counts_even_before_the_video_exists():
-    """Kept from the original check: GeForce NOW puts 'streaming' in the URL,
-    and says so before the element appears."""
+    """GeForce NOW puts 'streaming' in the URL before the video element appears."""
     assert _run_js(launcher.IS_STREAMING_JS, {
         "href": "https://play.geforcenow.com/streaming/session", "videos": [],
     }) is True
@@ -154,17 +130,16 @@ def test_a_trailer_next_to_a_real_stream_does_not_hide_it():
 # -------------------------------------------------------- the Play control
 
 def test_the_selector_cannot_match_the_signed_out_upsell():
-    """Signed out, the primary button shares the prefix and leads to a Prime
-    signup. The :not() is what makes this selector safe to run BEFORE the text
-    rules, which is where a provider selector is read."""
+    """Signed out, the primary button shares the prefix but leads to a Prime
+    signup; the :not() keeps this selector off it."""
     selector = LUNA["selectors"][0]
     assert 'primary_entitled_button' in selector
     assert ':not([data-test-id$="_log_in"])' in selector
 
 
 def test_the_signed_out_check_uses_ids_not_words():
-    """Luna localises by IP like Xbox does — a Belgian browser is served
-    "Inloggen" — so a text check would pass for anyone abroad."""
+    """Luna localises by IP (a Belgian browser gets "Inloggen"), so a text
+    check would pass for anyone abroad."""
     signed_out = LUNA["signed_out"]
     assert "item_secondary_nav_button_sign_in" in signed_out
     assert "primary_entitled_button_log_in" in signed_out
@@ -190,9 +165,8 @@ def test_lunas_play_label_is_matched(label):
     "speel gratis met prime",
 ])
 def test_controls_that_must_never_be_clicked(label):
-    """All three carry a play word. "Remote Play" is a <div role=button>, so it
-    lands in the BUTTON group where two leading words are read — it matched,
-    and clicking it navigates away from the game."""
+    """All three carry a play word. "Remote Play" is a <div role=button> in the
+    button group, so it matched and clicking it left the game."""
     assert _matcher()(label, 2) is False
     assert _matcher()(label, 4) is False
 
@@ -207,19 +181,15 @@ def test_the_rest_of_lunas_page_is_ignored(label):
 # --------------------------------------------------- Luna refuses Linux
 
 def test_luna_asks_for_a_user_agent_override():
-    """Luna shows "Unsupported Browser" on Linux and never starts the stream.
-
-    Not a capability problem: measured on the device, the same browser reports
-    "probably" for h264, h265, vp9 AND av1, has MediaSource and has EME. Luna
-    reads the platform out of the User-Agent and refuses on that alone.
-    """
+    """Luna shows "Unsupported Browser" on Linux. Not a capability problem: it
+    reads the platform from the User-Agent and refuses on that alone."""
     assert LUNA.get("user_agent"), "Luna needs a UA override or it cannot play"
     assert "Windows" in LUNA["user_agent"]
 
 
 def test_only_luna_spoofs_its_user_agent():
-    """Xbox localises its page by what the browser says it is, so lying to
-    every provider to satisfy one is how a fix for one game breaks three."""
+    """Xbox localises by what the browser says it is, so spoofing every provider
+    to satisfy Luna would break the others."""
     for key in ("boosteroid", "geforce_now", "xbox_cloud"):
         assert not launcher.provider_profile(key).get("user_agent")
 
@@ -240,14 +210,9 @@ def test_a_provider_without_an_override_gets_no_flag():
 # ------------------------------------------- the launcher identifies itself
 
 def test_the_launcher_sends_a_user_agent_to_the_gateway():
-    """urllib's default is "Python-urllib/3.x", which the reverse proxy in
-    front of the gateway answers 403 to — measured: every other User-Agent
-    reaches the app and gets a normal 401 for a bad token.
-
-    It failed invisibly, which is why it lasted: the launcher falls back to the
-    stored URL and the game still starts, so nothing looked wrong. It only
-    meant no launch was resolved live and none was ever counted.
-    """
+    """urllib's default "Python-urllib/3.x" gets a 403 from the proxy. It failed
+    invisibly: the launcher falls back to the stored URL and the game still
+    starts, so no launch was ever resolved live or counted."""
     import inspect
     source = inspect.getsource(launcher.resolve_launch)
     assert '"User-Agent"' in source

@@ -1,19 +1,10 @@
 # Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """An unchanged library is not sent across the socket again.
 
-get_desired_library answers with every desired tile and the whole tracking
-record. On a large account that is 1.6 MB, and it crossed Decky's websocket on
-EVERY sync -- every few minutes -- to report `+0 -0 ~0`. The HTTP hop to the
-gateway had been conditional for a while; this reply was not.
-
-So the reply carries a version, the caller hands it back, and when nothing has
-changed the backend says exactly that in a few hundred bytes.
-
-The version is taken over what the caller ACTS on -- the desired tiles and the
-tracking record -- rather than over the whole reply, so a field added later
-cannot quietly stop it from ever matching.
-
-Run: python3 -m pytest tests/unit/test_library_version.py
+get_desired_library can be 1.6 MB and crossed the websocket every sync just to
+report no change. Now the reply carries a version the caller hands back, and an
+unchanged answer is a few hundred bytes. The version covers only what the caller
+acts on (desired tiles + tracking), so a new field cannot stop it matching.
 """
 
 import asyncio
@@ -88,8 +79,8 @@ def test_a_changed_library_is_sent_in_full(tmp_path):
 
 
 def test_a_changed_tracking_record_also_counts_as_changed(tmp_path):
-    """`tracked` is half of what the caller acts on, so it is half of the
-    version. A tile recorded since the last answer must not be withheld."""
+    """`tracked` is half the version, so a newly recorded tile must not be
+    withheld."""
     p = plugin(tmp_path)
     first = library(p)
 

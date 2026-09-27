@@ -1,16 +1,10 @@
 # Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
-"""The offline launch URL, now that it is no longer on the command line.
+"""The offline launch URL, now off the command line.
 
-Steam shows launch options verbatim in a game's properties, so a provider deep
-link sat there in the interface for every tile. A game tile now passes only
---game-id and --provider; the gateway resolves the URL at launch, and the
-offline fallback is read from the plugin's own state file by game id.
-
-Two callers still pass a URL positionally and must keep working: the website
-tile, which has no game id to resolve from, and any shortcut written before the
-change — those keep launching until the next sync rewrites them.
-
-Run: python3 -m pytest tests/unit/test_launch_fallback.py
+A game tile passes only --game-id and --provider; the gateway resolves the URL,
+and the offline fallback is read from synced.json by game id. Two callers still
+pass a URL positionally (the website tile, and pre-change shortcuts) and must
+keep working.
 """
 
 import importlib.util
@@ -72,8 +66,7 @@ def test_no_game_id_means_no_lookup(state):
     "", None, 42, [], {},
 ])
 def test_a_fallback_that_is_not_a_permitted_url_is_ignored(state, stored):
-    """This file is read PRECISELY when the gateway cannot be asked to correct
-    it, so it gets the same check as anything the gateway sends."""
+    """Read when the gateway cannot correct it, so same check as gateway data."""
     write, _ = state
     write({"321": {"url": stored}})
     assert launcher.stored_fallback("321") == ""
@@ -81,8 +74,8 @@ def test_a_fallback_that_is_not_a_permitted_url_is_ignored(state, stored):
 
 @pytest.mark.parametrize("content", ["", "{not json", "[]", "null", '"text"'])
 def test_an_unreadable_state_file_degrades_to_no_fallback(state, content):
-    """Runs on the path where the gateway has ALREADY failed. Raising here
-    would turn a slow gateway into a launcher that crashes."""
+    """Runs after the gateway already failed, so raising would crash the
+    launcher."""
     _write, path = state
     path.write_text(content, encoding="utf-8")
     assert launcher.stored_fallback("321") == ""
@@ -96,8 +89,8 @@ def test_a_missing_state_file_is_not_an_error(tmp_path, monkeypatch):
 # --------------------------------------------------- the command line itself
 
 def parse_argv(argv):
-    """Mirror main()'s parsing: the flag PAIRS are removed from argv first, so
-    their values never reach the positional list."""
+    """Mirror main()'s parsing: flag pairs removed first, so their values never
+    reach the positional list."""
     argv = list(argv)
     for flag in ("--provider", "--game-id"):
         if flag in argv:
@@ -144,8 +137,7 @@ def test_local_state_is_used_when_the_command_line_has_no_url(state):
 
 
 def test_a_command_line_url_wins_over_local_state(state):
-    """An old shortcut carries its own URL; it is used as-is rather than being
-    second-guessed, so behaviour does not change under people mid-upgrade."""
+    """An old shortcut's own URL is used as-is, so mid-upgrade nothing changes."""
     write, _ = state
     write({"321": {"url": GOOD}})
     passed = "https://cloud.boosteroid.com/application/1573"

@@ -1,18 +1,9 @@
 # Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """How long a player count, and a failed one, may be reused.
 
-A badge on a game page is opened over and over on a Deck, so without a cache
-this is one request to Steam per press of the A button. But a COUNT and a
-FAILURE are not the same kind of fact and should not share a lifetime:
-
-  - a count is context, not a readout. Nobody decides anything differently
-    because a game went from 61,000 players to 60,400, so reusing one for
-    fifteen minutes costs the reader nothing they would notice.
-  - a failure is a fact about right now. Sharing the fifteen minutes meant a
-    minute of bad connectivity left a dash on that game long after everything
-    was working again.
-
-Run: python3 -m pytest tests/unit/test_players_cache.py
+A count and a failure are not the same kind of fact. A count is context and can
+be reused for fifteen minutes; a failure is about right now, so it is cached
+only briefly, or a minute of bad connectivity leaves a dash for the full window.
 """
 
 import asyncio

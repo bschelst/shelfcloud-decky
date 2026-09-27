@@ -1,14 +1,8 @@
 # Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """Installing a browser from the panel.
 
-SteamOS ships no browser, so a fresh Deck cannot play anything until one is
-installed. The panel used to say "go to Desktop Mode" and stop there.
-
-What is checked here is mostly what must NOT happen: this is the one feature
-that downloads software onto someone's machine, and it takes an app id from
-the frontend and puts it in an argv.
-
-Run: python3 -m pytest tests/unit
+Mostly about what must NOT happen: this feature downloads software and takes an
+app id from the frontend straight into an argv.
 """
 
 import os
@@ -53,8 +47,8 @@ def test_the_install_command_is_argv_not_a_shell_string():
 
 
 def test_the_install_is_per_user_and_needs_no_root():
-    """Plugin backends run as `deck`, verified on hardware. A --system install
-    would need a polkit prompt, which Game Mode cannot show."""
+    """Backends run as `deck`. A --system install needs a polkit prompt Game
+    Mode cannot show."""
     argv = browsers.install_command("com.google.Chrome")
     assert "--user" in argv
     assert "--system" not in argv
@@ -72,8 +66,8 @@ def test_it_installs_from_flathub():
 
 
 def test_the_remote_command_is_idempotent():
-    """Run unconditionally before every install, so it must be a no-op when
-    the remote is already there — which it is on stock SteamOS."""
+    """Runs before every install, so it must be a no-op when the remote is
+    already there."""
     argv = browsers.ensure_flathub_command()
     assert "--if-not-exists" in argv
     assert "--user" in argv
@@ -81,8 +75,7 @@ def test_the_remote_command_is_idempotent():
 
 
 def test_the_timeout_is_generous_but_finite():
-    """A fresh Deck pulls the ~300 MB runtime too; a wedged download must still
-    end in a failure the user can see rather than a permanent spinner."""
+    """A wedged download must end in a visible failure, not a forever spinner."""
     assert 5 * 60 <= browsers.INSTALL_TIMEOUT <= 30 * 60
 
 
@@ -129,8 +122,7 @@ def test_both_are_offered_on_a_bare_deck(monkeypatch):
 
 
 def test_the_offer_list_is_a_copy(monkeypatch):
-    """The caller serialises it to the frontend; mutating it must not corrupt
-    the module-level list for the next call."""
+    """Mutating the returned list must not corrupt the module-level one."""
     monkeypatch.setattr(browsers, "detect_browsers", lambda: [])
     first = browsers.installable_browsers()
     first[0]["label"] = "tampered"
@@ -141,7 +133,7 @@ def test_the_offer_list_is_a_copy(monkeypatch):
 
 def test_a_user_install_is_detected(monkeypatch, tmp_path):
     """--user writes to ~/.local/share/flatpak, which must be scanned or the
-    install would succeed and the panel would still say no browser."""
+    panel would still say no browser after a good install."""
     app_dir = tmp_path / "app" / "com.microsoft.Edge"
     app_dir.mkdir(parents=True)
     monkeypatch.setattr(browsers, "FLATPAK_ROOTS", [str(tmp_path / "app")])

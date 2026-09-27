@@ -1,15 +1,8 @@
 // Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 //
-// A Steam call that never comes back must not stop the sync.
-//
-// The sync already survived a call that FAILS -- each artwork slot is wrapped
-// so one bad picture does not cost the others. It did not survive a call that
-// never settles, which is a different thing: a catch never runs, the await
-// just sits there, and because the loop is serial every game behind it stops
-// too. SetCustomArtworkForApp did exactly that twice on an 881-game library:
-// no error, no CPU, no network, no further grid files, and a Cancel button
-// that could do nothing because the loop reading the cancel flag was never
-// reached again.
+// A Steam call that never comes back must not stop the sync. A failing call was
+// already handled per slot; one that never settles was not -- the serial loop
+// just sat there, and even Cancel could not run.
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -21,8 +14,7 @@ describe("waiting on a Steam call", () => {
   });
 
   it("treats a rejection as the slot not happening, not as a throw", async () => {
-    // The callers skip a failed slot and carry on. Making this throw would
-    // only mean writing the same catch at every call site.
+    // callers skip a failed slot and carry on, so no throw here.
     await expect(withTimeout(Promise.reject(new Error("nope")), "late"))
       .resolves.toBe("late");
   });
@@ -34,7 +26,7 @@ describe("waiting on a Steam call", () => {
       const guarded = withTimeout(never, "late", 15000);
 
       await vi.advanceTimersByTimeAsync(14000);
-      // Still waiting, as it should be -- these calls are allowed to be slow.
+      // still waiting, slow calls are allowed
       let settled = false;
       void guarded.then(() => { settled = true; });
       await Promise.resolve();
@@ -48,8 +40,8 @@ describe("waiting on a Steam call", () => {
   });
 
   it("ignores a late answer that arrives after it gave up", async () => {
-    // The abandoned promise cannot be cancelled, so it may still settle. By
-    // then nobody is listening, and it must not resolve the result twice.
+    // the abandoned promise may still settle, but nobody listens now and it
+    // must not resolve twice.
     vi.useFakeTimers();
     try {
       let release: (v: string) => void = () => {};
@@ -67,8 +59,7 @@ describe("waiting on a Steam call", () => {
 
 describe("steamCall", () => {
   it("flattens every outcome to the same 'it is over now'", async () => {
-    // Value, rejection and never all mean the same thing to the sync: stop
-    // waiting on this one and move to the next game.
+    // value, rejection and never all mean the same: stop and move on.
     await expect(steamCall(Promise.resolve(123))).resolves.toBeUndefined();
     await expect(steamCall(Promise.reject(new Error("x")))).resolves.toBeUndefined();
 
@@ -83,7 +74,7 @@ describe("steamCall", () => {
   });
 
   it("accepts a non-promise without waiting for anything", async () => {
-    // Not every Steam call hands back a promise; some return immediately.
+    // not every Steam call hands back a promise
     await expect(steamCall(undefined)).resolves.toBeUndefined();
   });
 });

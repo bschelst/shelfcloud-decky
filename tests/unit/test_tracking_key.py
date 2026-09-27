@@ -1,15 +1,10 @@
 # Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
-"""One tile per game was a fine assumption until a game could have three.
+"""One tile per game was fine until a game could have three.
 
-With sync_all_providers on, Fortnite becomes a Boosteroid tile, a Luna tile and
-a GeForce NOW tile. They all carry game id 42, and synced.json was a map keyed
-by game id — so the second tile overwrote the first in the record and the first
-became an orphan nothing would ever clean up.
-
-The key is composite now whether or not the setting is on. A key that changes
-shape when a toggle flips orphans every tile the moment it is flipped.
-
-Run: python3 -m pytest tests/unit
+With sync_all_providers on, Fortnite is three tiles all carrying game id 42, and
+synced.json was keyed by game id, so tiles overwrote each other into orphans.
+The key is composite now whether or not the setting is on — a key that changes
+shape when the toggle flips would orphan every tile at once.
 """
 
 import os

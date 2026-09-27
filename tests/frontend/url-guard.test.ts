@@ -1,12 +1,8 @@
 // Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 //
-// What may be handed to Steam's URL handler.
-//
-// `login_url` arrives from the gateway and is pasted into
-// `steam://openurl/${url}`, which Steam parses as a command. Nothing checked
-// it: whatever the server said went straight to that parser. The launcher has
-// held its own launch URLs to an allowlist from the beginning; this is the
-// same rule at the other door.
+// What may be handed to Steam's URL handler. `login_url` from the gateway is
+// pasted into `steam://openurl/${url}` and parsed as a command, so it needs the
+// same allowlist the launch URLs already get.
 
 import { describe, expect, it } from "vitest";
 
@@ -18,8 +14,7 @@ describe("addresses that are fine", () => {
   });
 
   it("accepts a hostname with a hyphen", () => {
-    // The first version of this guard rejected every one of these: its
-    // character class read "\s -", which is whitespace, space AND hyphen.
+    // an early version rejected these: its char class "\s -" ate the hyphen.
     expect(isSafeExternalUrl("https://my-gateway.example.com/sign-in")).toBe(true);
   });
 
@@ -46,9 +41,8 @@ describe("addresses that are not", () => {
   });
 
   it("accepts an empty authority, which the parser normalises away", () => {
-    // Checked against the runtime rather than assumed: new URL() turns
-    // "https:///nowhere" into host "nowhere". It is a real https address, so
-    // refusing it would be the guard being wrong, not strict.
+    // new URL() turns "https:///nowhere" into host "nowhere", a real https
+    // address, so refusing it would be wrong not strict.
     expect(isSafeExternalUrl("https:///nowhere")).toBe(true);
   });
 
@@ -68,8 +62,7 @@ describe("addresses that are not", () => {
 });
 
 describe("values that are not even strings", () => {
-  // The gateway can answer with anything. null, a number and an object all
-  // reached this function before it existed.
+  // the gateway can answer with anything, not only strings.
   it("refuses them without throwing", () => {
     for (const value of [null, undefined, 0, 1, {}, [], true, NaN]) {
       expect(isSafeExternalUrl(value)).toBe(false);

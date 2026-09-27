@@ -1,27 +1,18 @@
 // Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 //
-// Setting a page's name as its logo.
-//
-// Steam draws the logo slot over the hero and uses it INSTEAD of the title, so
-// a tile with one shows a picture where its name would be. Every page somebody
-// added was handed the Shelfcloud wordmark, which meant a shelf of pages all
-// announced themselves as Shelfcloud and the single thing identifying each one
-// was the thing being covered up.
-//
-// The drawing itself cannot be exercised here — there is no canvas in this
-// suite — so the layout is a pure function taking a measuring callback, and
-// that is what these tests drive. It is also where the bugs are: a logo that
-// overflows its canvas is clipped by Steam with no warning, and a name that
-// silently renders as nothing looks exactly like the bug this replaces.
+// Setting a page's name as its logo. Steam draws the logo slot instead of the
+// title, and every page got the same Shelfcloud wordmark, so a shelf of them
+// all read "Shelfcloud". There is no canvas here, so the layout is a pure
+// function taking a measuring callback -- and that is where the bugs are: Steam
+// clips an overflowing logo with no warning.
 
 import { describe, expect, it } from "vitest";
 
 import { logoLayout, LOGO_W, LOGO_H } from "../../src/lib/pagelogo";
 import { ellipsise } from "../../src/lib/textfit";
 
-/** A predictable stand-in for canvas text measurement: every glyph is 0.55em.
- *  Not a real font, and it does not need to be — what is under test is the
- *  arithmetic that consumes the measurement. */
+/** Stand-in for canvas text measurement: every glyph is 0.55em. The arithmetic
+ *  around the measurement is what is under test, not a real font. */
 const measure = (text: string, size: number) => text.length * size * 0.55;
 
 const widthOf = (layout: { lines: string[]; size: number }) =>
@@ -48,8 +39,7 @@ describe("fitting the name", () => {
   });
 
   it("never lets the words run past the canvas", () => {
-    // The failure Steam gives no warning about: it clips, and the name is
-    // half there with no indication anything was cut.
+    // Steam clips with no warning, leaving the name half there.
     for (const name of [
       "Wiki",
       "Schelstraete Bart",
@@ -72,27 +62,19 @@ describe("fitting the name", () => {
   });
 
   it("fills the canvas rather than floating in the middle of it", () => {
-    // Steam pins the logo against the bottom of the hero, so empty canvas
-    // under the artwork becomes a gap under the words and the whole logo
-    // rides high -- which is exactly what Disney/Pixar WALL-E did on a 360
-    // tall canvas, where the content only ever reached 71% of the height.
-    //
-    // The bound comes off Steam's own CDN, not off taste. Real logos put
-    // their content between roughly 20% and 85%: Hades 19..87, Hollow Knight
-    // 24..88, Cyberpunk 27..79, Terraria 25..78, and Portal 2 fills a 640x191
-    // canvas completely. Leave at most 20% of the height empty underneath.
+    // Steam pins the logo against the bottom of the hero, so empty canvas below
+    // becomes a gap and the logo rides high (WALL-E only reached 71%). Real
+    // logos fill roughly 20%..85% of the height, so leave at most 20% empty.
     const layout = logoLayout("Anything", measure);
     const bottom = layout.mark.y + layout.mark.size;
     expect(bottom / LOGO_H).toBeGreaterThan(0.8);
-    // Symmetric: the mark is centred, so the same holds above it.
+    // symmetric: the mark is centred, so the same holds above it.
     expect(layout.mark.y / LOGO_H).toBeLessThan(0.2);
   });
 
   it("centres the mark and words as one group in the canvas", () => {
-    // The bug this pins: the mark was pinned to the left margin, so a short
-    // name left the group off to one side and the provider chip Steam draws
-    // under the logo slot floated to the right of the mark instead of under
-    // it. A name that fits without clamping should sit dead centre.
+    // the mark used to be pinned left, so a short name sat off to one side and
+    // the provider chip floated wrong. A name that fits should sit dead centre.
     const layout = logoLayout("Wiki", measure);
     const left = layout.mark.x;
     const right = layout.textLeft + layout.textWidth;

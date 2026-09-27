@@ -1,11 +1,8 @@
 # Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """The About box reports the version Decky provides, or admits it does not know.
 
-_version() now reads decky.DECKY_PLUGIN_VERSION rather than parsing package.json
-itself — Decky already reads the version from package.json and exposes it as an
-environment variable, so the plugin does not need a second copy of that logic.
-
-Run: python3 -m pytest tests/unit
+_version() reads decky.DECKY_PLUGIN_VERSION rather than parsing package.json
+again — Decky already exposes it as an env variable.
 """
 
 import os

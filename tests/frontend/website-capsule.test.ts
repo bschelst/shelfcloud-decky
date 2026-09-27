@@ -2,13 +2,9 @@
 //
 // Which tiles get a capsule drawn for them, and what it is drawn from.
 //
-// pagecapsule.test.ts covers the composition. This covers the wiring, which is
-// a separate thing and broke separately: a renderer that works perfectly is
-// worth nothing if the sync never calls it, calls it for real games too, or
-// hands it the wrong picture to draw the mark from.
-//
-// There is no canvas in this suite, so the renderer is replaced by a stub. The
-// assertions are about who it is called for and what comes back out at Steam.
+// pagecapsule.test.ts covers the composition; this covers the wiring: who the
+// renderer is called for, and what picture it is handed. No canvas here, so the
+// renderer is a stub.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -93,17 +89,15 @@ describe("a website tile gets its name on the tile", () => {
   });
 
   it("draws it for the published page too", async () => {
-    // The Shelfcloud page has the same problem as anybody else's: its capsule
-    // is the bare mark, and a mark is not a name.
+    // the published page has the same problem: its capsule is a mark, not a name.
     await syncLibrary([page({ provider: "shelfcloud", name: "Shelfcloud Website" })], {}, callbacks());
     expect(renderPageCapsule).toHaveBeenCalledWith("Shelfcloud Website", expect.anything());
     expect(capsuleBytes).toBe("DRAWN");
   });
 
   it("draws the mark from the icon, never from the capsule", async () => {
-    // The icon is the 256px square mark. The capsule is 600x900 with the cloud
-    // already centred in it, so drawing THAT into the square would give a
-    // squashed cloud in a box.
+    // draw from the icon (256px square mark), not the capsule (600x900), which
+    // would squash the cloud into a box.
     await syncLibrary([page()], {}, callbacks());
     expect(renderPageCapsule).toHaveBeenCalledWith(
       expect.anything(),
@@ -114,30 +108,20 @@ describe("a website tile gets its name on the tile", () => {
 
 describe("reaching tiles that are already on a shelf", () => {
   it("changes a website tile's fingerprint", async () => {
-    // The gateway serves the same nameless capsule at the same URL, so nothing
-    // the fingerprint is built from moved. Without a marker of our own, every
-    // website tile already synced would keep the blank capsule forever.
+    // same nameless capsule at the same URL, so the fingerprint would not move.
+    // without our own marker, already-synced website tiles keep the blank capsule.
     const before = `${ART_REVISION}|||||`;         // the shape before this change
     expect(artworkFingerprint(page())).not.toBe(before);
     expect(artworkFingerprint(page())).toContain("w1");
   });
 
   it("leaves every game's fingerprint exactly as it was", async () => {
-    // The reason the marker is website-only rather than a bump of ART_REVISION.
-    // Disturbing this re-downloads four slots for the whole library — hundreds
-    // of games — to repaint a handful of website tiles.
-    //
-    // Pinned byte for byte rather than by prefix. The marker has to be mixed
-    // INTO the first field: carrying it as a field of its own would leave a
-    // game's fingerprint still starting "7|" while shifting every value one
-    // place along, so a prefix check would pass while the whole library
-    // re-synced anyway.
+    // why the marker is website-only, not an ART_REVISION bump: that would
+    // re-download four slots for the whole library. Pinned byte for byte because
+    // the marker is mixed into the first field, not added as its own.
     const game = page({ provider: "geforce_now", artwork: { capsule: "https://cdn.test/c" } });
-    // Against the CURRENT revision, not a literal. The point of this test is
-    // that the website marker stays out of a game's fingerprint and does not
-    // shift the fields along -- neither of which has anything to do with what
-    // ART_REVISION happens to be, and pinning the digit made a deliberate
-    // bump look like a regression in the website marker.
+    // against the CURRENT revision, not a literal digit: this test is about the
+    // marker staying out of a game's fingerprint, not about the revision value.
     expect(artworkFingerprint(game)).toBe(`${ART_REVISION}|https://cdn.test/c||||`);
     expect(artworkFingerprint(game)).not.toContain("w1");
   });
@@ -162,8 +146,7 @@ describe("what it leaves alone", () => {
   });
 
   it("keeps the gateway capsule when there is no icon to draw with", async () => {
-    // Rather than drawing a capsule with no mark on it. A missing icon is a
-    // failed download, and the tile it had before is better than half a tile.
+    // a missing icon is a failed download; keep the old tile over a markless one.
     const noIcon = page();
     delete (noIcon.artwork_proxy as Record<string, string>).icon;
     await syncLibrary([noIcon], {}, callbacks());
@@ -172,8 +155,7 @@ describe("what it leaves alone", () => {
   });
 
   it("keeps the gateway capsule when drawing fails", async () => {
-    // Canvas refused, or Steam's UI has no 2d context. The tile still gets a
-    // picture; it is just the old one.
+    // canvas refused; the tile still gets a picture, just the old one.
     vi.mocked(renderPageCapsule).mockResolvedValue(undefined);
     await syncLibrary([page()], {}, callbacks());
     expect(capsuleBytes).toBe("bytes:capsule");

@@ -1,17 +1,10 @@
 // Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 //
-// Taking games OUT of a provider collection when they no longer belong there.
-//
-// Filing only ever added, so a tile stayed in the collection it was first put
-// in. Fortnite is genuinely on Luna, Boosteroid and GeForce NOW; it was filed
-// under Luna and then launched GeForce NOW, because the collection is chosen
-// at sync time and the launch URL is resolved later by the gateway, which
-// reads the user's preferred service. Neither half was wrong — nothing ever
-// reconciled them.
-//
-// These collections are visible in the user's own library, so the two limits
-// below matter more than the removal itself: only collections named
-// "… (Shelfcloud)", and only apps Shelfcloud manages.
+// Taking games OUT of a provider collection when they no longer belong. Filing
+// only ever added, so a tile stayed where it was first put: Fortnite got filed
+// under Luna at sync time but launches GeForce NOW, and nothing reconciled the
+// two. These collections show in the user's own library, so the two limits
+// matter most: only "… (Shelfcloud)" collections, and only apps we manage.
 
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -64,7 +57,7 @@ describe("a game that moved provider leaves the old collection", () => {
 
     expect(collections[0].removed).toEqual([[42]]);
     expect(collections[0].saves).toBe(1);
-    // And is left alone where it does belong.
+    // left alone where it does belong.
     expect(collections[1].removed).toEqual([]);
     expect(collections[1].saves).toBe(0);
   });
@@ -72,9 +65,8 @@ describe("a game that moved provider leaves the old collection", () => {
   it("removes a game that left the library altogether", async () => {
     collections.push(collection(LUNA, [42]));
 
-    // Filed nowhere this sync, but Shelfcloud tracked it before — the shortcut
-    // has just been deleted, and without this it sits in the collection for
-    // good.
+    // filed nowhere this sync but tracked before: the shortcut was deleted, and
+    // without this it sits in the collection for good.
     await pruneProviderCollections([], new Set([42]));
 
     expect(collections[0].removed).toEqual([[42]]);
@@ -94,7 +86,7 @@ describe("a game that moved provider leaves the old collection", () => {
 
 describe("what it must not touch", () => {
   it("leaves a game the user filed there by hand", async () => {
-    // 99 is not Shelfcloud's: somebody dragged their own game in here.
+    // 99 is not ours: somebody dragged their own game in here.
     collections.push(collection(LUNA, [42, 99]));
 
     await pruneProviderCollections([{ appId: 42, provider: "geforce_now" }],
@@ -105,8 +97,7 @@ describe("what it must not touch", () => {
   });
 
   it("leaves collections that are not ours", async () => {
-    // A bare provider name is the user's own collection, which is exactly why
-    // ours carry the suffix.
+    // a bare provider name is the user's own collection, so ours carry a suffix.
     collections.push(collection("Amazon Luna", [42]));
     collections.push(collection("Favourites", [42]));
 
@@ -119,8 +110,8 @@ describe("what it must not touch", () => {
   });
 
   it("removes nothing when the sync filed nothing and tracked nothing", async () => {
-    // An empty managed set is the "we know of no apps" case — a failed sync
-    // must not read as "every collection should be emptied".
+    // an empty managed set means "we know of no apps"; a failed sync must not
+    // read as "empty every collection".
     collections.push(collection(LUNA, [42, 43]));
 
     await pruneProviderCollections([], new Set());
@@ -137,7 +128,7 @@ describe("it survives a collection that misbehaves", () => {
     collections.push(broken);
     collections.push(collection(GFN, [42]));
 
-    // Filed under neither, so both would be pruned; the first throws.
+    // filed under neither, so both would be pruned; the first throws.
     await expect(
       pruneProviderCollections([{ appId: 42, provider: "boosteroid" }], new Set([42])),
     ).resolves.toBeDefined();

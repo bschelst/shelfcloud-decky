@@ -2,17 +2,11 @@
 //
 // Backend calls must not bury Decky's socket, and must notice a dead one.
 //
-// Measured on hardware mid-sync: DeckyBackend.ws.readyState was CLOSED with
-// 553 calls outstanding and the request counter still climbing. Nothing threw
-// -- the promises simply never settled -- so the plugin did not fail, it
-// stopped, and every await in the sync hung at once. Seven attempts went into
-// finding "the call that hangs" when the answer was all of them, from the
-// moment the socket went.
+// On hardware the socket went CLOSED with hundreds of calls outstanding and
+// nothing threw: the promises never settled, so the whole sync hung.
 //
-// Each test takes a FRESH copy of the module. The in-flight count lives at
-// module scope, and a test that deliberately leaves calls pending would
-// otherwise spend the next test's slots -- which is the same "state outlives
-// the thing that made it" trap the job store had.
+// Each test takes a FRESH copy of the module: the in-flight count is at module
+// scope, so pending calls left by one test would spend the next test's slots.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -47,10 +41,8 @@ beforeEach(() => {
 
 describe("a socket that has died", () => {
   it("waits for the socket to come back rather than failing at once", async () => {
-    // Measured on hardware: the socket CYCLES -- ready, closed, ready --
-    // dozens of times a minute, because several Steam renderer contexts each
-    // hold a connection and Decky's router keeps one. Refusing on the spot
-    // turned a gap of a few seconds into a failed sync.
+    // the socket cycles ready/closed many times a minute. Refusing on the spot
+    // turned a short gap into a failed sync.
     vi.useFakeTimers();
     try {
       const { guarded } = await freshRpc();
@@ -89,9 +81,8 @@ describe("a socket that has died", () => {
   });
 
   it("still calls when Decky exposes no socket to inspect", async () => {
-    // A Decky that arranges this differently must not be treated as broken:
-    // refusing on a missing internal would disable the plugin over a detail
-    // it cannot see.
+    // no socket to inspect must not count as broken: that would disable the
+    // plugin over an internal it cannot see.
     const { guarded, socketUsable } = await freshRpc();
     socket(undefined);
     expect(socketUsable()).toBe(true);
@@ -101,14 +92,12 @@ describe("a socket that has died", () => {
   });
 
   it("frees its slot even when the call is refused", async () => {
-    // A run of failures must not permanently cost slots, or it wedges the
-    // plugin as surely as the dead socket did.
+    // failures must not permanently cost slots, or the plugin wedges.
     vi.useFakeTimers();
     try {
       const { guarded, rpcLoad } = await freshRpc();
       socket(3);
-      // Four at a time, each waiting out the full window before giving up,
-      // so ten of them take three waves rather than one.
+      // four at a time, each waiting the full window, so ten take three waves.
       const failures = [];
       for (let i = 0; i < 10; i++) failures.push(guarded("x")().catch(() => "refused"));
       await vi.advanceTimersByTimeAsync(90000);
@@ -122,11 +111,8 @@ describe("a socket that has died", () => {
 
 describe("a call that never comes back", () => {
   it("gives its slot back instead of holding it forever", async () => {
-    // The freeze, in one test. withTimeout at the call site gives up WAITING
-    // on a promise but cannot cancel it, so the abandoned call still sat in
-    // withSlot holding a permit. Four of those and every later call queued
-    // behind permits that were never coming back -- the plugin did not fail,
-    // it went quiet, which is what "stuck on Loading..." was.
+    // the freeze in one test: withTimeout gives up waiting but cannot cancel, so
+    // an abandoned call kept its permit. Four of those and everything queued behind.
     vi.useFakeTimers();
     try {
       const { guarded, rpcLoad } = await freshRpc();
@@ -163,11 +149,8 @@ describe("a call that never comes back", () => {
 
 describe("a message too big for the socket", () => {
   it("is refused rather than sent", async () => {
-    // aiohttp CLOSES a websocket on a message over 4 MB instead of raising.
-    // Nothing reports it: the socket stops, every outstanding promise stays
-    // pending forever, and the log ends mid-sentence. Two freezes were this --
-    // a hero image, then an icon -- and each cost a day, because the failure
-    // erases its own evidence.
+    // aiohttp CLOSES a websocket on a message over 4 MB instead of raising, and
+    // nothing reports it: every outstanding promise then hangs forever.
     const { guarded } = await freshRpc();
     const huge = "x".repeat(4 * 1024 * 1024);
     await expect(guarded("save_icon")(1, huge)).rejects.toThrow(/save_icon/);
@@ -200,9 +183,8 @@ describe("a message too big for the socket", () => {
 
 describe("the panel never queues behind a sync", () => {
   it("keeps a slot free for an interactive call", async () => {
-    // The sync issues thousands of calls and holds every permit for the fifty
-    // seconds it runs, so opening Quick Access mid-sync left get_status behind
-    // all of it -- the panel sat on "Loading…" for half a minute.
+    // the sync holds every permit for the whole run, so opening Quick Access
+    // mid-sync left get_status queued behind all of it for half a minute.
     const { guarded, rpcLoad } = await freshRpc();
     const background = guarded("fetch_artwork", true);
     for (let i = 0; i < 20; i++) void background();

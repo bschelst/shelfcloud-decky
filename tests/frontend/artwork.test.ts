@@ -2,23 +2,9 @@
 //
 // Artwork ordering and concurrency.
 //
-// Each tile has four art slots, and every one is a separate download through
-// the Python backend (Steam's client blocks the direct fetches: SteamGridDB
-// sends no CORS header and the gateway is plain HTTP on an HTTPS page). They
-// used to be fetched strictly one after another, so every game cost four round
-// trips end to end and artwork trickled in for minutes during a large
-// "add all my games".
-//
-// Two properties are asserted here because both are invisible from the code
-// reading correct — a sequential version and a parallel one look almost
-// identical on the page:
-//
-//   1. the capsule, the only slot visible in the library grid, is applied
-//      before the three that back the detail page
-//   2. the downloads actually overlap
-//
-// Applying stays sequential: SetCustomArtworkForApp writes Steam's own library
-// state, and the time is in the downloads anyway.
+// Four art slots per tile, each a separate backend download. Two things must
+// hold: the capsule (only slot shown in the grid) goes on first, and the
+// downloads overlap. Applying stays sequential on purpose.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -117,8 +103,7 @@ describe("ordering", () => {
   });
 
   it("writes to Steam one slot at a time", async () => {
-    // Concurrent writes to one appId are not documented as safe, and there is
-    // nothing to win: the downloads are the slow part.
+    // one write to an appId at a time; nothing to win, downloads are the slow part.
     let writesInFlight = 0;
     let peakWrites = 0;
     const apps = (globalThis as never as { SteamClient: { Apps: Record<string, unknown> } }).SteamClient.Apps;
@@ -192,14 +177,8 @@ describe("resilience", () => {
   });
 
   it("uses the gateway for a slot that has no direct URL at all", async () => {
-    // The website-tile case, and the one the test above does NOT cover: that
-    // one gives every slot a direct URL and makes the fetch fail. Here the
-    // direct URL is absent, which is what the gateway serves art off its own
-    // disk for — a catalogue row with a null capsule whose
-    // /api/artwork/<id>/capsule still answers with a picture.
-    //
-    // fetchSlot used to return early on a missing direct URL and never look at
-    // the proxy, so exactly the tiles that only have a fallback got nothing.
+    // a slot with no direct URL at all must still use the gateway. fetchSlot
+    // used to return early on a missing URL, so fallback-only tiles got nothing.
     const seen: string[] = [];
     vi.mocked(fetchArtwork).mockImplementation(async (url: string) => {
       seen.push(url);
@@ -223,9 +202,8 @@ describe("resilience", () => {
   });
 
   it("a slot with neither a URL nor a proxy is simply left empty", async () => {
-    // Website tiles have no logo on purpose: an empty logo slot is how Steam
-    // knows to draw the tile's name instead of a picture. That must stay a
-    // quiet no-op rather than becoming a failed download.
+    // empty logo is on purpose: Steam then draws the name. Must be a quiet
+    // no-op, not a failed download.
     vi.mocked(fetchArtwork).mockImplementation(async () => ({
       ok: true, base64: "aGk=", kind: "png",
     }));
@@ -242,10 +220,8 @@ describe("resilience", () => {
   });
 
   it("stops between tiles when asked, leaving the ones it made intact", async () => {
-    // "Add all my games" walks a whole library and there was no way out of it.
-    // Checked BETWEEN tiles on purpose: a tile is a shortcut plus artwork plus
-    // a collection entry, and stopping mid-tile would leave a nameless entry
-    // with no art that nothing tracks.
+    // stop is checked between tiles, not mid-tile: a half-made tile (shortcut +
+    // art + collection entry) would leave a nameless orphan.
     const games = [GAME, { ...GAME, game_id: 2 }, { ...GAME, game_id: 3 }];
     let seen = 0;
     const result = await syncLibrary(games, {}, {
@@ -259,11 +235,8 @@ describe("resilience", () => {
   });
 
   it("a cancel never drops the mandatory page, however early it comes", async () => {
-    // Cancelling "add all my games" means "stop the bulk", not "stop at
-    // whatever the loop happened to reach". The published page is pushed to
-    // every account and custom pages were typed in by hand, so they are done
-    // first AND exempt — a cancel aimed at three hundred owned games must not
-    // cost the handful that were deliberate.
+    // cancel means "stop the bulk", not "stop wherever the loop got to". Pages
+    // are done first and are exempt, so a cancel never drops them.
     const games = [
       { ...GAME, game_id: 1, provider: "boosteroid" },
       { ...GAME, game_id: 2, provider: "geforce_now" },
@@ -296,12 +269,8 @@ describe("resilience", () => {
   });
 
   it("stops DELETING when asked, which is the case cancel did nothing for", async () => {
-    // Reported as: press Remove all games, press Cancel, the button changes to
-    // "Stopping…" and every remaining tile is deleted anyway.
-    //
-    // The stop was checked in the ADD loop only. "Remove all games" passes an
-    // empty desired list, so the add loop has nothing to do and execution
-    // falls straight into the removal loop, which never asked.
+    // Remove all + Cancel used to delete everything anyway: the stop was checked
+    // in the add loop only, and remove passes an empty desired list.
     const tracked = Object.fromEntries(
       [1, 2, 3, 4, 5].map((id) => [String(id), {
         app_id: 1000 + id, name: `Game ${id}`, launch: "", art: "",
@@ -351,13 +320,8 @@ describe("resilience", () => {
 });
 
 describe("the icon", () => {
-  // An icon is NOT a library asset. Steam stores it in shortcuts.vdf as a file
-  // path and reads that file whenever it draws the icon, so it goes through
-  // SetShortcutIcon with a path -- not SetCustomArtworkForApp with bytes.
-  //
-  // The first attempt used asset type 4 through SetCustomArtworkForApp, a
-  // value inferred from a comment rather than verified, and artwork vanished
-  // from tiles afterwards. These tests exist so that cannot come back.
+  // An icon is NOT a library asset: it goes through SetShortcutIcon with a file
+  // path, not SetCustomArtworkForApp. Writing it as an asset once wiped tiles.
 
   it("never goes through the custom-artwork call", async () => {
     await syncLibrary([GAME], {}, callbacks());
@@ -414,14 +378,9 @@ describe("the icon", () => {
 
 // --------------------------------------------------- finishing, or not
 //
-// A tile is "done" once its artwork fingerprint is recorded, and a recorded
-// fingerprint is never revisited. So what counts as done decides whether a
-// blank tile ever gets a second chance.
-//
-// It used to be "any slot applied". With the capsule failing while hero and
-// logo succeeded that is two slots, which read as success — and produced a
-// tile blank in the grid whose detail page had full artwork, marked finished
-// and never retried. "007 First Light" looked exactly like that on hardware.
+// A tile is "done" once its fingerprint is recorded, and a recorded one is
+// never revisited. "Any slot applied" was too loose: a failed capsule with
+// hero+logo ok read as done and left a blank tile that never retried.
 
 describe("when artwork counts as finished", () => {
   /** Like callbacks(), but with `record` typed so its arguments can be read.
@@ -448,8 +407,7 @@ describe("when artwork counts as finished", () => {
 
     await syncLibrary([GAME], {}, cb);
 
-    // The other slots still went on. That is the partial success which used to
-    // be mistaken for a whole one.
+    // other slots still went on: the partial success once mistaken for a whole one.
     expect(appliedOrder).not.toContain(CAPSULE);
     expect(appliedOrder.length).toBeGreaterThan(0);
     expect(cb.record.mock.calls[0][4]).toBe("");     // empty = retry next sync
@@ -471,17 +429,13 @@ describe("when artwork counts as finished", () => {
       [{ ...GAME, artwork: { hero: GAME.artwork!.hero, logo: GAME.artwork!.logo } }],
       {}, cb);
 
-    // Nothing to put in the grid, so nothing to retry. Recording it stops the
-    // next sync re-downloading art for a game that will never have a capsule.
+    // no capsule = nothing to retry; recording it stops re-downloading forever.
     expect(cb.record.mock.calls[0][4]).not.toBe("");
   });
 
   it("re-applies art to a tile whose fingerprint predates the current revision", async () => {
-    // Its own game_id, not GAME's. artUnavailable is module-scoped and lives
-    // for the whole file — an earlier test syncs GAME with no artwork at all,
-    // which marks id 1 unavailable for every test after it, and the update
-    // path skips artwork for anything in that set. Reusing the id here tested
-    // that set, not the revision bump.
+    // own game_id, not GAME's: artUnavailable is module-scoped, and an earlier
+    // test marks id 1 unavailable for the rest of the file.
     const game: DesiredGame = { ...GAME, game_id: 77 };
     const cb = recording();
     const tracked = {
@@ -489,9 +443,8 @@ describe("when artwork counts as finished", () => {
         app_id: 4242,
         name: "Fortnite (GeForce NOW)",
         launch: game.options,
-        // Revision 4 — recorded before partial failures were caught, which is
-        // exactly why the bump exists: the URLs still match, so nothing else
-        // would ever look at this tile again.
+        // Revision 4 — recorded before partial failures were caught. URLs still
+        // match, so only the revision bump gets this tile looked at again.
         art: `4|${game.artwork!.capsule}|${game.artwork!.header}`
            + `|${game.artwork!.hero}|${game.artwork!.logo}`,
       },
@@ -504,10 +457,8 @@ describe("when artwork counts as finished", () => {
 });
 
 describe("a slot the gateway no longer offers", () => {
-  // Website tiles used to carry the Shelfcloud cloud as their logo, and Steam
-  // draws the logo INSTEAD OF the title — so every page somebody added showed
-  // the same mark where its name should be. The gateway stopped serving it,
-  // but a slot that is merely skipped keeps whatever was written last time.
+  // Steam draws the logo instead of the title, so a dropped logo slot must be
+  // cleared, not just skipped — else the old mark stays where the name should be.
   const noLogo = {
     ...GAME,
     artwork: { capsule: GAME.artwork!.capsule, header: GAME.artwork!.header, hero: GAME.artwork!.hero },
@@ -522,9 +473,8 @@ describe("a slot the gateway no longer offers", () => {
   });
 
   it("does not clear a slot whose download merely failed", async () => {
-    // The opposite case, and the reason the check is on what the entry offers
-    // rather than on whether an image came back: clearing here would wipe good
-    // artwork every time the network hiccuped.
+    // opposite case: clear on what the entry offers, not on a failed download,
+    // or a network hiccup would wipe good artwork.
     vi.mocked(fetchArtwork).mockImplementation(async (url: string) =>
       url.includes("hero") ? { ok: false } : { ok: true, base64: "aGk=", kind: "jpg" });
 
@@ -536,11 +486,8 @@ describe("a slot the gateway no longer offers", () => {
 });
 
 describe("the icon has its own slot", () => {
-  // It used to be taken from the logo, which tied two unrelated things
-  // together: the only way to give a tile an icon was to give it a logo, and
-  // Steam draws a logo INSTEAD OF the title. Every website tile showed the
-  // same mark where its name should be. The gateway now serves a square icon
-  // and no logo for those, so the two can differ.
+  // icon used to come from the logo, which tied them together and hid the name.
+  // Gateway now serves a separate square icon, so the two can differ.
   const withIcon = {
     ...GAME,
     artwork: { ...GAME.artwork!, logo: null, icon: "https://cdn.test/icon.png" },
@@ -557,8 +504,7 @@ describe("the icon has its own slot", () => {
   });
 
   it("never writes the icon as a library asset", async () => {
-    // The whole reason this slot is kept out of BACKGROUND_SLOTS. Writing it
-    // as asset type 4 is what damaged tiles under revision 2.
+    // why the icon is kept out of BACKGROUND_SLOTS: asset type 4 damaged tiles.
     await syncLibrary([withIcon], {}, callbacks());
 
     expect(appliedOrder).not.toContain(ICON);
@@ -566,8 +512,7 @@ describe("the icon has its own slot", () => {
   });
 
   it("still leaves a tile with no logo showing its name", async () => {
-    // The tile gets an icon and the logo slot stays empty — which is the
-    // point: an empty logo is how Steam knows to draw the title.
+    // icon set, logo left empty on purpose — empty logo makes Steam draw the name.
     await syncLibrary([withIcon], {}, callbacks());
 
     expect(clearedSlots).toEqual([LOGO]);
@@ -588,8 +533,7 @@ describe("the icon has its own slot", () => {
 
 describe("the artwork fingerprint", () => {
   it("changes when only the icon changes", async () => {
-    // Otherwise a tile that already exists keeps its stored fingerprint, is
-    // never revisited, and never receives the icon at all.
+    // else an existing tile keeps its old fingerprint and never gets the icon.
     const { artworkFingerprint } = await import("../../src/lib/sync");
     const before = artworkFingerprint(GAME);
     const after = artworkFingerprint({

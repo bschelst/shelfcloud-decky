@@ -1,15 +1,10 @@
 // Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 //
-// Two badges must not be offered the same corner.
-//
-// The provider badge and the players badge are separate components injected
-// into the same hero image, each with its own corner setting. Nothing stopped
-// both being put in the same one, and when that happened they drew on top of
-// each other.
-//
-// Decky's Dropdown has no per-option `disabled` -- SingleDropdownOption is
-// `{ data, label }` and nothing else -- so a corner that cannot be chosen is
-// left OUT of the list rather than greyed out.
+// Two badges must not be offered the same corner. The provider badge and the
+// players badge each have their own corner setting on the same hero image, and
+// nothing stopped both landing in one corner and drawing over each other.
+// Decky's Dropdown has no per-option `disabled`, so a corner that can't be
+// chosen is left OUT of the list rather than greyed out.
 
 import { describe, expect, it } from "vitest";
 
@@ -25,17 +20,15 @@ describe("offering a corner for a badge", () => {
   });
 
   it("offers all six when the other badge is switched off", () => {
-    // `undefined` is how the caller says "nothing is taken" -- a badge that is
-    // not drawn cannot be overlapped, so hiding a corner then would take away
-    // a choice for no reason.
+    // `undefined` means "nothing taken" -- an undrawn badge cannot overlap, so
+    // hiding a corner then would drop a choice for no reason.
     expect(data(cornersExcept(undefined, "tr"))).toEqual(all);
   });
 
   it("keeps my own corner even when it is the one that collides", () => {
-    // A Dropdown whose selectedOption is missing from its own list renders
-    // BLANK. Settings that already collide -- saved before this rule, or
-    // arriving from another device -- must still show what they are set to,
-    // or the control for fixing an overlap is the one that looks broken.
+    // a Dropdown whose selectedOption is not in its own list renders BLANK, so
+    // an already-colliding setting must still show what it is set to -- else the
+    // control for fixing the overlap is the one that looks broken.
     expect(data(cornersExcept("tr", "tr"))).toEqual(all);
   });
 

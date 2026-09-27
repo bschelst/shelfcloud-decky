@@ -1,17 +1,10 @@
 # Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """Writing shortcut icons to disk.
 
-Icons are the one piece of artwork that has to become a real file. Steam takes
-the four library slots as bytes and keeps its own copy; an icon it stores in
-shortcuts.vdf as a PATH and re-reads whenever it draws the icon. Two
-consequences drive everything here:
-
-  - the file must be somewhere durable, NOT the plugin directory, which
-    install-to-deck.sh overwrites on every install
-  - a half-written file is a broken icon, not a missed one, because Steam may
-    read it at any time -- so writes land atomically
-
-Run: python3 -m pytest tests/unit
+Icons are the one artwork that has to be a real file: Steam stores the icon in
+shortcuts.vdf as a PATH and re-reads it whenever it draws. So the file must be
+durable (not the plugin dir, which install overwrites) and written atomically,
+since a half-written file is a broken icon rather than a missed one.
 """
 
 import asyncio
@@ -48,11 +41,9 @@ PNG = base64.b64encode(b"\x89PNG\r\n\x1a\n-pretend-this-is-an-image").decode()
 def _no_real_steam(monkeypatch):
     """Keep these tests off the developer's own Steam install.
 
-    `_icon_dir()` now prefers Steam's grid folder and finds it by looking for
-    a real shortcuts.vdf on the machine running the tests. Without this, every
-    test below would write an icon into whatever Steam install happens to be
-    present. WHICH folder is chosen is covered on its own, with a fake
-    userdata tree, in test_icon_location.py.
+    _icon_dir() finds Steam's grid folder by looking for a real shortcuts.vdf,
+    so without this it would write into whatever install is present. Which
+    folder is chosen is covered in test_icon_location.py.
     """
     monkeypatch.setattr(main.shortcuts, "shortcuts_files", lambda *a, **k: [])
 
@@ -75,12 +66,9 @@ def test_writes_the_image_and_returns_its_path(tmp_path):
 
 
 def test_the_icon_lives_outside_the_plugin_directory(tmp_path):
-    """The plugin directory is overwritten on every install.
-
-    An icon stored there would survive exactly until the next update, then
-    every tile would silently lose its icon with the path still recorded in
-    shortcuts.vdf pointing at a file that no longer exists.
-    """
+    """The plugin dir is overwritten on every install, so an icon stored there
+    would survive only until the next update and then every tile would lose it,
+    with a dead path still recorded in shortcuts.vdf."""
     result = asyncio.run(plugin(tmp_path).save_icon(42, PNG, "png"))
     assert main.decky.DECKY_PLUGIN_DIR not in result["path"]
     assert str(tmp_path) in result["path"]
@@ -172,20 +160,11 @@ def test_forgetting_a_shortcut_with_no_icon_is_not_an_error(tmp_path):
 
 # ------------------------------------------------- saving BY REFERENCE
 #
-# save_icon takes the image as base64, which means the frontend pushes the
-# whole picture back over Decky's websocket. That was the last big message
-# travelling frontend -> backend and the only one never sliced -- and aiohttp
-# CLOSES a websocket on a message over 4 MB rather than raising. A closed
-# socket does not fail a call, it silences it: the promise never settles, and
-# the timeout that would have reported it cannot be delivered either.
-#
-# It was reached on ordinary games, not odd ones. The icon falls back to the
-# CAPSULE when a game ships no icon of its own, and a capsule is 600x900.
-# Measured on hardware: the sync died on the FIRST game of every run, at
-# saveIcon, having logged every step before it and nothing after.
-#
-# The bytes never needed to travel. The backend downloaded that image -- it is
-# what served the slices -- so the icon is named rather than shipped.
+# save_icon takes base64, so the frontend pushes the whole picture over Decky's
+# websocket. aiohttp closes a socket on a message over 4 MB rather than raising,
+# which silences the call: the promise never settles. It hit ordinary games,
+# because the icon falls back to the 600x900 capsule. The backend already
+# downloaded the image (it served the slices), so the icon is named, not shipped.
 
 REAL_PNG = b"\x89PNG\r\n\x1a\n-pretend-this-is-an-image"
 
@@ -203,9 +182,9 @@ def test_saving_by_url_writes_the_file_without_being_handed_the_bytes(tmp_path):
 
 
 def test_saving_by_url_reuses_the_image_already_held(tmp_path):
-    """fetch_artwork keeps the last image so its own slices do not re-download
-    it. The icon is usually THAT image, fetched slice by slice a moment ago, so
-    going back to the CDN would be a second download per game for nothing."""
+    """fetch_artwork keeps the last image so its slices do not re-download it.
+    The icon is usually that same image, so going to the CDN again would be a
+    second download per game for nothing."""
     instance = plugin(tmp_path)
     url = "https://cdn.example/held.png"
     instance._artwork_part = (url, base64.b64encode(REAL_PNG).decode(), "png")
@@ -266,9 +245,8 @@ def test_a_download_that_fails_is_an_error_not_a_crash(tmp_path):
 
 
 def test_saving_by_url_names_the_file_after_the_shortcut(tmp_path):
-    """Unchanged from save_icon, and it still matters: the file lands in
-    Steam's own grid folder, where `<appid>.png` is already Steam's library art
-    for the app with that id."""
+    """The file lands in Steam's grid folder, where `<appid>.png` is already
+    Steam's library art for the app with that id."""
     instance = plugin(tmp_path)
     with mock.patch.object(main.Plugin, "_fetch_image",
                            lambda self, url, headers: ("image/png", REAL_PNG)):

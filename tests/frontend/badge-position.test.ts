@@ -2,15 +2,9 @@
 //
 // Where the badge sits on a game's page.
 //
-// Measured on hardware rather than chosen. The first version inset the sides
-// by 20 and the bottom by 40, and used a top of 40 in one corner and 60 in
-// the other — so on a 360px hero the badge sat 32px above the bottom edge
-// beside a 20px gap to its left. That reads as "not quite lined up" without
-// it being obvious why.
-//
-// And it measured the wrong element: the capsule around the hero reported
-// 342px where the hero image inside it was 360, so the badge floated another
-// 18px above the edge a person actually sees.
+// The numbers are measured on hardware. An early version used mismatched
+// insets so the badge looked "not quite lined up", and measured the capsule
+// (342px) instead of the hero image inside it (360px).
 
 import { describe, expect, it } from "vitest";
 
@@ -18,10 +12,8 @@ import {
   ART_OVERHANG, BADGE_HEIGHT, INSET, TOP_INSET, badgePosition,
 } from "../../src/lib/badgePosition";
 
-/** What the Deck reported for a real game page: the CAPSULE is 342 and the
- *  artwork inside it reaches 360. The capsule is what gets measured, because
- *  its height is settled at first paint and the image's is not — measuring
- *  the image made the badge hop on every page. */
+/** Real numbers from the Deck: capsule 342, artwork inside 360. The capsule is
+ *  measured because its height is settled at first paint; the image's is not. */
 const CAPSULE = 342;
 const ART_BOTTOM = CAPSULE + ART_OVERHANG;
 
@@ -44,8 +36,7 @@ describe("the bottom corners", () => {
   });
 
   it("measures from the BOTTOM edge, not the top of the badge", () => {
-    // The old code placed the badge's top INSET above the hero bottom, which
-    // put its visible edge a whole badge-height further up.
+    // old code put the badge's TOP an inset up, so its edge sat a height too high.
     expect(topOf(badgePosition("bl", CAPSULE))).toBe(ART_BOTTOM - INSET - BADGE_HEIGHT);
   });
 
@@ -57,11 +48,8 @@ describe("the bottom corners", () => {
 
 describe("the top corners", () => {
   it("keeps the two corners at DIFFERENT heights", () => {
-    // Not an oversight, and not ours to tidy: the top-right of a Steam game
-    // page carries its own furniture, so a badge there has further to come
-    // down before it is clear of it. These are the ProtonDB medal's numbers,
-    // arrived at against the real UI. Flattening them to one value put the
-    // top-right badge over the page's own controls.
+    // on purpose: the top-right of the page has its own furniture, so a badge
+    // there sits lower. Flattening the two put the badge over the page controls.
     expect(badgePosition("tl", CAPSULE).top).toBe(`${TOP_INSET.tl}px`);
     expect(badgePosition("tr", CAPSULE).top).toBe(`${TOP_INSET.tr}px`);
     expect(badgePosition("tl", CAPSULE).top)
@@ -88,10 +76,8 @@ describe("before the hero has been measured", () => {
 
 describe("the middle positions", () => {
   it("centres with a transform, not a computed left", () => {
-    // The badge's width changes with the provider's name -- "GeForce NOW" is
-    // wider than "Luna" -- and is not known here. left:50% puts its LEFT EDGE
-    // at the middle; the transform pulls it back by half its own box, which
-    // is resolved at paint time against whatever ended up inside it.
+    // the badge width varies with the name and is not known here. left:50% plus
+    // translateX(-50%) centres it at paint time whatever its width.
     for (const middle of ["tm", "bm"] as const) {
       const style = badgePosition(middle, CAPSULE);
       expect(style.left).toBe("50%");
@@ -101,16 +87,14 @@ describe("the middle positions", () => {
   });
 
   it("hangs the top-middle level with the top-RIGHT", () => {
-    // Not with the top-left. The page's furniture runs across the top, so the
-    // middle has the same clearance to make as the right does. ProtonDB's
-    // medal uses 60 for both, and that is where this comes from.
+    // not the top-left: the furniture runs across the top, so middle needs the
+    // same clearance as right.
     expect(badgePosition("tm", CAPSULE).top).toBe(badgePosition("tr", CAPSULE).top);
     expect(badgePosition("tm", CAPSULE).top).not.toBe(badgePosition("tl", CAPSULE).top);
   });
 
   it("sits the bottom-middle at the same height as the bottom corners", () => {
-    // Only the horizontal placement differs; the distance up from the
-    // artwork's bottom edge is the one the eye compares across all three.
+    // only the horizontal placement differs; the height is what the eye compares.
     expect(badgePosition("bm", CAPSULE).top).toBe(badgePosition("bl", CAPSULE).top);
     expect(badgePosition("bm", CAPSULE).top).toBe(badgePosition("br", CAPSULE).top);
   });

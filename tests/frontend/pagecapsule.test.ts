@@ -1,31 +1,23 @@
 // Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 //
-// Putting a page's name on its capsule.
-//
-// The capsule is the tile you look at on the shelf, and every website tile got
-// the same one: our cloud on navy, no words. Two pages were already
-// indistinguishable; a shelf of them was a wall of identical squares.
-//
-// The drawing cannot be exercised here — there is no canvas in this suite — so
-// the composition is a pure function taking a measuring callback, and that is
-// what these tests drive. It is also where the failures hide: Steam clips a
-// capsule that overflows and says nothing, so a name running off the edge
-// looks like a rendering quirk rather than a fault.
+// Putting a page's name on its capsule. Every website tile got the same cloud
+// on navy with no words, so a shelf of them was a wall of identical squares.
+// No canvas here, so the composition is a pure function taking a measuring
+// callback, and that is where the failures hide: Steam clips an overflow
+// silently.
 
 import { describe, expect, it } from "vitest";
 
 import { capsuleLayout, CAPSULE_W, CAPSULE_H } from "../../src/lib/pagecapsule";
 
-/** A predictable stand-in for canvas text measurement: every glyph is 0.55em.
- *  Not a real font, and it does not need to be — what is under test is the
- *  arithmetic that consumes the measurement. */
+/** Stand-in for canvas text measurement: every glyph is 0.55em. The arithmetic
+ *  around the measurement is what is under test, not a real font. */
 const measure = (text: string, size: number) => text.length * size * 0.55;
 
 const widthOf = (layout: { lines: string[]; size: number }) =>
   Math.max(0, ...layout.lines.map((line) => measure(line, layout.size)));
 
-/** Names worth being rude with. Every one of these is something somebody
- *  could plausibly call a page, plus the two that are not. */
+/** Names worth being rude with -- plausible page names plus the odd ones. */
 const NAMES = [
   "Wiki",
   "Schelstraete Bart",
@@ -46,8 +38,7 @@ describe("fitting the name onto a capsule", () => {
   });
 
   it("has more room to wrap than the logo does", () => {
-    // The capsule is tall, so a long name gets three lines rather than being
-    // shrunk until it is unreadable.
+    // the capsule is tall, so a long name gets three lines, not a tiny size.
     const layout = capsuleLayout("The Hitchhikers Guide To The Galaxy Wiki", measure);
     expect(layout.lines.length).toBeGreaterThan(1);
     expect(layout.lines.length).toBeLessThanOrEqual(3);
@@ -76,7 +67,7 @@ describe("staying inside the tile", () => {
     for (const name of NAMES) {
       const layout = capsuleLayout(name, measure);
       expect(widthOf(layout)).toBeLessThanOrEqual(layout.textWidth + 0.5);
-      // Set centred, so both halves have to clear the edge.
+      // set centred, so both halves have to clear the edge.
       expect(layout.centreX - layout.textWidth / 2).toBeGreaterThanOrEqual(0);
       expect(layout.centreX + layout.textWidth / 2).toBeLessThanOrEqual(CAPSULE_W);
     }
@@ -93,8 +84,7 @@ describe("staying inside the tile", () => {
   });
 
   it("never draws the name over the mark", () => {
-    // They are one stacked group, so this is the invariant that keeps it one:
-    // words starting above the mark's bottom edge would sit on top of it.
+    // one stacked group: words above the mark's bottom edge would overlap it.
     for (const name of NAMES) {
       const layout = capsuleLayout(name, measure);
       expect(layout.textTop).toBeGreaterThanOrEqual(layout.mark.y + layout.mark.size);
@@ -109,9 +99,8 @@ describe("balance", () => {
   });
 
   it("keeps the group centred as the name grows", () => {
-    // Mark and name move together. Without this the mark would be pinned and a
-    // three-line name would hang off the bottom while a one-word page floated
-    // with a third of the tile empty beneath it.
+    // mark and name move together; without it a three-line name hangs off the
+    // bottom while a one-word page floats with the tile half empty.
     const short = capsuleLayout("Wiki", measure);
     const tall = capsuleLayout("The Hitchhikers Guide To The Galaxy Wiki", measure);
     expect(tall.mark.y).toBeLessThan(short.mark.y);

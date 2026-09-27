@@ -1,23 +1,12 @@
 # Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """Losing our own state file must not throw away the user's Steam tiles.
 
-Reconcile works entirely from the tracked map, so an empty map does not mean
-"no tiles" - it means "I have never made any". Every game then reads as
-desired-but-untracked and gets a BRAND NEW tile, while the old ones stay
-behind untracked and uncleaned.
-
-That matters more than a duplicate, because a Steam shortcut's identity IS its
-app id. Playtime, collections, artwork and the per-game CONTROLLER
-CONFIGURATION all hang off it, so recreating a tile silently abandons all of
-it on an app id nothing points at any more.
-
-Seen on a real device: a synced.json.bak containing exactly "{}", and Steam
-holding controller configs for app ids that no current tile uses.
-
-shortcuts.vdf is the authority on what Steam actually has, and every tile
-carries "--game-id N" in its launch options, so it can always be rebuilt.
-
-Run: python3 -m pytest tests/unit/test_state_recovery.py
+Reconcile works from the tracked map, so an empty map reads as "no tiles ever
+made" and every game gets a brand new tile while the old ones leak. Since a
+shortcut's identity is its app id (playtime, collections, artwork, controller
+config all hang off it), that abandons all of it. shortcuts.vdf is the authority
+on what Steam has, and every tile carries "--game-id N", so state is rebuilt
+from it.
 """
 
 import json

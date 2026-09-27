@@ -1,11 +1,8 @@
 # Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """The install state machine in main.py.
 
-Every path matters here because the panel renders straight from this state:
-if `running` is never cleared the user watches a spinner for ever, and if a
-failure is not recorded they see nothing at all and press the button again.
-
-Run: python3 -m pytest tests/unit
+The panel renders straight from this state: a `running` never cleared is a
+forever spinner, a failure not recorded is a button pressed again.
 """
 
 import asyncio
@@ -54,17 +51,10 @@ def run(coro):
 async def install_and_wait(p, app_id, run_result, present=True):
     """Start an install with subprocess.run stubbed, and wait for it.
 
-    Calls past the end of `run_result` get a success rather than running out.
-    _run_install makes a VARIABLE number of subprocess calls — ensure-flathub,
-    install, and on the success path the flatpak override as well — and a
-    side_effect list that runs out raises StopIteration inside a coroutine,
-    where it does not surface as a failed test: the await simply never
-    resolves and the whole suite hangs with no output.
-
-    It did exactly that, on Python 3.11 and not on 3.14, which is worth
-    knowing because 3.11 is what Decky ships on the Deck. The same file
-    already warns against pinning the number of commands a few tests below;
-    this is that lesson again, with teeth.
+    Calls past the end of `run_result` return success. _run_install makes a
+    variable number of subprocess calls, and a side_effect list that runs out
+    raises StopIteration in a coroutine, which just hangs the suite (seen on
+    3.11, which is what Decky ships).
     """
     remaining = list(run_result)
 
@@ -137,11 +127,8 @@ def test_the_remote_is_ensured_before_installing():
         return calls
     calls = run(scenario())
 
-    # Assert the ORDER, which is the thing this test is named for, rather than
-    # the total number of commands. Pinning the count to 2 meant that adding a
-    # third, unrelated step — the --filesystem=/run/udev override that lets the
-    # browser see a controller — failed a test about remote-add ordering, which
-    # says nothing about whether the ordering broke.
+    # assert the order, not the command count: a pinned count breaks when an
+    # unrelated step is added, which says nothing about ordering
     flat = [" ".join(argv) for argv in calls]
     remote_add = next(i for i, c in enumerate(flat) if "remote-add" in c)
     install = next(i for i, c in enumerate(flat) if " install " in f" {c} ")

@@ -1,20 +1,8 @@
 # Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """How big the display is, and how much to scale a web UI on it.
 
-A cloud service's web interface is built for a monitor at arm's length. On a 7"
-handheld it is small; across a room on a television it is smaller still.
-
-The thing this must never do is key off the hardware model. Measured on a Steam
-Deck docked to a 4K television, three different numbers were true at once:
-
-    card0-eDP-1   connected, enabled=disabled   the 7" panel, switched off
-    card0-DP-1    connected, 3840x2160          the television
-    gamescope     1920x1080                     what the browser actually gets
-
-product_name said "Jupiter" throughout, so a "Steam Deck mode" switch would
-have applied the handheld recipe to a television.
-
-Run: python3 -m pytest tests/unit
+Must never key off the hardware model: a docked Deck reports "Jupiter" while
+driving a 4K television, so scaling follows the actual resolution instead.
 """
 
 import os
@@ -34,14 +22,12 @@ def test_the_handheld_gets_the_deck_recipe():
 
 
 def test_a_rotated_panel_reads_the_same():
-    # The Deck's own panel is physically 800x1280 and rotated. Judging by the
-    # short edge means it does not matter which way round it is reported.
+    # judged by the short edge, so rotation does not matter
     assert display.auto_scale(800, 1280) == display.auto_scale(1280, 800)
 
 
 def test_a_television_is_scaled_too():
-    # 1080p is usually a room away, where 1:1 is no more readable than a 7"
-    # screen at arm's length.
+    # 1080p is usually a room away, so 1:1 is not readable enough
     assert display.auto_scale(1920, 1080) == 1.25
 
 
@@ -51,8 +37,7 @@ def test_bigger_displays_get_more():
 
 
 def test_an_ultrawide_is_judged_by_its_height():
-    # 3440x1440 is not a 4K display. Measured on the long edge it would be
-    # scaled to 2.0 and become unusable.
+    # 3440x1440 is not 4K; on the long edge it would wrongly scale to 2.0
     assert display.auto_scale(3440, 1440) == 1.5
 
 
@@ -82,11 +67,8 @@ def test_a_missing_xrandr_does_not_raise():
 
 
 def test_the_drm_fallback_skips_a_connected_but_disabled_panel(tmp_path):
-    """A docked Deck keeps its dark internal panel CONNECTED the whole time.
-
-    Reading it would size everything for a screen nobody is looking at, which
-    is the exact mistake this fallback exists to avoid.
-    """
+    """A docked Deck keeps its dark panel connected; sizing off it would use a
+    screen nobody looks at."""
     panel = tmp_path / "card0-eDP-1"
     tv = tmp_path / "card0-DP-1"
     for folder, enabled, mode in ((panel, "disabled", "800x1280"),
@@ -130,8 +112,7 @@ def test_no_setting_at_all_means_auto():
 
 
 def test_a_setting_that_is_not_a_scale_falls_back_to_auto_and_says_so():
-    # Silently ignoring a value someone typed is how a wrong scale goes
-    # unexplained.
+    # a typed value that cannot be read must be explained, not ignored
     with _at(1280, 800):
         _, _, _, scale, why = display.resolve("enormous")
     assert scale == 1.25
@@ -148,8 +129,7 @@ def test_a_zero_scale_is_refused():
 # -------------------------------------------------------------------- flags
 
 def test_the_window_is_sized_in_scaled_pixels():
-    # 1280x800 at 1.25 is 1024x640 — the numbers the Deck recipe uses, arrived
-    # at rather than hardcoded.
+    # 1280x800 at 1.25 is 1024x640, computed rather than hardcoded
     with _at(1280, 800):
         flags = display.flags("auto")
     assert "--window-size=1024,640" in flags
@@ -157,9 +137,8 @@ def test_the_window_is_sized_in_scaled_pixels():
 
 
 def test_only_one_scale_flag_is_passed():
-    """--device-scale-factor is an older spelling of the same idea and is
-    overridden by --force-device-scale-factor, so passing both says nothing
-    twice."""
+    """--device-scale-factor is the old spelling and gets overridden, so we
+    pass only --force-device-scale-factor."""
     with _at(1280, 800):
         flags = display.flags("auto")
     assert not any(f.startswith("--device-scale-factor") for f in flags)
@@ -173,8 +152,7 @@ def test_no_scale_flag_when_nothing_needs_scaling():
 
 
 def test_an_undetectable_display_gets_no_window_size():
-    # Guessing a size for a display we could not measure is worse than letting
-    # the browser pick its own.
+    # for an unmeasured display, let the browser pick its own size
     with _at(0, 0):
         assert display.flags("auto") == []
 

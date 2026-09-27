@@ -1,17 +1,10 @@
 # Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """Which library entries become a Steam shortcut, now that some are pages.
 
-_to_desired applies two rules, because there are two kinds of tile. A game is
-https-only: its URL is written into a shortcut and opened in a window holding
-live provider sessions. A page goes through weburl instead, which permits http
-and refuses anything inside the user's network.
-
-The two have to agree with the launcher. An entry that becomes a shortcut here
-and is refused there is a tile that does nothing when pressed, with the reason
-in a log file nobody opens — which is exactly how the website tile was broken
-once before, when the gateway's own host was missing from the allowlist.
-
-Run: python3 -m pytest tests/unit
+_to_desired has two rules: a game is https-only, a page goes through weburl
+(http allowed, the user's own network refused). Both must agree with the
+launcher, or a tile becomes a shortcut here and is refused there — a dead tile
+whose reason sits in a log nobody reads.
 """
 
 import os
@@ -50,13 +43,10 @@ def entry(provider, url, name="A page", game_id=4242):
     }
 
 
-# A browser, stubbed.
-#
-# _to_desired returns None when no supported browser is installed, and
-# detect_browsers() reads the real flatpak directories — so without this the
-# whole file passes on a machine that happens to have Chrome and fails on a CI
-# runner and in a container, which is exactly what it did. Nothing here is
-# about browser detection; that has its own tests.
+# A browser, stubbed. _to_desired returns None when no supported browser is
+# installed and detect_browsers() reads real flatpak dirs, so without this the
+# file would pass or fail on whether the machine has Chrome. Detection has its
+# own tests.
 BROWSER = {"app_id": "com.google.Chrome", "label": "Google Chrome"}
 
 
@@ -65,10 +55,8 @@ def desired(game):
     plugin._settings = {"api_token": "t", "browser": BROWSER["app_id"]}
     with mock.patch.object(main.browsers, "resolve_browser", lambda _: dict(BROWSER)):
         made = plugin._to_desired(game)
-    # _to_desired answers with a LIST now — one tile per service a game is on.
-    # Nothing in this file is about that: each case offers a single route and
-    # asks whether it becomes a tile, so the one entry is unwrapped here and
-    # every test below keeps reading the way it did.
+    # _to_desired answers with a list (one tile per service). Each case here
+    # offers a single route, so the one entry is unwrapped.
     return made[0] if made else None
 
 
@@ -84,8 +72,8 @@ def test_a_page_becomes_a_shortcut(provider, url):
     assert made is not None, f"{provider} {url} produced no tile"
     assert made["provider"] == provider
     assert made["url"] == url
-    # The launcher is told which kind of tile this is; without that it would
-    # apply the provider allowlist and refuse its own shortcut.
+    # launcher is told which kind of tile this is, or it applies the provider
+    # allowlist and refuses its own shortcut
     assert "--provider" in made["options"] and provider in made["options"]
 
 
@@ -97,9 +85,9 @@ def test_a_page_becomes_a_shortcut(provider, url):
     "https://example.com\\evil.example/",
 ])
 def test_a_page_pointing_inside_the_network_never_becomes_a_shortcut(url):
-    """Refused here as well as in the launcher. This value came off the network
-    and gets persisted into a Steam shortcut, so the check that keeps it out of
-    the file is separate from the one that keeps it out of the browser."""
+    """Refused here as well as in the launcher: the value comes off the network
+    and is persisted into a shortcut, so keeping it out of the file is a
+    separate check from keeping it out of the browser."""
     assert desired(entry("custom", url)) is None
 
 
@@ -130,9 +118,9 @@ def test_a_game_on_a_private_address_is_refused_by_the_https_rule():
     "http://0x7f.0.0.1/",
 ])
 def test_making_a_shortcut_and_opening_it_reach_the_same_verdict(url):
-    """The property that matters, stated directly: a page entry becomes a tile
-    if and only if the launcher would open it. Both read weburl, so this holds
-    by construction — and this test is what says so if one of them stops."""
+    """A page entry becomes a tile if and only if the launcher would open it.
+    Both read weburl, so it holds by construction, and this test says so if one
+    of them stops."""
     becomes_a_tile = desired(entry("custom", url)) is not None
     would_open = weburl.is_allowed_website_url(url)
     assert becomes_a_tile == would_open, url

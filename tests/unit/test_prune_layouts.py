@@ -1,16 +1,10 @@
 # Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """Removing layout directories an older naming rule left behind.
 
-The name Steam reads was got wrong twice: first the shortcut's own case, then
-lower case, and only then lower case with the characters Steam strips. Each
-attempt wrote a directory and nothing removed the last one -- measured on a
-real Deck, 552 dead directories holding 9.2 MB that Steam had never opened.
-
-This deletes directories, so the guards matter more than the feature. It may
-only remove a directory that is OURS, under a spelling an earlier rule
-produced, and only when the name Steam reads today sits beside it.
-
-Run: python3 -m pytest tests/unit/test_prune_layouts.py
+The name Steam reads was got wrong a few times, and each attempt wrote a
+directory nothing removed (552 dead ones on a real Deck). This deletes
+directories, so the guards matter most: it may only remove a directory that is
+OURS, under an older spelling, and only when today's name sits beside it.
 """
 
 import os
@@ -31,8 +25,7 @@ def deck(tmp_path, monkeypatch):
     cfg = root / "steamapps" / "common" / "Steam Controller Configs" / "123" / "config"
     cfg.mkdir(parents=True)
     # expanduser, not realpath: the code resolves the symlink itself, and
-    # patching realpath would also defeat the containment check the prune
-    # relies on -- which is the guard most worth exercising for real.
+    # patching realpath would defeat the containment guard we want to exercise.
     monkeypatch.setattr(os.path, "expanduser",
                         lambda p: str(root) if p.startswith("~/.steam") else p)
     plugin = main.Plugin()
@@ -66,10 +59,8 @@ def test_it_removes_the_old_spellings(deck):
 
 
 def test_it_never_removes_the_only_copy(deck):
-    """If the current spelling is not there, the old one is all the user has.
-
-    Deleting it would take away a working layout to tidy up a name.
-    """
+    """If the current spelling is not there, the old one is all the user has —
+    deleting it would drop a working layout just to tidy a name."""
     plugin, cfg = deck
     track(plugin, "R.E.P.O. (Boosteroid)")
     only = make(cfg, "R.E.P.O. (Boosteroid)")

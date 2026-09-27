@@ -2,24 +2,15 @@
 //
 // What a provider is CALLED, everywhere a person can read it.
 //
-// `providerLabel` falls back to the raw key when a provider is missing from
-// the table, which means a miss does not fail — it ships. types.ts says so in
-// a comment, and KNOWN_PROVIDERS was exported "for tests that check nothing is
-// missed". No such test was ever written, and two providers were missing for
-// as long as they existed:
-//
-//   * a Steam tile titled "Shelfcloud Website (shelfcloud)"
-//   * a Steam collection called, literally, "custom (Shelfcloud)"
-//
-// These are the tests that were supposed to exist. They assert the SHAPE of a
-// name rather than only listing the current ones, so a provider added next
-// year is caught by the same rule rather than needing a line here.
+// providerLabel falls back to the raw key when a provider is missing from the
+// table, so a miss ships instead of failing. Two providers were missing for as
+// long as they existed. These tests assert the SHAPE of a name, so a new
+// provider is caught by the same rule.
 
 import { describe, expect, it, vi } from "vitest";
 
-// sync.ts reaches @decky/api through lib/api, which does not resolve outside
-// the Steam client. Only the names are under test here, so the boundary is
-// stubbed rather than the whole module tree pulled in.
+// lib/api does not resolve outside the Steam client. Only names are tested
+// here, so the boundary is stubbed.
 vi.mock("../../src/lib/api", () => ({ layoutSelectionBase: vi.fn(async () => ({ ok: false })), logNote: vi.fn(async () => ({ ok: true })),
   fetchArtwork: vi.fn(async () => ({ ok: false })),
   saveIcon: vi.fn(async () => ({ ok: false })),
@@ -56,9 +47,8 @@ describe("every provider has a name written for a person", () => {
   });
 
   it("includes the two website providers, which were the ones missed", () => {
-    // Named explicitly as well as covered by the sweep above: they are the
-    // reason this file exists, and a future tidy-up that drops them from the
-    // table would otherwise just shrink the sweep and pass.
+    // named explicitly too: a future tidy-up dropping them would otherwise just
+    // shrink the sweep and pass.
     expect(KNOWN_PROVIDERS).toContain("shelfcloud");
     expect(KNOWN_PROVIDERS).toContain("custom");
   });
@@ -72,9 +62,8 @@ describe("collection names", () => {
   });
 
   it("gives each kind of web page its OWN collection", () => {
-    // Merging them was tried and was wrong: it put the page Shelfcloud
-    // publishes in with the ones you typed in yourself, and left the
-    // collection named after its own provider standing empty.
+    // merging them was wrong: it mixed the published page with hand-added ones
+    // and left a provider's own collection empty.
     const names = [...WEBSITE_PROVIDERS].map(collectionName);
     expect(new Set(names).size).toBe(WEBSITE_PROVIDERS.size);
     expect(collectionName("shelfcloud")).toBe("Shelfcloud (Shelfcloud)");
@@ -82,8 +71,7 @@ describe("collection names", () => {
   });
 
   it("does not leave a provider's own collection empty by filing it elsewhere", () => {
-    // The shape of the bug, stated as a rule: every provider's tiles go to
-    // the collection named after that provider, with no exceptions.
+    // the rule: every provider's tiles go to the collection named after it.
     for (const provider of KNOWN_PROVIDERS) {
       expect(collectionName(provider)).toBe(`${providerLabel(provider)} (Shelfcloud)`);
     }
@@ -98,8 +86,7 @@ describe("collection names", () => {
 
 describe("tile titles", () => {
   it("suffixes a cloud game with its provider", () => {
-    // The reason the suffix exists: a streamed copy sitting next to an
-    // installed one under one name.
+    // suffix exists so a streamed copy is not confused with an installed one.
     expect(shortcutTitle(game())).toBe("Fortnite (Boosteroid)");
   });
 

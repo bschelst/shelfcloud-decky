@@ -1,15 +1,8 @@
 # Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """The provider badge: which tile is ours, and where the mark sits.
 
-badge_position is written into a style on a patched Steam page, so it is
-checked against the list rather than taken on trust — set_setting is an RPC
-and the dropdown is not the only thing that can call it.
-
-tracked_providers exists so the badge can ask one short question instead of
-reading the whole library: it runs on a Steam route, once per game page
-opened, which on a Deck is constantly.
-
-Run: python3 -m pytest tests/unit
+badge_position is written into a style on a patched Steam page, so set_setting
+checks it against the list -- the dropdown is not the only caller of that RPC.
 """
 
 import asyncio
@@ -46,8 +39,8 @@ TRACKED = {
 
 
 def _plugin(tracked=None, settings=None):
-    # `is None`, not `or`: an EMPTY library is a case worth testing, and
-    # `tracked or TRACKED` would quietly hand it the full one instead.
+    # `is None` not `or`: an empty library is a real case, `or` would swap it
+    # for the full one.
     plugin = main.Plugin.__new__(main.Plugin)
     plugin._synced = dict(TRACKED if tracked is None else tracked)
     plugin._settings = dict(settings or {})
@@ -88,9 +81,8 @@ def test_a_malformed_entry_does_not_raise():
 
 def test_an_empty_library_answers_empty_rather_than_failing():
     out = asyncio.run(_plugin({}).tracked_providers())
-    # steam_ids rides alongside providers: the badge needs a game's Steam
-    # appid to ask how many people are playing it, and a cloud tile is a
-    # non-Steam shortcut so Steam cannot be asked about the tile itself.
+    # steam_ids rides along so the badge can look up player counts; a cloud
+    # tile is a non-Steam shortcut.
     assert out == {"ok": True, "providers": {}, "steam_ids": {}}
 
 
@@ -124,11 +116,7 @@ def test_the_badge_can_be_switched_off():
 
 
 def test_the_card_badge_has_its_own_switch():
-    """Two places, and wanting one without the other is ordinary.
-
-    Turning the game-page badge off must not silently take the card badge
-    with it, nor the other way round.
-    """
+    """Two switches -- turning one off must not touch the other."""
     plugin = _plugin()
     asyncio.run(plugin.set_setting("badge_enabled", False))
     assert "badge_on_cards" not in plugin._settings

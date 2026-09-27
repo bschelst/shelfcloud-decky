@@ -2,18 +2,12 @@
 //
 // Tiles Steam has that the plugin does not account for.
 //
-// Reconcile works from the tracked map: desired-but-untracked is added,
-// tracked-but-unwanted is removed. A shortcut that exists in Steam and was
-// never written down is in neither category, so nothing looks at it — and the
-// next sync, seeing the game as untracked, creates a SECOND tile for it.
-// Neither is tracked, so neither is ever cleaned up.
+// Reconcile works from the tracked map, so a shortcut that exists in Steam but
+// was never written down is in neither category: the next sync makes a SECOND
+// tile, and neither gets cleaned up. ("Ad Infinitum" was on the Deck twice.)
 //
-// That is not hypothetical: "Ad Infinitum (Boosteroid)" was on the Deck twice,
-// with one app id in synced.json and two in shortcuts.vdf.
-//
-// shortcuts.vdf is the only thing that knows, and every tile of ours carries
-// `--game-id N` in its launch options, so it can say which game each belongs
-// to. These tests cover what is done with that answer.
+// Every tile of ours carries `--game-id N`, so shortcuts.vdf can say which game
+// each belongs to. These tests cover what is done with that answer.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -75,10 +69,8 @@ const callbacks = () => ({
 });
 
 describe("a malformed stray report", () => {
-  // This runs BEFORE the main loop's filtering, so anything that throws here
-  // throws out of the WHOLE sync and costs every tile, not just the bad row.
-  // The backend already applies the opposite rule to the library: one unusable
-  // entry is skipped and the rest still sync.
+  // runs BEFORE the main loop, so anything that throws here costs the whole
+  // sync, not just the bad row.
   it.each([
     ["not ok", { ok: false }],
     ["no shortcuts field", { ok: true }],
@@ -150,9 +142,8 @@ describe("a tile that exists but was never recorded", () => {
     // The whole point: no second tile.
     expect(added).toBe(0);
     expect(removed).toEqual([]);
-    // And it is written down against the app id Steam already has, under the
-    // key the report carried — this one predates per-route grouping and sends
-    // none, so it falls back to the bare game id.
+    // written against the app id Steam already has, under the report's key —
+    // this one sends none, so it falls back to the bare game id.
     expect(cb.record.mock.calls.some((c) => c[0] === "1196" && c[1] === 4242)).toBe(true);
   });
 
@@ -171,9 +162,8 @@ describe("a tile that exists but was never recorded", () => {
 
 describe("when the file cannot be read", () => {
   it("still syncs", async () => {
-    // A repair that fails is not a reason to refuse the job. A plugin that
-    // stops syncing because it could not read a Steam file is worse than one
-    // with a duplicate tile.
+    // a repair that fails must not refuse the job: a stuck sync is worse than a
+    // duplicate tile.
     vi.mocked(strayShortcuts).mockRejectedValue(new Error("no such file"));
 
     const result = await syncLibrary([GAME], {}, callbacks());

@@ -1,19 +1,9 @@
 # Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
-"""The default gateway address, which is written down twice.
+"""The default gateway address, written down twice.
 
-main.py has DEFAULT_GATEWAY and index.tsx has GATEWAY_URL. They must agree:
-the backend uses its copy for every request, the panel uses its copy to show
-the user where they are pointed, and a mismatch means the panel confidently
-displays an address the plugin is not talking to.
-
-The bug that prompted this was a single letter — "selfcloud" for "shelfcloud"
-— in both files. Nothing caught it, because nothing exercises the default: a
-developer's plugin has an explicit gateway_url in its settings, so the constant
-is only ever reached by an install that has never been configured. That is
-precisely a first-time user, and for them the plugin would fail to resolve the
-host with no clue why.
-
-Run: python3 -m pytest tests/unit
+main.py has DEFAULT_GATEWAY and index.tsx has GATEWAY_URL. They must agree, or
+the panel shows an address the plugin is not using. Only a fresh, unconfigured
+install ever reaches the default, so a typo here bites first-time users.
 """
 
 import os
@@ -45,14 +35,12 @@ def test_the_two_copies_agree():
 
 
 def test_the_default_is_https():
-    """The gateway holds the bearer token. Plain HTTP would put it on the wire,
-    and Steam's client blocks mixed content besides."""
+    """The bearer token rides on this, so plain HTTP would leak it."""
     assert backend_default().startswith("https://")
 
 
 def test_the_host_is_spelled_shelfcloud():
-    """The actual bug: 'selfcloud' is a plausible-looking typo that resolves to
-    nothing, and reads as correct at a glance."""
+    """The actual bug: 'selfcloud' looks right but resolves to nothing."""
     host = backend_default().split("//", 1)[1].split("/", 1)[0]
     assert host.startswith("shelfcloud."), f"suspicious gateway host: {host}"
     assert "selfcloud" not in backend_default()

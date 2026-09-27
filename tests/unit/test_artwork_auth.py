@@ -1,23 +1,8 @@
 # Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
-"""Artwork fetched through the gateway must carry the token — and only there.
+"""Artwork through the gateway carries the token, a provider CDN never does.
 
-The gateway's /api/artwork endpoint used to answer anonymously. It was the one
-endpoint that had to, because this plugin fetched from it without credentials;
-gating it while that was true would have blanked every tile on the Deck with
-nothing in the log but a 401 the UI never surfaces.
-
-Two properties keep it working, and both fail silently if they drift:
-
-  1. Requests to our own gateway carry the bearer token.
-  2. Requests to a provider's CDN do NOT — SteamGridDB has no business
-     receiving a Shelfcloud credential.
-
-Property 1 depends on the proxy URL and the comparison base being built the
-same way. They are built by _artwork_proxy and read by fetch_artwork, two
-methods far apart in the file, so the agreement between them is tested rather
-than assumed.
-
-Run: python3 -m pytest tests/unit
+The proxy URL is built by _artwork_proxy and read by fetch_artwork, so we test
+that the two agree instead of assuming it.
 """
 
 import asyncio
@@ -44,13 +29,8 @@ sys.path.insert(0, os.path.join(ROOT, "py_modules"))
 
 import main  # noqa: E402
 
-# Read from the implementation, not written down again here. The plugin talks
-# to one fixed address — _gateway() returns DEFAULT_GATEWAY and the old
-# gateway_url setting is no longer read by anything — so a literal here would
-# be a second copy of a constant that already has two (see
-# test_gateway_default.py), and a stale one would make every assertion below
-# vacuous: with no match, no token is attached, and "no token" is exactly what
-# half of these tests expect to see.
+# Read from the implementation. A stale literal here would make every "no
+# token" assertion below pass for the wrong reason.
 GATEWAY = main.DEFAULT_GATEWAY
 TOKEN = "plugin-token-eeeeeeeeeeeeeeeeeeee"
 
@@ -83,16 +63,9 @@ def fetch(instance, url, response=None):
     sent = {}
 
     def fake_open(url, headers=None, method="GET", body=None, timeout=None):
-        # The signature is _open's, exactly: a stub that refuses an argument
-        # the real call passes raises INSIDE the try block, where the error is
-        # caught and returned as {"ok": False} -- indistinguishable from "the
-        # fetch was refused", which is the very thing these tests assert
-        # about. They passed for the wrong reason once already that way.
-        #
-        # A headers DICT now rather than a urllib Request: requests go through
-        # the shared connection pool, because a fresh TCP connection and TLS
-        # handshake per artwork slot is hundreds of handshakes a sync. What is
-        # asserted is unchanged -- which header reached which host.
+        # Signature must match _open exactly. A wrong arg raises inside the try
+        # and comes back as {"ok": False}, which looks like a refused fetch.
+        # headers is a dict, not a urllib Request, since we use the shared pool.
         sent["request"] = {"url": url, "headers": dict(headers or {})}
         return response or FakeResponse()
 
@@ -102,13 +75,7 @@ def fetch(instance, url, response=None):
 
 
 def header_of(request, name):
-    """One header from the captured call, however it was spelled.
-
-    A plain dict now: the pooled _open takes headers as a mapping rather than
-    building a urllib Request, so there is no get_header to ask and no
-    title-casing to work around. Matched case-insensitively, which is what
-    HTTP means anyway.
-    """
+    """One header from the captured call, matched case-insensitively."""
     if not request:
         return None
     for key, value in request["headers"].items():
@@ -127,12 +94,7 @@ def test_gateway_artwork_carries_the_token():
 
 
 def test_the_proxy_url_the_plugin_builds_is_one_it_will_authenticate():
-    """The two halves must agree, or every tile silently goes blank.
-
-    _artwork_proxy writes the URL; fetch_artwork decides whether it is ours.
-    If either changes how the base is spelled — a trailing slash, a different
-    setting — the token stops being attached and the gateway answers 401.
-    """
+    """The two halves must agree, or the token stops being attached."""
     instance = plugin()
     urls = instance._artwork_proxy({"id": 12})
     assert urls, "expected proxy urls for a valid game id"
@@ -143,14 +105,7 @@ def test_the_proxy_url_the_plugin_builds_is_one_it_will_authenticate():
 
 
 def test_the_gateway_base_has_no_trailing_slash():
-    """A trailing slash would make the proxy URL "…org//api/artwork/…".
-
-    This replaces a test that set a hand-typed gateway address with a trailing
-    slash. There is no longer an address to type: _gateway() returns a fixed
-    constant, so the only way a slash gets in is by being edited into that
-    constant, and the comparison base and the built URL would then disagree
-    about a character neither of them prints.
-    """
+    """A trailing slash would make the proxy URL "…org//api/artwork/…"."""
     assert not GATEWAY.endswith("/")
 
 
@@ -163,12 +118,8 @@ def test_a_provider_cdn_never_receives_the_token():
 
 
 def test_a_lookalike_host_does_not_get_the_token():
-    """The check is a prefix match, so the separator matters.
-
-    "http://192.168.1.50:8000.evil.com/" starts with the gateway address as a
-    string. Requiring the "/" that ends the authority is what stops a host
-    whose name merely begins with ours from being handed the credential.
-    """
+    """Prefix match, so the "/" ending the authority matters: a host whose
+    name merely begins with ours must not get the credential."""
     instance = plugin()
     for hostile in (f"{GATEWAY}.evil.com/api/artwork/1/capsule",
                     f"{GATEWAY}@evil.com/api/artwork/1/capsule",
@@ -178,11 +129,7 @@ def test_a_lookalike_host_does_not_get_the_token():
 
 
 def test_no_token_means_no_header_rather_than_an_empty_one():
-    """Signed out, the request goes out bare and the gateway refuses it.
-
-    That is the right outcome — no art without an account — but it must not go
-    out as "Bearer ", which reads as a malformed credential rather than none.
-    """
+    """Signed out, no header at all -- not "Bearer ", which reads as broken."""
     instance = plugin(token=None)
     _, request = fetch(instance, f"{GATEWAY}/api/artwork/12/capsule")
     assert header_of(request, "Authorization") is None
@@ -191,12 +138,8 @@ def test_no_token_means_no_header_rather_than_an_empty_one():
 # ------------------------------------------------------- response validation
 
 def test_a_non_image_response_is_rejected():
-    """A 401 from the gated endpoint arrives as JSON, not as an image.
-
-    Without this check the error body would be base64-encoded and handed to
-    Steam as artwork, which is how a gating change turns into a corrupted tile
-    instead of a missing one.
-    """
+    """A 401 arrives as JSON. Without this check it gets handed to Steam as
+    artwork and the tile shows corrupt instead of missing."""
     instance = plugin()
     result, _ = fetch(instance, f"{GATEWAY}/api/artwork/12/capsule",
                       response=FakeResponse("application/json", b'{"detail":"x"}'))

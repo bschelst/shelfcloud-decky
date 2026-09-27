@@ -1,19 +1,9 @@
 # Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """What the plugin accepts from the gateway, from disk, and from the frontend.
 
-Two things drive this file.
-
-A game's TITLE becomes a directory name. It is scraped from each provider's
-own API — Boosteroid's, NVIDIA's, Microsoft's, Amazon's — and passed through
-the gateway's catalogue. None of that is ours to trust, and
-install_controller_layout joined it straight onto a path and called makedirs.
-
-And an unreadable settings file used to take the whole plugin down rather than
-the one file: _read_json caught FileNotFoundError and JSONDecodeError only, so
-a wrong file mode, a corrupted byte or a JSON array left `self._settings` as
-something that is not a mapping — or stopped _main before the plugin loaded.
-
-Run: python3 -m pytest tests/unit
+A game TITLE (scraped from a provider API) becomes a directory name, so it must
+not escape the path. And an unreadable settings file must fail as one file, not
+take the whole plugin down: _read_json has to return {} for every bad shape.
 """
 
 import asyncio
@@ -75,12 +65,8 @@ def test_a_single_dot_is_refused(tmp_path):
 
 
 def test_nothing_is_written_outside_the_config_directory(tmp_path):
-    """The assertion that matters: not just refused, but nothing created.
-
-    The snapshot is taken with a harmless install first, so the fixture's own
-    files are already on disk and the comparison sees only what the escaping
-    name did.
-    """
+    """Not just refused, but nothing created. A harmless install runs first so
+    the snapshot only sees what the escaping name did."""
     _install("Harmless Game (Boosteroid)", tmp_path)
     before = sorted(p for p in tmp_path.rglob("*") if p.is_file())
 
@@ -93,14 +79,8 @@ def test_nothing_is_written_outside_the_config_directory(tmp_path):
 
 
 def _install_for_real(name, tmp_path):
-    """Like _install, but with the template where the code actually looks.
-
-    _install mocks a module constant the install path does not consult, so it
-    always stops at "template not found" -- fine for the refusal tests above,
-    which only care whether the NAME was accepted, but useless for checking
-    where a file lands. This builds the tree the code really reads:
-    <steam>/controller_base/templates/.
-    """
+    """Like _install, but builds the tree the code really reads
+    (<steam>/controller_base/templates/), so a file actually lands."""
     steam = tmp_path / "steam"
     cfg = steam / "steamapps" / "common" / "Steam Controller Configs" / "1" / "config"
     cfg.mkdir(parents=True, exist_ok=True)
@@ -118,21 +98,15 @@ def _install_for_real(name, tmp_path):
 
 
 def test_a_title_with_a_slash_nests_instead_of_being_refused(tmp_path):
-    """"Disney/Pixar WALL-E" is a real game, not an attack.
-
-    Steam keys a shortcut's config by its NAME and joins that onto the config
-    directory, so a slash in a title simply nests one level -- and Steam
-    resolves it back the same way when it looks the layout up. Refusing every
-    separator was an over-correction on top of a real fix: it cost two Amazon
-    Luna games their controller layout on every single sync, and the warning
-    it logged looked like an attack being blocked rather than a bug.
+    """"Disney/Pixar WALL-E" is a real game. Steam keys config by name and a
+    slash just nests one level, so refusing every separator broke real games.
     """
     result, cfg = _install_for_real("Disney/Pixar WALL-E (Amazon Luna)", tmp_path)
     assert "unsafe" not in str(result.get("error", "")), result
 
     written = list(cfg.rglob("controller_neptune.vdf"))
     assert written, "a legitimate slashed title got no layout at all"
-    # Nested, and still inside the per-user config directory.
+    # nested, but still inside the per-user config dir
     for path in written:
         assert str(path.resolve()).startswith(str(cfg.resolve()) + os.sep)
 
@@ -148,8 +122,7 @@ def test_a_slash_still_cannot_be_used_to_climb(tmp_path):
 
 
 def test_an_ordinary_game_title_is_still_accepted(tmp_path):
-    # Real titles have colons, apostrophes and brackets. Rejecting those would
-    # turn a security fix into a broken feature.
+    # real titles have colons, apostrophes and brackets
     result, _ = _install("Tom Clancy's The Division 2 (Xbox Cloud)", tmp_path)
     assert result["ok"] is not False or "unsafe" not in str(result.get("error", ""))
 
@@ -175,11 +148,8 @@ def test_a_missing_file_reads_as_empty(tmp_path):
 
 
 def test_a_json_array_does_not_become_the_settings(tmp_path):
-    """`[]` is valid JSON and is not a mapping.
-
-    It used to be returned as-is, so self._settings became a list and every
-    .get() after it raised — a plugin that loads and then fails at everything.
-    """
+    """`[]` is valid JSON but not a mapping. Returned as-is, self._settings
+    became a list and every .get() after it raised."""
     path = tmp_path / "settings.json"
     path.write_text("[]")
     assert main.Plugin._read_json(str(path)) == {}
@@ -199,11 +169,8 @@ def test_broken_json_reads_as_empty(tmp_path):
 
 
 def test_invalid_utf8_reads_as_empty_rather_than_raising(tmp_path):
-    """UnicodeDecodeError is not a JSONDecodeError.
-
-    It was not caught, so a single corrupted byte in settings.json stopped the
-    plugin loading at all.
-    """
+    """UnicodeDecodeError is not a JSONDecodeError, so an uncaught corrupt byte
+    stopped the plugin loading."""
     path = tmp_path / "s.json"
     path.write_bytes(b'{"browser": "\xff\xfe bad"}')
     assert main.Plugin._read_json(str(path)) == {}

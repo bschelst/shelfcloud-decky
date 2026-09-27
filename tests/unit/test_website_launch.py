@@ -1,17 +1,11 @@
 # Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """Website tiles: where they may go, and how the window differs from a game's.
 
-A game tile is held to a five-host allowlist because it opens a kiosk-mode
-Chromium — no address bar — on a profile holding live Microsoft, NVIDIA,
-Boosteroid and Luna sessions. A page somebody added cannot be held to that
-list: going somewhere the catalogue never heard of is the entire feature.
-
-What makes the relaxation acceptable is the window, so that is tested here as
-carefully as the URL rule is. A page gets its own profile, no debugging port
-and no kiosk. If any one of those three quietly came back, the allowlist would
-be protecting nothing and no URL test would notice.
-
-Run: python3 -m pytest tests/unit
+A game tile is held to a five-host allowlist since it opens a kiosk Chromium on
+a profile with live provider sessions. A page cannot be held to that list — the
+whole feature is going elsewhere. What makes that safe is the window, tested here
+as carefully as the URL rule: a page gets its own profile, no debug port, no
+kiosk. If any of those came back the allowlist would protect nothing.
 """
 
 import importlib.util
@@ -45,8 +39,8 @@ allowed = launcher.is_allowed_website_url
     "https://sub.domain.example.co.uk/deep/path?q=1#frag",
 ])
 def test_a_public_page_is_allowed(url):
-    """The point of the feature. A tile that could only reach five hosts would
-    be the provider allowlist with extra steps."""
+    """The point of the feature. A tile stuck to five hosts is just the provider
+    allowlist with extra steps."""
     assert allowed(url) is True
 
 
@@ -67,9 +61,8 @@ def test_a_public_page_is_allowed(url):
     "http://router/",
 ])
 def test_the_users_own_network_is_out_of_reach(url):
-    """The tile is opened by the person's own browser, inside their own
-    network, with their own cookies. That is not a website, it is a request to
-    their router — and it would be made by whatever the gateway said."""
+    """Opened by the person's own browser, in their own network, with their own
+    cookies — a request to their router, made by whatever the gateway said."""
     assert allowed(url) is False
 
 
@@ -114,9 +107,9 @@ def test_credentials_in_the_authority_are_refused(url):
     "https://example.com\r\n",
 ])
 def test_characters_a_browser_would_move_are_refused(url):
-    """urlsplit reads a backslash as ordinary; Chromium ends the authority at
-    it. When the two disagree about the host, the browser is the one that opens
-    the page — so this is refused before either gets a say."""
+    """urlsplit treats a backslash as ordinary; Chromium ends the authority at
+    it. When they disagree about the host, the browser wins — so refuse it
+    first."""
     assert allowed(url) is False
 
 
@@ -131,9 +124,8 @@ def test_a_page_provider_uses_the_page_rule(provider):
 @pytest.mark.parametrize("provider", ["boosteroid", "geforce_now", "xbox_cloud",
                                       "amazon_luna", ""])
 def test_a_game_provider_still_uses_the_allowlist(provider):
-    """The relaxation must not leak. A game is opened in a kiosk window on the
-    profile with every provider session in it, and that window is still only
-    allowed to reach the five hosts."""
+    """The relaxation must not leak. A game opens in a kiosk window on the
+    profile with every provider session, still limited to the five hosts."""
     assert launcher.url_is_acceptable("https://www.protondb.com/", provider) is False
     assert launcher.url_is_acceptable("https://cloud.boosteroid.com/x", provider) is True
 
@@ -146,13 +138,12 @@ def command(url="https://www.protondb.com/", profile="/home/deck/.shelfcloud/chr
 
 
 def test_a_page_never_gets_a_debugging_port():
-    """A game window opens one so the launcher can press Play through CDP. It
-    is unauthenticated and accepts commands from anything that reaches it,
-    including script in the page being debugged — which is a trade worth making
-    for four known provider sites and not for an arbitrary one."""
+    """A game window opens one so the launcher can press Play through CDP. It is
+    unauthenticated and takes commands from anything that reaches it — a trade
+    worth making for known provider sites, not an arbitrary page."""
     assert not any("remote-debugging" in arg for arg in command())
-    # And the game path still has it, so this test is about the page and not
-    # about the flag having been dropped everywhere.
+    # game path still has it, so this is about the page, not the flag being
+    # dropped everywhere
     game = launcher.build_browser_command("com.google.Chrome", "/tmp/p",
                                           "https://cloud.boosteroid.com/x")
     assert any("--remote-debugging-port" in arg for arg in game)
@@ -160,15 +151,13 @@ def test_a_page_never_gets_a_debugging_port():
 
 def test_a_page_is_not_opened_in_kiosk_mode():
     """Kiosk hides the address bar, and for a page the catalogue cannot vouch
-    for, the address bar is the check — handed back to the person looking at
-    it."""
+    for, the address bar is the check."""
     assert "--kiosk" not in command()
 
 
 def test_a_page_cannot_reach_the_provider_sessions():
-    """Cookies, storage and saved passwords live in --user-data-dir. A page
-    sharing the game profile would be one XSS away from a live Microsoft
-    session."""
+    """Cookies, storage and passwords live in --user-data-dir. A page sharing
+    the game profile is one XSS from a live Microsoft session."""
     game_profile = "/home/deck/.shelfcloud/chrome"
     page_profile = launcher.website_profile(game_profile)
     assert page_profile != game_profile
@@ -181,8 +170,8 @@ def test_a_page_cannot_reach_the_provider_sessions():
 
 
 def test_the_url_is_the_last_argument_and_is_not_a_flag():
-    """Chromium reads a leading-dash argument as a flag. The URLs that could do
-    that are refused above, but the ordering is what makes that true."""
+    """Chromium reads a leading-dash argument as a flag. Such URLs are refused
+    above, but the ordering is what backs that up."""
     args = command()
     assert args[-1] == "https://www.protondb.com/"
     assert not args[-1].startswith("-")

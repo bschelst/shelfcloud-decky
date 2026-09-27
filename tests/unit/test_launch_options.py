@@ -1,18 +1,10 @@
 # Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """A Steam shortcut's launch options must survive `/bin/sh -c`.
 
-This pins down a bug that cost real debugging time and was invisible from the
-Deck. Steam runs a shortcut as `sh -c "<exe> <options>"`. A GeForce NOW URL
-ends `?game-id=<uuid>&lang=en_US`, and joining the arguments with plain spaces
-leaves that `&` unquoted — a shell operator. `sh` then backgrounds everything
-before it and treats the rest as a separate command, so the launcher gets a
-URL truncated at the ampersand and never sees `--game-id` or `--provider`.
-
-The game still starts from the truncated URL. Nothing looks broken. It just
-silently stops asking the gateway, so no launch is resolved live and none is
-ever counted — which is exactly how it went unnoticed.
-
-Run: python3 -m pytest tests/unit
+Steam runs a shortcut as `sh -c "<exe> <options>"`. An unquoted `&` in a URL
+(GeForce NOW ends `&lang=en_US`) is a shell operator, so a plain-space join
+truncates the URL there and the launcher never sees --game-id or --provider.
+The game still starts, so the broken gateway call went unnoticed.
 """
 
 import json
@@ -56,9 +48,7 @@ def through_shell(options: str):
     result = subprocess.run(
         ["sh", "-c", f"{sys.executable} -c {shlex.quote(harness)} {options}"],
         capture_output=True, text=True,
-        # Bounded, and stdin closed. A child that waits for input hangs the
-        # whole suite otherwise, and on a CI runner nobody is there to notice —
-        # it simply sits there until the job's own six-hour limit.
+        # bounded with stdin closed, else a child waiting for input hangs the suite
         timeout=30, stdin=subprocess.DEVNULL,
     )
     try:

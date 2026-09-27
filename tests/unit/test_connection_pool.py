@@ -1,25 +1,9 @@
 # Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
-"""The shared connection pool, and the exception contract it has to keep.
+"""The shared connection pool and the exception contract it keeps.
 
-urlopen opened a NEW TCP connection -- and a TLS handshake with it -- for
-every call. A sync makes hundreds: a layout per new tile, six artwork slots
-per changed game, a slice per two megabytes of a hero, a player count per page
-opened. Measured here: 40 requests were 40 connections, and are now 1.
-
-The delicate half is not the pooling, it is the ERRORS. Every caller in
-main.py was written against urlopen, and two of them depend on the exact
-exception:
-
-  * _request treats HTTPError 304 as "what you already hold is current" and
-    HTTPError 401 as "sign out" -- urllib3 does not raise for a status at all,
-    it puts it in the response.
-  * _request's URLError handler is the one place that names a certificate
-    failure in the log -- and urllib3 raises MaxRetryError/SSLError there,
-    which sailed straight past it until this file caught it.
-
-So _open translates, and these tests are about the translation.
-
-Run: python3 -m pytest tests/unit/test_connection_pool.py
+Pooling turns 40 connections into 1. The tricky half is errors: callers were
+written against urlopen and depend on HTTPError (304, 401) and URLError, so
+_open has to translate urllib3's exceptions back. These tests cover that.
 """
 
 import http.server
@@ -86,7 +70,7 @@ def test_many_requests_share_one_connection(server):
         with main._open(url) as response:
             response.read()
 
-    # The whole point. Before the pool this was 40.
+    # the whole point: before the pool this was 40
     assert _CountingServer.accepted == 1, (
         "expected the connection to be reused, got %d handshakes"
         % _CountingServer.accepted)
@@ -112,12 +96,8 @@ def test_a_non_2xx_raises_HTTPError_with_its_code(server, code):
 
 
 def test_an_unreachable_host_raises_URLError_not_urllib3s_error(server):  # noqa: ARG001
-    """The SSL diagnostic in _request catches URLError and nothing else.
-
-    urllib3 raises MaxRetryError here. Untranslated it sails past that
-    handler, and the one log line that says "your certificate is wrong"
-    stops being printed.
-    """
+    """_request's SSL diagnostic catches URLError only. urllib3 raises
+    MaxRetryError here, which would sail past it untranslated."""
     with pytest.raises(urllib.error.URLError):
         main._open("http://127.0.0.1:1/nope", timeout=2).read()
 
@@ -130,8 +110,7 @@ def test_an_unreachable_host_fails_quickly_rather_than_hanging(server):  # noqa:
 
 
 def test_failures_do_not_leak_the_pool(server):
-    """A run of errors must not exhaust it -- that would wedge every later
-    call as surely as a dead socket."""
+    """A run of errors must not exhaust the pool and wedge later calls."""
     _, url = server
     _Handler.status = 500
     for _ in range(60):
@@ -144,8 +123,7 @@ def test_failures_do_not_leak_the_pool(server):
 
 
 def test_it_still_works_where_urllib3_is_missing(server):
-    """Decky ships urllib3, but a plugin that dies without it is worse than
-    one that opens a connection per call."""
+    """Without urllib3 fall back to a connection per call, not a crash."""
     _, url = server
     with mock.patch.object(main, "_urllib3", None):
         opened = main._open(url)

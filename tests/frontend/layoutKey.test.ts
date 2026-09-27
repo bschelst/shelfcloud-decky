@@ -1,14 +1,10 @@
 // Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 //
-// The directory name Steam uses for a shortcut's controller config.
-//
-// This must agree with _layout_key in main.py character for character: the
-// backend WRITES the layout under that name and this composes the URL that
-// SELECTS it. Any disagreement is a layout Steam silently never applies --
-// no error, no log line, just the default template on every tile.
-//
-// The expectations below are not invented. Each is what Steam itself reported
-// through GetConfigForAppAndController for that shortcut on hardware.
+// The directory name Steam uses for a shortcut's controller config. Must match
+// _layout_key in main.py character for character: the backend writes under that
+// name and this selects it; any mismatch and Steam silently uses the default.
+// Each expectation is what Steam reported through GetConfigForAppAndController
+// on hardware, not invented.
 
 import { describe, expect, it } from "vitest";
 
@@ -21,7 +17,7 @@ describe("the name Steam gives a shortcut's config directory", () => {
   });
 
   it("drops full stops", () => {
-    // Lower-casing alone left this one broken: Steam looks for "repo".
+    // lower-casing alone left this broken: Steam looks for "repo".
     expect(layoutKey("R.E.P.O. (Boosteroid)")).toBe("repo (boosteroid)");
     expect(layoutKey("Crash Bandicoot N. Sane Trilogy (GeForce NOW)"))
       .toBe("crash bandicoot n sane trilogy (geforce now)");
@@ -44,8 +40,8 @@ describe("the name Steam gives a shortcut's config directory", () => {
   });
 
   it("keeps everything else, including spaces and brackets", () => {
-    // The provider suffix in brackets is how a streamed copy is told apart
-    // from an installed one, so it has to survive.
+    // the bracketed provider suffix tells a streamed copy from an installed
+    // one, so it has to survive.
     expect(layoutKey("A Way Out (Boosteroid)")).toBe("a way out (boosteroid)");
     expect(layoutKey("Disney/Pixar WALL-E (GeForce NOW)"))
       .toBe("disneypixar wall-e (geforce now)");
@@ -56,8 +52,7 @@ describe("the name Steam gives a shortcut's config directory", () => {
   });
 
   it("never produces a path separator", () => {
-    // Which is also why the directory cannot nest: "/" is in the strip set, so
-    // the result is one path segment by construction rather than by checking.
+    // "/" is in the strip set, so the result is one path segment by build.
     expect(layoutKey("Disney/Pixar WALL-E")).not.toContain("/");
     expect(layoutKey("back\\slash")).not.toContain("\\");
   });

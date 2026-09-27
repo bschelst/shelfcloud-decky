@@ -1,16 +1,10 @@
 // Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 //
-// The job store is what makes progress survive closing the panel.
-//
-// The bug it fixes: "Add all my games" wrote its progress into React state
-// inside the panel component. Closing the Quick Access menu unmounts that
-// component, so the state died with it — while the work carried on. Reopening
-// showed an idle panel with no progress and an enabled button, inviting a
-// second run over the same library.
-//
-// These tests model that sequence directly: subscribe (panel opens),
-// unsubscribe (panel closes), subscribe again (panel reopens), and assert the
-// reopened panel sees the work still in flight.
+// The job store makes progress survive closing the panel. "Add all my games"
+// kept its progress in React state inside the panel, so closing Quick Access
+// unmounted it and the state died while the work carried on. The tests model
+// that: subscribe (open), unsubscribe (close), subscribe again (reopen), and
+// check the reopened panel still sees the work in flight.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -20,17 +14,17 @@ beforeEach(() => resetJob());
 
 describe("surviving the panel closing", () => {
   it("still reports a running job after unsubscribe and resubscribe", () => {
-    // Panel open, user presses "Add all my games".
+    // panel open, user presses "Add all my games".
     const openPanel = vi.fn();
     const closePanel = subscribeJob(openPanel);
     setJob({ busy: true, message: "Reading your Steam library…" });
     expect(getJob().busy).toBe(true);
 
-    // Panel closed. The work keeps going and keeps reporting.
+    // panel closed. the work keeps going and keeps reporting.
     closePanel();
     setJob({ message: "Adding Fortnite (12/124)", progress: 12 / 124 });
 
-    // Panel reopened: it must see the run in progress, not a clean slate.
+    // panel reopened: it must see the run in progress, not a clean slate.
     subscribeJob(vi.fn());
     const seen = getJob();
     expect(seen.busy).toBe(true);
@@ -57,16 +51,15 @@ describe("surviving the panel closing", () => {
 
 describe("snapshot identity", () => {
   it("returns a new object on every change", () => {
-    // useSyncExternalStore compares snapshots by identity. Mutating in place
-    // would leave a mounted panel rendering stale text forever.
+    // useSyncExternalStore compares snapshots by identity; mutating in place
+    // would leave a mounted panel showing stale text.
     const before = getJob();
     setJob({ message: "changed" });
     expect(getJob()).not.toBe(before);
   });
 
   it("returns a stable object between changes", () => {
-    // The other half: a snapshot that differs on every read makes React
-    // re-render in a loop.
+    // a snapshot that differs on every read makes React re-render in a loop.
     setJob({ message: "settled" });
     expect(getJob()).toBe(getJob());
   });

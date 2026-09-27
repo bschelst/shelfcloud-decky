@@ -1,18 +1,11 @@
 // Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 //
-// Deleting collections this plugin created under a name it no longer uses.
-//
-// Nothing ever deleted a collection. Filing created them, pruning emptied
-// them, and that was the whole lifecycle — so when a provider's LABEL changed,
-// the collection under the old name stayed in the user's library forever.
-//
-// "custom (Shelfcloud)" is the one that prompted this. Website tiles were
-// filed under the raw provider key before `custom` was given the label
-// "Websites", and the renaming fixed what NEW collections are called without
-// touching the one already sitting there. Worse, deleting it by hand did not
-// help: collections live in Steam Cloud, so the next sync pulled it back.
-// Steam's own DeleteCollection drops the cloud entry as well, which is what
-// makes the removal stick.
+// Deleting collections this plugin made under a name it no longer uses. Nothing
+// ever deleted one, so when a provider label changed the old-named collection
+// stayed forever ("custom (Shelfcloud)" before `custom` became "Websites").
+// Deleting by hand did not help either -- collections live in Steam Cloud and
+// the next sync pulled it back, so we use Steam's DeleteCollection to make it
+// stick.
 
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -67,8 +60,8 @@ describe("a collection named after a label we no longer use", () => {
   });
 
   it("is deleted even when it still holds the tiles we manage", async () => {
-    // The games are not lost — the same sync has already filed them under the
-    // current name. Only the grouping goes.
+    // games are not lost, the same sync filed them under the current name.
+    // only the grouping goes.
     const stale = collection(RETIRED, [11, 22]);
     collections.push(stale);
     collections.push(collection(CURRENT, [11, 22]));
@@ -88,7 +81,7 @@ describe("what it must not touch", () => {
   });
 
   it("leaves collections that are not ours alone", async () => {
-    // No " (Shelfcloud)" suffix, so not ours to delete however odd the name.
+    // no " (Shelfcloud)" suffix, so not ours however odd the name.
     for (const name of ["custom", "Websites", "Favourites", "custom (Shelfcloud) "]) {
       collections.push(collection(name, [1]));
     }
@@ -97,9 +90,8 @@ describe("what it must not touch", () => {
   });
 
   it("keeps a retired collection that holds a game we do not manage", async () => {
-    // Somebody dragged their own game in. Deleting the collection would throw
-    // away a grouping they made by hand, which is not ours to do — the games
-    // we manage have already been filed correctly elsewhere.
+    // somebody dragged their own game in. deleting would throw away a grouping
+    // they made by hand, which is not ours to do.
     const stale = collection(RETIRED, [11, 999]);
     collections.push(stale);
     const gone = await removeRetiredCollections(new Set([11]));

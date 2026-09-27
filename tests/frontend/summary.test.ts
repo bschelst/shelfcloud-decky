@@ -1,15 +1,8 @@
 // Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 //
-// The numbers in the finished-sync line have to agree with each other.
-//
-// What shipped: "385 games — 385 added (7 skipped)". Read it as a sentence and
-// it is nonsense — if 385 were added and 7 skipped, the library holds 392, not
-// 385. The cause was that `total` was taken AFTER the skipped entries had been
-// dropped, so the two numbers counted different populations while sitting side
-// by side in one line, inviting the reader to find the 7 inside the 385.
-//
-// These tests state the invariant directly: whatever else the line says, the
-// totals it shows must add up.
+// The numbers in the finished-sync line have to agree. What shipped was
+// "385 games — 385 added (7 skipped)", which is nonsense: total was taken after
+// the skipped ones were dropped. These tests pin that the totals add up.
 
 import { describe, expect, it } from "vitest";
 
@@ -22,7 +15,7 @@ const result = (over: Partial<SyncResult> = {}): SyncResult => ({
 
 describe("the finished-sync line", () => {
   it("reports a total that includes the skipped entries", () => {
-    // The exact case from the Deck: 392 in the library, 7 unusable, 385 added.
+    // the exact case from the Deck: 392 in library, 7 unusable, 385 added.
     expect(syncSummary(392, result({ added: 385 }), 7))
       .toBe("392 games — 385 added (7 skipped)");
   });
@@ -59,14 +52,14 @@ describe("the finished-sync line", () => {
   });
 
   it("leaves out the kinds that did not happen", () => {
-    // A run that only removed should not read "0 added, 3 removed".
+    // a run that only removed should not read "0 added, 3 removed".
     expect(changeSummary(result({ removed: 3 }))).toBe("3 removed");
   });
 });
 
 describe("the toast", () => {
   it("carries the changes without the totals", () => {
-    // It can appear over a game in progress, so it stays short.
+    // it can appear over a game in progress, so it stays short.
     const line = changeSummary(result({ added: 385 }));
     expect(line).toBe("385 added");
     expect(line).not.toContain("games");
