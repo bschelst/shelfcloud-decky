@@ -75,7 +75,7 @@ export interface LogoLayout {
   lines: string[];
   /** Left edge of the text column. */
   textLeft: number;
-  /** Width available to the text. */
+  /** Width the widest line actually occupies at `size`. */
   textWidth: number;
   /** Where the mark is drawn. */
   mark: { x: number; y: number; size: number };
@@ -92,15 +92,29 @@ export function logoLayout(
   name: string,
   measure: (text: string, size: number) => number,
 ): LogoLayout {
-  const textLeft = EDGE + MARK_BOX + GAP;
-  const textWidth = LOGO_W - textLeft - EDGE;
-  const mark = { x: EDGE, y: (LOGO_H - MARK_BOX) / 2, size: MARK_BOX };
+  // The widest the text column can ever be — mark pinned to the left margin.
+  // Fitting decides size and wrapping against this; centring comes after.
+  const maxTextWidth = LOGO_W - (EDGE + MARK_BOX + GAP) - EDGE;
 
   const fitted = fitText(
     tidyName(name),
-    { width: textWidth, sizes: SIZES, maxLines: MAX_LINES },
+    { width: maxTextWidth, sizes: SIZES, maxLines: MAX_LINES },
     measure,
   );
+
+  // The name almost never fills the column, so [mark][gap][text] is narrower
+  // than the canvas. Pinned to the left margin it sat off to one side, and
+  // Steam draws the provider chip centred under the logo slot -- so the chip
+  // ended up floating to the right of the mark instead of sitting under it.
+  // Measure what the text really occupies and centre the whole group; now the
+  // mark, the name and the chip beneath them share one vertical axis.
+  const textWidth = fitted.lines.reduce(
+    (widest, line) => Math.max(widest, measure(line, fitted.size)), 0);
+  const contentWidth = textWidth > 0 ? MARK_BOX + GAP + textWidth : MARK_BOX;
+  const groupLeft = Math.max(EDGE, (LOGO_W - contentWidth) / 2);
+
+  const mark = { x: groupLeft, y: (LOGO_H - MARK_BOX) / 2, size: MARK_BOX };
+  const textLeft = groupLeft + MARK_BOX + GAP;
   return { size: fitted.size, lines: fitted.lines, textLeft, textWidth, mark };
 }
 

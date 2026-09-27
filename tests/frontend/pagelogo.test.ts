@@ -88,6 +88,17 @@ describe("fitting the name", () => {
     expect(layout.mark.y / LOGO_H).toBeLessThan(0.2);
   });
 
+  it("centres the mark and words as one group in the canvas", () => {
+    // The bug this pins: the mark was pinned to the left margin, so a short
+    // name left the group off to one side and the provider chip Steam draws
+    // under the logo slot floated to the right of the mark instead of under
+    // it. A name that fits without clamping should sit dead centre.
+    const layout = logoLayout("Wiki", measure);
+    const left = layout.mark.x;
+    const right = layout.textLeft + layout.textWidth;
+    expect((left + right) / 2).toBeCloseTo(LOGO_W / 2, 0);
+  });
+
   it("keeps the mark inside the canvas and clear of the words", () => {
     const layout = logoLayout("Anything", measure);
     expect(layout.mark.x).toBeGreaterThanOrEqual(0);
