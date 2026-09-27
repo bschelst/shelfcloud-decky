@@ -261,6 +261,11 @@ async function fetchSlot(game: DesiredGame, slot: ArtSlot) {
 interface ArtworkOutcome {
   applied: number;
   visible: boolean;
+  // Did the LOGO end up as what the gateway offered? A game with a real logo
+  // URL whose download failed this pass gets a drawn fallback instead, and the
+  // fallback must not be recorded as finished — see the logo block below and
+  // the fingerprint guard in recordArtwork. False means "retry next sync".
+  logoSettled: boolean;
 }
 
 /** Fill each library art slot. Never fatal: a blank tile still plays.
@@ -561,7 +566,7 @@ async function applyArtwork(
   // Half a dozen slices per slot, each an RPC. If this turn was abandoned
   // while they were in flight, stop here rather than spending the live game's
   // slots applying pictures to a tile nobody is waiting for.
-  if (turn.abandoned) return { applied, visible: false };
+  if (turn.abandoned) return { applied, visible: false, logoSettled: false };
   for (let i = 0; i < BACKGROUND_SLOTS.length; i++) {
     const [slot, assetType] = BACKGROUND_SLOTS[i];
     if (images[i]) {
@@ -634,7 +639,8 @@ async function applyArtwork(
   //
   // Applied after the others so a real publisher logo always wins over a
   // drawn one.
-  if (!images[logoIndex]) {
+  const realLogo = !!images[logoIndex];
+  if (!realLogo) {
     // BRAND_MARK, not iconImage. The mark beside the name is ours and is the
     // same on every tile; iconImage is a FALLBACK CHAIN for the shortcut icon
     // and lands wherever it lands. Once the icon slot began 404ing for
@@ -645,6 +651,16 @@ async function applyArtwork(
     const drawn = await renderPageLogo(game.name, BRAND_MARK);
     if (drawn) await applySlot(drawn, LibraryAsset.Logo);
   }
+
+  // A drawn fallback is a stand-in, not the finished logo. When the gateway
+  // DOES offer a real logo and the download simply failed this pass, recording
+  // the fingerprint as done would freeze the fallback in place -- re-syncing
+  // sees nothing changed and skips it forever. The GeForce NOW Hogwarts tile
+  // hit exactly that: its logo 404'd once, the 22 KB fallback stuck, and the
+  // real 167 KB logo the Boosteroid copy already had never replaced it. So the
+  // slot is "settled" only when the real logo went on, or when there was none
+  // to fetch in the first place; otherwise the sync retries next pass.
+  const logoSettled = realLogo || !game.artwork?.logo;
   if (iconImage) {
     try {
       // appId as well as game_id: the file is named after the SHORTCUT now,
@@ -690,7 +706,7 @@ async function applyArtwork(
     }
   }
 
-  return { applied, visible };
+  return { applied, visible, logoSettled };
 }
 
 /** Make the tracked map agree with the shortcuts Steam actually has.
@@ -1103,9 +1119,13 @@ export async function syncLibrary(
         if (turn.abandoned) return false;
         const appliedNew = await applyArtwork(appId, game, turn);
         if (appliedNew.applied === 0) artUnavailable.add(game.game_id);
+        // Same guard as the update path: an unsettled logo (real one offered,
+        // download failed, fallback drawn) leaves the fingerprint empty so the
+        // next sync retries instead of freezing the fallback in.
+        const recordedNew = appliedNew.visible && appliedNew.logoSettled ? art : "";
         await withTimeout(
           callbacks.record(trackingKey(game), appId, title, game.options,
-                           appliedNew.visible ? art : "", game.provider,
+                           recordedNew, game.provider,
                            game.url ?? "", String(game.steam_app_id ?? "")),
           undefined, RPC_TIMEOUT);
         file({ appId, provider: game.provider });
@@ -1197,7 +1217,7 @@ export async function syncLibrary(
         // Do not re-attempt art already known to be unavailable this session.
         const tryArt = artChanged && !artUnavailable.has(game.game_id);
 
-        let appliedArt: ArtworkOutcome = { applied: 0, visible: false };
+        let appliedArt: ArtworkOutcome = { applied: 0, visible: false, logoSettled: true };
         if (tryArt) {
           if (!launchChanged) step("Artwork", game.name);
           if (turn.abandoned) return false;
@@ -1205,9 +1225,12 @@ export async function syncLibrary(
           if (appliedArt.applied === 0) artUnavailable.add(game.game_id);
         }
         if (launchChanged || tryArt) {
-          // Keep the old fingerprint until the visible slot goes on, so a later
-          // session tries again rather than marking a blank tile as finished.
-          const recordedArt = tryArt && !appliedArt.visible ? (existing.art ?? "") : art;
+          // Keep the old fingerprint until the visible slot goes on AND the
+          // logo settled, so a later session tries again rather than marking a
+          // blank tile -- or one wearing a drawn fallback over a real logo it
+          // could not fetch -- as finished.
+          const recordedArt = tryArt && (!appliedArt.visible || !appliedArt.logoSettled)
+            ? (existing.art ?? "") : art;
           await withTimeout(
             callbacks.record(trackingKey(game), existing.app_id, title, game.options,
                              recordedArt, game.provider, game.url ?? "",
