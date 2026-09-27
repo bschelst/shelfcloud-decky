@@ -1,11 +1,9 @@
 # Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
-"""Browser detection and launch-command construction.
+"""Browser detection and building the launch command.
 
-Shelfcloud is not tied to one browser, but it is limited to Chromium-based ones:
-Edge, Chrome, Chromium and their relatives. Cloud gaming depends on codec and
-DRM support that Firefox on Linux does not handle reliably, so Firefox is not
-offered at all — a browser that loads the page and then fails to stream is worse
-than being told to install a supported one.
+Chromium-based browsers only (Edge, Chrome, Chromium and family). Cloud gaming
+needs codec and DRM support that Firefox on Linux does not do well, so we do not
+offer it: a browser that loads but then fails to stream is worse than none.
 """
 
 import os
@@ -19,8 +17,8 @@ FLATPAK_ROOTS = [
     "/home/deck/.local/share/flatpak/app",
 ]
 
-# Chromium-based browsers only, ordered by how well they handle cloud gaming.
-# Edge leads because Xbox Cloud has historically been fussiest about it.
+# Chromium-based only, ordered by how well they do cloud gaming. Edge first
+# because Xbox Cloud has always been the most picky about it.
 KNOWN_BROWSERS = [
     {"app_id": "com.microsoft.Edge", "label": "Microsoft Edge"},
     {"app_id": "com.google.Chrome", "label": "Google Chrome"},
@@ -33,23 +31,20 @@ KNOWN_BROWSERS = [
     },
 ]
 
-# Each flag suppresses something that would otherwise sit on top of the game in
-# Game Mode, where there is no way to dismiss it.
+# Each flag hides something that would sit on top of the game in Game Mode.
 BASE_FLAGS = [
     "--no-first-run",
     "--no-default-browser-check",
     "--disable-infobars",
     "--disable-session-crashed-bubble",
     "--disable-features=TranslateUI",
-    # Game Mode has no keyring daemon; without this the browser can stall
-    # waiting on a secret store that will never answer.
+    # Game Mode has no keyring, so without this the browser can hang on it.
     "--password-store=basic",
     "--disable-background-networking",
-    # Cloud streams must be able to start without the user clicking the page.
+    # cloud streams must start without the user clicking the page.
     "--autoplay-policy=no-user-gesture-required",
-    # Hardware video decode via VA-API. Without it the CPU decodes the stream,
-    # which costs frames and battery. SteamOS exposes the GPU drivers to
-    # flatpak, so this works in Game Mode on Deck and Steam Machine hardware.
+    # Hardware video decode with VA-API. Without it the CPU decodes and we lose
+    # frames and battery. SteamOS gives flatpak the GPU drivers, so this works.
     "--enable-features=VaapiVideoDecodeLinuxGL",
 ]
 
@@ -67,16 +62,10 @@ def detect_browsers() -> List[Dict]:
 
 # --------------------------------------------------------------- installation
 
-# The browsers offered for one-press installation, best first.
-#
-# Only these two. Every entry is something the plugin will download onto
-# someone's machine, so the list is short, well known, and the same pair the
-# Discover store puts in front of them. The rest of KNOWN_BROWSERS is still
-# detected and usable — it is simply not installed on the user's behalf.
-#
-# SteamOS ships no browser but does ship the Flathub remote, so both are
-# reachable on a stock Deck with nothing to configure. Edge leads for the same
-# reason it leads KNOWN_BROWSERS: Xbox Cloud has historically been fussiest.
+# Browsers we offer to install with one press, best first. Only these two: each
+# one gets downloaded onto someone's machine, so the list stays short and well
+# known. The rest of KNOWN_BROWSERS still works, we just do not install it. Edge
+# first for the same reason as above.
 INSTALLABLE = [
     {
         "app_id": "com.microsoft.Edge",
@@ -94,10 +83,8 @@ INSTALLABLE = [
 
 FLATHUB_REPO = "https://dl.flathub.org/repo/flathub.flatpakrepo"
 
-# Long enough for a slow connection to pull the browser and, on a Deck with no
-# other flatpaks, the ~300 MB runtime it needs as well. Short enough that a
-# wedged download eventually reports failure rather than appearing to run for
-# ever behind a spinner.
+# Long enough for a slow line to pull the browser plus its ~300 MB runtime,
+# short enough that a stuck download fails instead of spinning for ever.
 INSTALL_TIMEOUT = 15 * 60
 
 
@@ -108,26 +95,21 @@ def installable_browsers() -> List[Dict]:
 
 
 def is_installable(app_id: str) -> bool:
-    """Whether this is one of the two the plugin will install.
+    """Is this one of the two we will install?
 
-    The gate on a value that arrives from the frontend and ends up in an argv.
-    Checked against a literal list rather than validated by pattern: there are
-    exactly two right answers, so anything else is wrong by definition.
+    Guards a value that comes from the frontend and ends up in an argv. Checked
+    against a fixed list: there are only two right answers.
     """
     return any(b["app_id"] == app_id for b in INSTALLABLE)
 
 
 def install_command(app_id: str) -> List[str]:
-    """The exact argv used to install one browser.
+    """The exact argv to install one browser.
 
-    A --user install, because plugin backends run as `deck` — verified on
-    hardware: Decky Loader itself runs as root but drops to the user for
-    plugins. It writes to ~/.local/share/flatpak, which detect_browsers already
-    scans and `flatpak run` already searches, so the install is visible to the
-    rest of the plugin the moment it finishes. No root, and no polkit prompt
-    that Game Mode has no way to show.
-
-    argv, never a shell string.
+    A --user install, because plugin backends run as `deck`. It writes to
+    ~/.local/share/flatpak, which detect_browsers scans and `flatpak run` finds,
+    so the install shows up at once. No root, and no polkit prompt that Game
+    Mode cannot show. argv, never a shell string.
     """
     return [
         FLATPAK_BIN, "install", "--user", "--assumeyes", "--noninteractive",
@@ -136,11 +118,10 @@ def install_command(app_id: str) -> List[str]:
 
 
 def ensure_flathub_command() -> List[str]:
-    """Add the Flathub remote for this user if it is somehow absent.
+    """Add the Flathub remote for this user if it is missing.
 
-    A no-op on stock SteamOS, which ships it. Kept because the install fails
-    with an unhelpful error when the remote is missing, and --if-not-exists
-    makes running it unconditionally harmless.
+    Does nothing on stock SteamOS, which has it. Kept because the install gives
+    a bad error without it, and --if-not-exists makes it safe to always run.
     """
     return [
         FLATPAK_BIN, "remote-add", "--user", "--if-not-exists",
@@ -155,26 +136,21 @@ FLATPAK_OVERRIDES = [
 
 
 def override_command(app_id: str) -> List[str]:
-    """Grant a browser the sandbox permissions cloud gaming needs.
+    """Give a browser the sandbox permissions cloud gaming needs.
 
-    --filesystem=/run/udev:ro lets the browser enumerate devices via udev.
-    --device=all grants read access to /dev/input/*, which is where the
-    actual gamepad data lives. Without it navigator.getGamepads() returns
-    four null slots and cloud providers fall back to "use your phone".
-    — the cloud sees a keyboard-only session and offers no controller input.
-
-    Applied as a --user override so it survives browser updates and does not
-    need root.
+    --filesystem=/run/udev:ro lets it list devices via udev. --device=all gives
+    read access to /dev/input/*, where the gamepad data is. Without it
+    getGamepads() returns four empty slots and the cloud offers no controller.
+    A --user override, so it survives browser updates and needs no root.
     """
     return [FLATPAK_BIN, "--user", "override", *FLATPAK_OVERRIDES, app_id]
 
 
 def profile_dir(app_id: str) -> str:
-    """A persistent browser profile, kept per browser.
+    """A browser profile that stays, one per browser.
 
-    Without this the browser starts logged out on every launch, so the user
-    would have to sign in to the cloud provider every single time they press
-    Play. This is the most important part of the launch command.
+    Without it the browser starts logged out every launch, so the user would
+    have to sign in on every Play. The most important part of the command.
     """
     base = os.environ.get("DECKY_PLUGIN_RUNTIME_DIR", "/tmp/shelfcloud")
     return os.path.join(base, "browser-profiles", app_id)
@@ -183,10 +159,10 @@ def profile_dir(app_id: str) -> str:
 
 
 def resolve_browser(preferred: Optional[str]) -> Optional[Dict]:
-    """The browser to use: the user's choice if installed, else the best available.
+    """The browser to use: the user's choice if installed, else the best one.
 
-    Returns None when no supported browser is installed, which the UI turns into
-    a prompt to install one rather than a failed launch.
+    Returns None when nothing supported is installed; the UI then asks to
+    install one instead of failing the launch.
     """
     installed = detect_browsers()
     if not installed:

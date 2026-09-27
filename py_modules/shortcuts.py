@@ -1,19 +1,10 @@
 # Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """Read Steam's shortcuts.vdf and find the tiles this plugin made.
 
-The plugin knows which shortcuts it created because it writes them down. When
-that record and reality disagree, it has no way to notice: reconcile removes
-"tracked but no longer wanted", and a shortcut it never tracked is invisible to
-it. That is how a game ends up on the shelf twice — one tile tracked, one
-orphaned, and nothing that will ever look at the second.
-
-The orphan is identifiable. Every Shelfcloud shortcut launches
-shelfcloud-launch.py with `--game-id N` in its options, so the file itself says
-which game each tile belongs to.
-
-Reading rather than writing, deliberately. Steam holds shortcuts.vdf open and
-rewrites it wholesale; editing it underneath a running client loses whatever it
-flushes next. Removing a tile is SteamClient's job — this only finds them.
+Reading, not writing: Steam holds the file open and rewrites it wholesale, so
+editing underneath a running client loses whatever it flushes next. Removing a
+tile is SteamClient's job. Every Shelfcloud shortcut runs shelfcloud-launch.py
+with `--game-id N` in its options, so the file itself says which game a tile is.
 
 Binary VDF, enough of it for this:
     0x00 key \0   a nested map begins
@@ -32,17 +23,10 @@ from typing import Dict, List, Optional
 # Every shortcut this plugin creates runs the launcher with this flag.
 _GAME_ID = re.compile(rb"--game-id\s+(\d+)")
 
-# And with this one, which is what tells two tiles for the same game apart.
-# Optional on purpose: a tile written by an older build has no --provider, and
-# such a tile must still be recognised as ours rather than read as an orphan
-# and removed.
-# Accepts a bare token, and a single- or double-quoted value.
-#
-# The writer quotes with shlex, so a key that ever needed quoting used to come
-# back truncated at the opening quote -- a value that matches nothing in
-# synced.json, which reads as an untracked tile and gets removed and rebuilt on
-# every sync. The writer now refuses such a key outright; this half means an
-# older tile carrying one is still read correctly rather than churned.
+# Tells two tiles for the same game apart. Optional: an older tile has no
+# --provider and must still read as ours, not as an orphan. Accepts a bare
+# token or a single/double-quoted value (the quoted branches also cover older
+# tiles from when the writer's shlex quoting could truncate a key).
 _PROVIDER = re.compile(rb"--provider\s+(?:'([^']*)'|\"([^\"]*)\"|(\S+))")
 
 _APPID = re.compile(rb"\x02appid\x00(....)", re.IGNORECASE | re.DOTALL)
@@ -56,9 +40,8 @@ _ENTRY = re.compile(rb"\x00(\d+)\x00")
 def shortcuts_files(steam_root: Optional[str] = None) -> List[str]:
     """Every user's shortcuts.vdf on this machine.
 
-    One per Steam account, and a Deck can have several. The caller does not
-    know which account is signed in, so all of them are read and the app ids
-    speak for themselves.
+    One per Steam account, and a Deck can have several. We read them all and let
+    the app ids speak for themselves.
     """
     root = steam_root or os.path.expanduser("~/.steam/steam")
     userdata = os.path.join(root, "userdata")
@@ -76,10 +59,9 @@ def shortcuts_files(steam_root: Optional[str] = None) -> List[str]:
 def parse(blob: bytes) -> List[Dict]:
     """Every Shelfcloud shortcut here, as {app_id, game_id, provider, name}.
 
-    Entries are split on the index markers rather than parsed as a tree: the
-    file is Steam's, its exact shape varies between client versions, and a
-    tolerant scan that can miss a malformed entry is much better here than a
-    strict parser that raises on one and reports nothing at all.
+    Split on the index markers rather than parsed as a tree: the file's shape
+    changes between Steam versions, and a loose scan that may miss one bad entry
+    beats a strict parser that raises and reports nothing.
     """
     out: List[Dict] = []
     if not blob:
@@ -99,7 +81,7 @@ def parse(blob: bytes) -> List[Dict]:
         appid = _APPID.search(chunk)
         if not appid:
             continue
-        # Steam stores it as an unsigned 32-bit id; Python wants the same back.
+        # unsigned 32-bit id
         (app_id,) = struct.unpack("<I", appid.group(1))
 
         name = _NAME.search(chunk)
@@ -128,10 +110,10 @@ def shelfcloud_shortcuts(steam_root: Optional[str] = None) -> List[Dict]:
 
 
 def duplicates(shortcuts: List[Dict]) -> Dict[int, List[int]]:
-    """game_id -> its app ids, for games that have more than one tile.
+    """game_id -> its app ids, for games with more than one tile.
 
-    Order is the order Steam stores them, so a caller keeping "the first" keeps
-    the oldest — the one more likely to hold playtime and a controller layout.
+    Order is Steam's storage order, so keeping "the first" keeps the oldest, the
+    one more likely to hold playtime and a controller layout.
     """
     by_game: Dict[int, List[int]] = {}
     for entry in shortcuts:

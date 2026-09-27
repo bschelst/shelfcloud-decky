@@ -1,13 +1,10 @@
 # Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
-"""Minimal Chrome DevTools Protocol client.
+"""Small Chrome DevTools Protocol client.
 
-Just enough CDP to find a page and evaluate JavaScript in it — used to press the
-provider's Play button after the browser opens, since the streaming URL contains
-a server-minted session id and therefore cannot be linked to directly.
-
-Implemented on stdlib sockets rather than a websocket library: Decky's Python
-environment does not guarantee third-party packages, and vendoring one for two
-frames of traffic is not worth it.
+Just enough CDP to find a page and run JavaScript in it, so we can press the Play
+button after the browser opens. The streaming URL has a server-made session id,
+so we cannot link to it directly. Built on stdlib sockets because Decky's Python
+has no guaranteed websocket library.
 """
 
 import base64
@@ -127,7 +124,7 @@ class _WebSocket:
                 raise CDPError("server closed the connection")
             if opcode == _OPCODE_TEXT:
                 return payload.decode(errors="replace")
-            # ignore ping/pong/continuation for our purposes
+            # ignore ping/pong/continuation, we dont need them
 
     def close(self) -> None:
         try:
@@ -158,28 +155,16 @@ def evaluate(ws_url: str, expression: str, timeout: float = 15.0) -> Any:
 
 def hold_platform(ws_url: str, user_agent: str, platform: str = "Windows",
                   platform_version: str = "10.0.0", timeout: float = 15.0) -> "_WebSocket":
-    """Tell one page it is running on another OS, and keep telling it.
+    """Tell one page it runs on another OS, and keep telling it.
 
-    Returns the OPEN socket. The caller must keep that object alive for as long
-    as the lie has to hold — a CDP emulation override belongs to the session
-    that set it, so closing the socket reverts it instantly. That is exactly
-    why evaluate() cannot be used for this: it opens and closes a socket per
-    call, so an override set through it is gone before the page reads it.
+    Returns the open socket. The caller must keep it alive: a CDP override
+    belongs to the session that set it, so closing the socket undoes it at once.
+    That is why evaluate() will not work here, it opens and closes per call.
 
-    Why this is needed at all, when the launcher already passes --user-agent:
-    that flag changes the User-Agent STRING and nothing else. Measured on the
-    device with the flag on, navigator.platform was still "Linux x86_64" and
-    navigator.userAgentData.platform was still "Linux", and there is no
-    command-line flag for either (--disable-features=UserAgentClientHint was
-    tried and changed nothing). Emulation.setUserAgentOverride is the only
-    thing that moves the string, navigator.platform, navigator.userAgentData
-    and the Sec-CH-UA-Platform request headers together.
-
-    No domain is enabled by THIS call — the override needs none. A caller that
-    goes on to add a startup script does enable Page (it is required, see
-    add_startup_script) and must then call drain_in_background, because an
-    enabled domain pushes events into a socket nobody reads, and a peer that
-    cannot finish writing eventually blocks.
+    The --user-agent flag only changes the UA string; navigator.platform and
+    userAgentData stay "Linux" and have no flag of their own.
+    setUserAgentOverride is the only thing that moves all of them together.
+    This call enables no domain.
     """
     ws = _WebSocket(ws_url, timeout=timeout)
     try:
@@ -219,12 +204,10 @@ def hold_platform(ws_url: str, user_agent: str, platform: str = "Windows",
 
 
 def reload_page(ws: "_WebSocket", timeout: float = 15.0) -> None:
-    """Reload so the document is built with the override already in force.
+    """Reload so the document is built with the override already on.
 
-    Without this the page has already run its checks against the real platform
-    and cached the answer; the override would only affect whatever it asks
-    afterwards. Page.enable is deliberately NOT sent — reload does not need it,
-    and enabling the domain would start an event stream nobody reads.
+    Without it the page has already checked the real platform and cached the
+    answer. Page.enable is not sent on purpose: reload does not need it.
     """
     ws.send_text(json.dumps({"id": 2, "method": "Page.reload",
                              "params": {"ignoreCache": False}}))
@@ -238,23 +221,16 @@ def reload_page(ws: "_WebSocket", timeout: float = 15.0) -> None:
 def add_startup_script(ws: "_WebSocket", source: str, timeout: float = 15.0) -> None:
     """Run JS in every document this page loads, before the page's own scripts.
 
-    Page.enable is NOT optional here, and the failure without it is a quiet
-    one. Measured on the device, against the live page:
+    Page.enable is not optional here, and without it the failure is quiet.
+    Tested on the device:
 
         enable -> script -> reload    script ran
         script -> enable -> reload    script ran
         script -> reload              script NEVER ran
 
-    In that last case the command still answered {"identifier": "1"} and the
-    reload genuinely happened — a stamp set on the old document was gone
-    afterwards — so every signal said success and nothing was injected.
-
-    Enabling Page starts an event stream, so a caller must follow the reload
-    with drain_in_background.
-
-    Sent on the HELD socket, so it lives exactly as long as the session that
-    set it, and the reload that follows is what gets it into the document the
-    page is actually running.
+    In that last case the command still said ok and the reload happened, but
+    nothing was injected. Enabling Page starts an event stream, so the caller
+    must follow the reload with drain_in_background. Sent on the held socket.
     """
     for ident, method, params in (
         (3, "Page.enable", {}),
@@ -274,22 +250,18 @@ def add_startup_script(ws: "_WebSocket", source: str, timeout: float = 15.0) -> 
 
 
 def drain_in_background(ws: "_WebSocket") -> "threading.Thread":
-    """Read and discard everything, forever, so an enabled domain cannot wedge.
+    """Read and throw away everything so an enabled domain cannot get stuck.
 
-    Once Page is enabled the browser pushes an event for every frame, request
-    and lifecycle step of a session that may run for hours. Nothing wants to
-    read them, but something has to: an unread socket stops being drained, the
-    peer's writes back up, and the override this session exists to hold dies
-    with it.
-
-    Daemon, so it never keeps the launcher alive past the game.
+    Once Page is on, the browser sends an event for every frame and request, for
+    hours. Nobody wants them, but if the socket is not read the peer's writes
+    back up and the override dies. Daemon, so it never outlives the game.
     """
     def pump() -> None:
         while True:
             try:
                 ws.recv_text()
             except Exception:
-                return            # socket closed at end of session; expected
+                return            # socket closed at end of session, thats fine
 
     thread = threading.Thread(target=pump, name="cdp-drain", daemon=True)
     thread.start()
@@ -297,20 +269,16 @@ def drain_in_background(ws: "_WebSocket") -> "threading.Thread":
 
 
 def open_session(ws_url: str, timeout: float = 15.0) -> "_WebSocket":
-    """An open CDP session with no emulation attached.
-
-    Same lifetime rule as hold_platform: whatever is installed through it lives
-    only as long as this socket, so the caller keeps the object.
-    """
+    """An open CDP session with no emulation. Same rule as hold_platform:
+    whatever is set through it lives only as long as this socket."""
     return _WebSocket(ws_url, timeout=timeout)
 
 
 def dispatch_click(ws_url: str, x: float, y: float, timeout: float = 15.0) -> None:
-    """Click at page coordinates via CDP Input events.
+    """Click at page coordinates with CDP Input events.
 
-    Unlike el.click() from Runtime.evaluate, these are treated as real user
-    gestures by Chrome — so requestFullscreen() and other APIs that require
-    "user activation" work when triggered this way.
+    Unlike el.click(), Chrome treats these as real user gestures, so APIs like
+    requestFullscreen() that need "user activation" work this way.
     """
     ws = _WebSocket(ws_url, timeout=timeout)
     try:

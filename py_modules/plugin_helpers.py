@@ -10,14 +10,10 @@ def shell_join(parts: List[str]) -> str:
     """Build a Steam shortcut's launch options as one shell-safe string.
 
     Steam runs a shortcut through `/bin/sh -c "<exe> <options>"`, so every
-    argument has to survive a round trip through the shell. Plain `" ".join`
-    does not, and the way it fails is genuinely nasty:
-
-    a GeForce NOW URL ends `?game-id=<uuid>&lang=en_US`, and that unquoted `&`
-    is a shell operator. `sh` backgrounds everything before it and treats the
-    rest as a second command.
-
-    Quoting is therefore not tidiness here. Do not simplify this back.
+    argument must survive the shell. A GeForce NOW URL ends
+    `?game-id=<uuid>&lang=en_US`, and that unquoted `&` is a shell operator: sh
+    would run the rest as a second command. So the quoting matters, do not
+    simplify it away.
     """
     return " ".join(shlex.quote(part) for part in parts)
 

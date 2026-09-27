@@ -143,23 +143,14 @@ CLICK_PLAY_JS = """
 })()
 """
 
-# Words meaning "play" in the languages SteamOS is commonly set to. Verified
-# needed: xbox.com localises by IP, so an English-only list silently fails —
-# a Belgian browser is served "NU SPELEN", not "PLAY".
-#
-# Single words only. The matcher looks for one of these as a word inside the
-# button's first line, so multi-word labels are covered without listing every
-# phrasing: "nu spelen", "jetzt spielen" and "jouer maintenant" are each caught
-# by their verb alone.
-#
-# Shared by every provider — Boosteroid, GeForce NOW and Xbox all use this one
-# list, so a language added here works everywhere.
+# Play words per language. xbox.com localises by IP, so an english-only list
+# silently fails: a Belgian browser gets "NU SPELEN", not "PLAY". Single words
+# only, matched inside the button's first line, shared by every provider.
 PLAY_WORDS = [
     # English, Dutch, French, German, Spanish, Italian, Portuguese
     "play", "spelen", "speel", "jouer", "spielen", "jugar", "juega",
     "gioca", "giocare", "jogar", "jogue",
-    # Nordic. Both the infinitive and the imperative: Xbox labels the button
-    # "Spill nå" in Norwegian, not "Spille".
+    # Nordic, both infinitive and imperative (Xbox uses "Spill nå", not "Spille")
     "spela", "spille", "spill", "spil", "pelaa",
     # Central and Eastern Europe
     "graj", "zagraj", "hrát", "hrat", "hrať", "joacă", "joaca", "játék",
@@ -170,17 +161,9 @@ PLAY_WORDS = [
     "遊ぶ", "プレイ", "开始游戏", "立即游戏", "玩", "플레이", "게임하기",
 ]
 
-# Words that disqualify a control no matter what else it says.
-#
-# Boosteroid offers "Subscribe and Play" — a play word in a button that takes
-# money, and clicking it opened the account page instead of the game. A play
-# word is not enough on its own; the label has to be an instruction to play,
-# not to buy or to sign in.
-#
-# Any of these appearing anywhere in the label rejects it outright, so a
-# provider adding "Upgrade and play" or "Buy to play" is refused too. The cost
-# of being wrong here is asymmetric: failing to click means the user presses
-# Play themselves, while clicking the wrong thing can start a purchase.
+# Words that disqualify a control whatever else it says. Boosteroid's
+# "Subscribe and Play" carries a play word but takes money, and clicking the
+# wrong thing can start a purchase. Any of these anywhere in the label rejects.
 DENY_WORDS = [
     # subscribing
     "subscribe", "subscription", "subscriptions", "abonneren", "abonnement",
@@ -199,47 +182,27 @@ DENY_WORDS = [
     "registreren", "inloggen", "aanmelden", "connexion", "anmelden",
 ]
 
-# Phrases that name a category rather than give an instruction.
-#
-# "Free to Play" is a genre filter on GeForce NOW. Every word in it is
-# innocent, so only the phrase catches it — and it appears both hyphenated on
-# the chip and spaced in the aria-label, which is how it slipped past a
-# tokeniser fix: the provider's own selector matched the chip's aria-label
-# before any text rule ran.
-#
-# Compared against the label with hyphens folded to spaces, so one entry
-# covers both spellings.
+# Phrases that name a category, not a "play" action. "Free to Play" is a genre
+# filter on GeForce NOW: each word is fine on its own, only the phrase catches
+# it. Checked with hyphens turned into spaces, so one entry covers both spellings.
 DENY_PHRASES = [
     "free to play", "play to earn", "pay to play", "cross play",
     "couch play", "local play", "online play", "co op play",
     "play store", "google play", "play pass", "play together",
     "how to play", "ways to play", "learn to play", "ready to play",
     "gratis spelen", "samen spelen", "hoe te spelen",
-    # Luna's top navigation, which sits on every game page. As a <div
-    # role=button> it lands in the BUTTON group, where two leading words are
-    # read — so "Remote Play" matched on "play" and would have navigated away
-    # from the game. Luna keeps this label in English even on localised sites,
-    # so one phrase covers every market.
+    # Luna's top nav is a <div role=button>, so it lands in the button group.
+    # "Remote Play" matched on "play" and took us away from the game. English
+    # on every market.
     "remote play",
-    # Signed out, Luna's PRIMARY button reads "Play free with Prime" and leads
-    # to a subscription signup. The signed-out check and the :not(_log_in)
-    # selector both already stop it; this is the third layer, because the cost
-    # of being wrong here is starting a purchase rather than a game.
+    # Signed out, Luna shows "Play free with Prime" which goes to a signup. Third
+    # layer of defence, the signed-out check and :not(_log_in) also stop it.
     "free with prime", "gratis met prime",
 ]
 
-# Is the game actually running yet?
-#
-# This used to be "is there a <video> on the page", and that is not the same
-# question. Luna's game detail page carries a TRAILER — paused, muted, 0x0 —
-# so the answer was yes before anything had been clicked, the launcher logged
-# "already streaming" and returned, and Play was never pressed. Verified on the
-# device: one <video> with src m.media-amazon.com/images/I/*.mp4, paused=true,
-# videoWidth=0, sitting right next to an enabled "Play now" button.
-#
-# A stream that is really running is PLAYING and has real dimensions. A trailer
-# that happens to be auto-playing muted is still excluded by the size test on
-# Luna, where it reports 0x0 until someone opens it.
+# Is the game really running yet? Not just "is there a <video>": Luna's page has
+# a paused 0x0 trailer, so that check said yes before we clicked anything. A real
+# stream is playing and has real width and height.
 IS_STREAMING_JS = """
 (() => {
   if (location.href.includes('streaming')) return true;
@@ -248,18 +211,11 @@ IS_STREAMING_JS = """
 })()
 """
 
-# What the stream actually came down at, beside what the window asked for.
-#
-# Scaling the interface with --force-device-scale-factor makes a provider's UI
-# readable on a handheld and across a room, but it also shrinks the CSS
-# viewport: 1280x720 at 1.25 leaves the page believing it is 1024x576. Whether
-# that costs picture quality depends on something only the provider knows —
-# whether it sizes the stream from CSS pixels or from real ones — and the only
-# honest way to find out is to read the video element while a game runs.
-#
-# Logged, not acted on. If `stream` comes back matching `css` rather than
-# `physical`, the scaling is costing resolution and the ladder wants
-# revisiting. If it matches `physical`, the interface got bigger for free.
+# The real stream size next to what the window asked for.
+# --force-device-scale-factor makes the UI bigger but shrinks the CSS viewport
+# (1280x720 at 1.25 reads as 1024x576), and only the provider knows if that
+# costs quality. We only log it: `css` means we lose resolution, `physical`
+# means the bigger UI was free.
 STREAM_STATS_JS = """
 (() => {
   const v = [...document.querySelectorAll('video')].find(
@@ -275,9 +231,8 @@ STREAM_STATS_JS = """
 })()
 """
 
-# What the page offered, for the log when nothing matched. Every provider
-# words and marks up its Play button differently and changes it without
-# notice, so a bare "not found" costs a trip to the device to find out why.
+# What the page had, logged when nothing matched. Providers change their Play
+# button without warning, and a bare "not found" means a trip to the device.
 LIST_CANDIDATES_JS = """
 (() => {
   const out = [];
@@ -292,11 +247,8 @@ LIST_CANDIDATES_JS = """
 })()
 """
 
-# What a provider looks like when the browser profile is not signed in.
-#
-# Both checks were verified against the live sites while signed out. They are
-# structural rather than textual on purpose: the visible wording is localised,
-# but the login URL and the routing are not.
+# Provider profiles. The signed_out checks look at the URL or the DOM, not the
+# text on purpose: the wording is localised, but the login URL and routing are not.
 PROVIDERS = {
     "boosteroid": {
         "label": "Boosteroid",
@@ -306,17 +258,14 @@ PROVIDERS = {
     },
     "xbox_cloud": {
         "label": "Xbox Cloud",
-        # Signed out, the page offers /auth/msa?action=logIn and no Play
-        # control. The locale prefix varies (/nl-BE/, /en-US/); the rest does
-        # not.
+        # signed out shows /auth/msa and no Play control. Locale prefix varies.
         "signed_out": "!!document.querySelector('a[href*=\"/auth/msa\"]')",
-        # Signed in, the Play control links into the launch route.
+        # signed in, the Play control links into the launch route.
         "selectors": ["a[href*='/play/launch/']"],
         "setup_url": "https://www.xbox.com/play",
     },
     "geforce_now": {
-        # The deeplink bounces to #/loginwall when the profile is not signed
-        # in — an unambiguous signal that needs no DOM inspection at all.
+        # the deeplink jumps to #/loginwall when not signed in, so no DOM check.
         "label": "GeForce NOW",
         "signed_out": "location.hash.includes('loginwall')",
         "selectors": ["button[aria-label*='Play' i]"],
@@ -324,66 +273,34 @@ PROVIDERS = {
     },
     "amazon_luna": {
         "label": "Amazon Luna",
-        # Luna refuses to play on Linux.
-        #
-        # Not a capability problem — measured on the device, this browser
-        # reports "probably" for h264, h265, vp9 AND av1, has MediaSource and
-        # has EME. Luna is reading the platform out of the User-Agent and
-        # refusing on that alone, so the page shows "Unsupported Browser" and
-        # the stream never starts even though everything it needs is present.
-        #
-        # Verified over CDP on the live page: overriding only
-        # navigator.userAgent is enough — Luna does not consult
-        # navigator.userAgentData, which is why a command-line flag works here
-        # and no CDP-session override is needed (that one dies with the
-        # debugging session anyway).
-        #
-        # Same Edge version the browser really is, so nothing else about the
-        # page changes; only the platform is different.
+        # Luna refuses to play on Linux, but the browser can do it: it has the
+        # codecs, MediaSource and EME. Luna reads the platform from the
+        # User-Agent alone, so faking the UA string is enough (it ignores
+        # navigator.userAgentData). Same Edge version we really are, only the
+        # platform is different.
         "user_agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             "(KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36 Edg/153.0.0.0"
         ),
-        # Reporting Windows has a side effect: Luna then believes a desktop app
-        # might be installed and pokes "luna://" to find out, which Chromium
-        # surfaces as "This site is trying to open xdg-open". See
-        # NEUTRALISE_APP_HANDOFF_JS.
+        # saying we are Windows makes Luna poke "luna://" to look for a desktop
+        # app, which Chromium shows as an xdg-open prompt. See below.
         "startup_js": "NEUTRALISE_APP_HANDOFF_JS",
-        # The launch URL is luna.amazon.com, and Luna REDIRECTS it to the
-        # viewer's own country: luna.amazon.de, luna.amazon.co.uk,
-        # luna.amazon.com.be. Matching on the host we asked for therefore finds
-        # the page in some markets and not others.
-        #
-        # It is worth being precise about how this hid: Belgium redirects to
-        # luna.amazon.com.be, which CONTAINS "luna.amazon.com", so the substring
-        # match succeeded here by accident. Germany (luna.amazon.de) and the UK
-        # (luna.amazon.co.uk) do not contain it and would have found nothing,
-        # waited out the 45s timeout and left Play to the user — a bug that
-        # only ever appeared for people abroad.
+        # Luna sends the launch URL to the viewer's own country: luna.amazon.de,
+        # luna.amazon.co.uk, luna.amazon.com.be. Matching the full host only
+        # works in some markets, so we match the "luna.amazon." start.
         "page_match": "luna.amazon.",
-        # Two element ids, both read off the live signed-out page. Ids, not
-        # text: Luna localises by IP like Xbox does, and a Belgian browser is
-        # served "Inloggen" rather than "Sign in".
-        #
-        # This check earns its keep more than the others. Signed out, Luna's
-        # PRIMARY button reads "Speel gratis met Prime" — it carries a play
-        # word, is not on any deny list, and leads to a Prime signup. Detecting
-        # signed-out first is what stops the launcher pressing it.
+        # Element ids, not text: Luna localises by IP, a Belgian browser gets
+        # "Inloggen". This check matters most, becaue signed out Luna's main
+        # button "Speel gratis met Prime" has a play word and goes to Prime.
         "signed_out": (
             "!!document.querySelector('#item_secondary_nav_button_sign_in, "
             "[data-test-id=\"primary_entitled_button_log_in\"]')"
         ),
-        # Read off the live signed-in page rather than guessed. Both states use
-        # the same prefix and differ only in the suffix:
-        #
-        #   primary_entitled_button_purchase_detail   signed in  -> "Play now"
-        #   primary_entitled_button_log_in            signed out -> "Play free with Prime"
-        #
-        # The :not() is the important half. Signed out, that button carries a
-        # play word, is on no deny list, and leads to a Prime signup — so a
-        # selector matching the prefix alone would press "subscribe" for anyone
-        # whose session had expired. Excluding the log-in suffix means this can
-        # only ever match a control that plays something.
+        # Both states share the same prefix and differ only in the suffix:
+        #   ..._purchase_detail  signed in  -> "Play now"
+        #   ..._log_in           signed out -> "Play free with Prime"
+        # The :not(_log_in) is the important half: without it an expired session
+        # would press the Prime signup button.
         "selectors": [
             'button[data-test-id^="primary_entitled_button"]'
             ':not([data-test-id$="_log_in"])'

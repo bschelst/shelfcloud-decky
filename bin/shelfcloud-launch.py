@@ -2,31 +2,18 @@
 # Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """Launch one cloud game and press the provider's Play button.
 
-This is what a Shelfcloud Steam shortcut actually runs. It exists because the
-provider's streaming URL contains a session id minted server-side when Play is
-pressed, so the game page cannot be linked to directly — something has to click.
-
-Steam launches this, not the plugin, so the automation has to live here rather
-than in the plugin backend.
+What a Shelfcloud Steam shortcut runs. The streaming URL carries a session id
+made when Play is pressed, so the game page cannot be linked to and something
+has to click. Steam runs this, not the plugin.
 
 Usage:
     shelfcloud-launch.py <browser_app_id> <profile_dir> [url]
                          [--game-id N] [--provider KEY] [--no-autoplay] [--no-kiosk]
 
-A game tile passes NO url. --game-id is what resolves a launch: the gateway is
-asked where the game goes right now, so a changed URL or provider preference
-takes effect without re-syncing, and the launch can be counted. When the
-gateway does not answer, the offline URL is read from synced.json by game id.
-
-It lives there rather than on this command line because Steam shows launch
-options verbatim in a game's properties, and a provider deep link is not
-something anyone needs to read there.
-
-[url] is still accepted, for the website tile (which has no game id) and for
-shortcuts written before the URL moved off the command line.
-
-Exits when the browser exits, so Steam shows the game as running for the whole
-session and the tile's playtime is accurate.
+A game tile passes no url; --game-id lets the gateway say where the game goes
+now, so a changed URL or provider works without re-syncing, and synced.json is
+the offline fallback. [url] is still taken for the website tile and old
+shortcuts. Exits when the browser exits so Steam counts playtime right.
 """
 
 import ipaddress
@@ -57,82 +44,45 @@ from luna_shims import (  # noqa: E402
 
 CDP_PORT = 9223
 
-# Identifies this launcher to the gateway. It must be SOMETHING: the proxy in
-# front of the gateway rejects urllib's default with 403.
+# Must be something: the proxy in front of the gateway rejects urllib's default with 403.
 USER_AGENT = "Shelfcloud-Launcher/0.1 (+https://github.com/bschelst/shelfcloud)"
 PAGE_TIMEOUT = 45.0
 CLICK_TIMEOUT = 60.0
 
-# How long to wait for a first frame before giving up on measuring the stream.
-# Generous because a queue on a busy evening is minutes, not seconds, and this
-# costs nothing while it waits — it runs beside the session, not in front of
-# it, and a game that never starts simply goes unmeasured.
+# Wait for a first frame before giving up on measuring. Generous, a queue on a
+# busy evening is minutes. Runs next to the session so it costs nothing.
 STREAM_STATS_TIMEOUT = 180.0
 
-# Where this plugin's gateway lives. Fixed, and https.
-#
-# It used to be read from settings.json, which holds whatever address the
-# plugin was last pointed at — on this developer's Deck, a plaintext
-# http://192.168.x.x:8000. Every launch then sent the bearer token across the
-# LAN in clear and accepted a launch URL from whoever answered that port. The
-# plugin backend already ignores that setting and uses its own constant; the
-# launcher disagreeing with it is what kept the hole open.
-#
-# Must match DEFAULT_GATEWAY in main.py — tests/unit/test_gateway_default.py
-# checks that they agree.
+# The gateway. Fixed and https, NOT read from settings.json: that key holds
+# whatever plaintext LAN address the plugin was last aimed at, which put the
+# bearer token on the wire in clear. Must match DEFAULT_GATEWAY in main.py,
+# tests/unit/test_gateway_default.py checks they agree.
 GATEWAY = "https://shelfcloud.cc"
 
-# Where the gateway used to live. Still serving, and still allowed as a
-# launch target during the changeover; see ALLOWED_LAUNCH_DOMAINS.
+# Where the gateway used to live, still allowed during the changeover, see below.
 LEGACY_HOST = "shelfcloud.schelstraete.org"
 
-# The only places a game is allowed to launch.
+# The only places a game may launch. Checked HERE on the device, not just on
+# the gateway: a server can be compromised and its URL opens in a kiosk browser
+# holding live provider sessions, with no address bar to show where it went.
 #
-# Checked HERE, on the device, not merely on the gateway. The gateway is a
-# server, servers get compromised, and a launch URL it returns is opened in a
-# kiosk-mode browser carrying live Microsoft, NVIDIA and Boosteroid sessions —
-# with no address bar and no tab strip to show where it went. A phishing page
-# in that window is indistinguishable from the real sign-in.
-#
-# Every launch URL in the production catalog is https on one of these hosts, so
-# this costs nothing in practice.
-#
-# Luna is pinned to the FULL host, not to "amazon.com". The entry below is a
-# suffix rule, so "amazon.com" would admit every host Amazon serves — retail
-# pages, seller-controlled content, arbitrary S3-backed subdomains — to a
-# fullscreen browser holding the user's provider sessions. "luna.amazon.com" is
-# the only Amazon host a Shelfcloud launch ever needs.
-#
-# That host is also why the catalog stores luna.amazon.com links rather than the
-# play.amazon.<tld> URL Luna's own API returns: one host to allow instead of a
-# dozen country variants, and it redirects each user to their own Luna domain.
+# Luna is the FULL host, not "amazon.com": these are suffix rules, so
+# "amazon.com" would let in every Amazon host (retail, S3 subdomains). Only
+# luna.amazon.com is needed, which is also why the catalog stores it instead of
+# the country-specific play.amazon.<tld> that Luna returns.
 ALLOWED_LAUNCH_DOMAINS = (
     "geforcenow.com",     # play.geforcenow.com
     "boosteroid.com",     # cloud.boosteroid.com
     "xbox.com",           # www.xbox.com
-    "luna.amazon.com",    # Amazon Luna — full host on purpose, see above
-    # Our own site. The plugin makes a "Shelfcloud (website)" tile so the
-    # catalogue can be browsed under Steam Input — Steam's built-in browser
-    # forwards no controller input, so the d-pad is dead there.
-    #
-    # It was missing, so that tile could never launch: every URL goes through
-    # this check, the gateway's own host was not on the list, and the launcher
-    # refused its own website with exit 3. Nothing said so on screen — the tile
-    # simply did nothing.
-    #
-    # DERIVED from GATEWAY rather than typed again, so the two cannot drift.
-    # Admitting it grants nothing new: this is the host the launcher already
-    # asks where every game goes, so trusting it to answer and refusing to open
-    # it was the inconsistent half.
+    "luna.amazon.com",    # full host on purpose, see above
+    # Our own site, for the "Shelfcloud (website)" tile — Steam's own browser
+    # sends no controller input, so the catalogue needs one under Steam Input.
+    # Taken from GATEWAY so the two cannot drift; this is the host the launcher
+    # already asks where every game goes.
     urllib.parse.urlsplit(GATEWAY).hostname or "",
-    # The previous home, kept while devices catch up.
-    #
-    # A tile's address is resolved by the gateway at launch, so the moment the
-    # published Shelfcloud page moves to the new domain, a Deck still running
-    # an older plugin is handed an address its allowlist does not know — and a
-    # Deck on the new plugin would refuse the old one. Allowing both means the
-    # tile works whichever side of the update a device is on. Drop it once
-    # every device has been updated.
+    # The old home, kept while devices catch up. The gateway resolves a tile's
+    # address at launch, so allowing both means the tile works whichever side of
+    # the update a device is on. Drop it once every device is updated.
     LEGACY_HOST,
 )
 
@@ -140,9 +90,8 @@ ALLOWED_LAUNCH_DOMAINS = (
 def _ssl_context():
     """Verified TLS, using certifi's CA bundle if available.
 
-    The launcher runs as a standalone process (not inside Decky's sandbox),
-    so it cannot import Decky's helpers module. But certifi is installed by
-    Decky and reachable on the system path, so we use it directly.
+    Runs standalone (not in Decky's sandbox) so it cannot import Decky's
+    helpers, but certifi is on the system path and reachable directly.
     """
     try:
         import certifi
@@ -152,42 +101,23 @@ def _ssl_context():
 
 
 def is_allowed_launch_url(url) -> bool:
-    """Is this somewhere a cloud game may legitimately be played?
+    """Is this somewhere a cloud game may really be played?
 
-    https only: a launch carries provider session cookies, and http would both
-    expose them and let anything on the path rewrite the page.
+    https only: a launch carries provider session cookies. The host must BE an
+    allowed domain or sit under it; the dot in `"." + domain` is the whole
+    check, without it "xbox.com.evil.com" would pass. Credentials in the
+    authority are refused, "https://play.geforcenow.com@evil.com/" reads as
+    though evil.com is not the host.
 
-    The host must BE one of the allowed domains or sit beneath it. The dot in
-    `"." + domain` is the whole check — without it "xbox.com.evil.com" ends
-    with "xbox.com" and passes.
-
-    Credentials in the authority are refused outright:
-    "https://play.geforcenow.com@evil.com/" names the host evil.com while
-    reading, at a glance, as though it does not.
-
-    A URL containing a backslash, a tab or a newline is refused before it is
-    parsed at all, because on those this checker and the browser DISAGREE about
-    what the host is — and the browser is the one that opens the page.
-
-    Python's urlsplit follows RFC 3986, where "\\" is an ordinary character.
-    Chromium follows the WHATWG URL Standard, where "\\" ends the authority
-    exactly like "/". So
-
-        https://evil.com\\cloud.boosteroid.com/steal
-
-    has host "evil.com\\cloud.boosteroid.com" here — which ends with
-    ".boosteroid.com" and passes every check below — and host "evil.com" in the
-    browser, which then opens an attacker's page in kiosk mode with the user's
-    provider sessions. Tab, CR and LF are the same class of bug: a browser
-    strips them from a URL before resolving it, so they can move the host
-    boundary after this function has approved it.
-
-    No legitimate provider URL contains any of them, so refusing is free.
+    A backslash, tab or newline is refused before parsing: urlsplit follows
+    RFC 3986 (where "\\" is normal) but Chromium follows WHATWG (where "\\" ends
+    the authority like "/"), so "https://evil.com\\cloud.boosteroid.com/" is
+    host evil.com to the browser but passes the suffix check here. No real
+    provider URL has any of them.
     """
     if not url or not isinstance(url, str):
         return False
-    # Before parsing, and on the RAW string: .strip() would remove a trailing
-    # newline that is part of the attack.
+    # On the RAW string: .strip() would drop a trailing newline that is part of the attack.
     if any(c in url for c in "\\\t\r\n"):
         return False
     try:
@@ -203,15 +133,13 @@ def is_allowed_launch_url(url) -> bool:
         return False
     return any(host == d or host.endswith("." + d) for d in ALLOWED_LAUNCH_DOMAINS)
 
-# Where the plugin keeps its gateway address and credential. The launcher is
-# started by Steam, not by the plugin, so it has to read them itself.
+# Gateway address and credential. Steam starts the launcher, not the plugin,
+# so it reads these itself.
 SETTINGS_FILE = os.path.expanduser(
     "~/homebrew/settings/Shelfcloud/settings.json")
 
-# What the plugin remembers about every tile it made, keyed by game id. The
-# offline launch URL lives here rather than in the Steam shortcut, because
-# Steam displays launch options verbatim in a game's properties and a provider
-# deep link is not something anyone needs to read there.
+# What the plugin remembers per tile, keyed by game id. The offline launch URL
+# lives here, not in the shortcut, because Steam shows launch options verbatim.
 STATE_FILE = os.path.expanduser(
     "~/homebrew/settings/Shelfcloud/synced.json")
 RESOLVE_TIMEOUT = 8
@@ -220,24 +148,17 @@ RESOLVE_TIMEOUT = 8
 def stored_fallback(game_id: str, provider: str = "") -> str:
     """The offline launch URL for this game, or "" if there is not a usable one.
 
-    Never raises: this runs on the path where the gateway has ALREADY failed,
-    so an unreadable or malformed state file must degrade to "no fallback"
-    rather than take the launch down with it.
-
-    The URL is checked here as well as at the end of main(). This file is
-    written by the plugin, but it is also just a file on disk — and it is read
-    precisely when the gateway cannot be consulted to correct it.
+    Never raises: runs after the gateway has already failed, so a bad state file
+    must degrade to "no fallback". The URL is checked again here since the file
+    is read exactly when the gateway cannot be asked to correct it.
     """
     if not game_id:
         return ""
     try:
         with open(STATE_FILE, encoding="utf-8") as handle:
             state = json.load(handle)
-        # Keyed "<game id>:<provider>" now, because a game can have a tile per
-        # service and they cannot share one record. The bare id is still tried,
-        # for an entry written before that and not yet rewritten — this is the
-        # offline path, which runs precisely when nothing can fetch the right
-        # answer instead, so it reads both shapes rather than one.
+        # Keyed "<game id>:<provider>" now, a game can have a tile per service.
+        # The bare id is still tried for entries written before that change.
         entry = state.get(f"{game_id}:{provider}") if provider else None
         if entry is None:
             entry = state.get(str(game_id))
@@ -249,17 +170,14 @@ def stored_fallback(game_id: str, provider: str = "") -> str:
         return ""
     return url if isinstance(url, str) and url_is_acceptable(url, provider) else ""
 
-# Steam runs this script and captures none of its output — stdout goes nowhere
-# a person can read. That mattered: when a launch quietly used the stored URL
-# instead of asking the gateway, there was no way to tell from the outside,
-# because a fallback is indistinguishable from success as far as the user is
-# concerned. The game still starts. Only the gateway's silence gives it away.
+# Steam catches none of this script's output, so we keep our own log. A silent
+# fallback to the stored URL is otherwise invisible: the game starts either way,
+# only the log says whether the gateway was ever reached.
 _PLUGIN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _HOMEBREW_DIR = os.path.dirname(os.path.dirname(_PLUGIN_DIR))
 LOG_FILE = os.path.join(_HOMEBREW_DIR, "logs", "Shelfcloud", "shelfcloud-launch.log")
 
-# Kept small on purpose. This lives on a Deck's internal storage and nothing
-# rotates it, so it trims itself rather than growing without end.
+# Kept small: lives on Deck internal storage and nothing rotates it, so it trims itself.
 LOG_MAX_BYTES = 256 * 1024
 LOG_KEEP_BYTES = 128 * 1024
 
@@ -267,8 +185,8 @@ LOG_KEEP_BYTES = 128 * 1024
 def log(message: str) -> None:
     """Write one timestamped line, to the log file and to stdout.
 
-    Never raises: a launcher that dies because it could not log would be a
-    worse bug than the one this exists to diagnose.
+    Never raises: dying because it could not log would be worse than the bug
+    this exists to find.
     """
     line = f"[shelfcloud] {message}"
     print(line)  # keep: log() is the writer
@@ -291,11 +209,8 @@ def log(message: str) -> None:
 def configured_scale():
     """What the user chose for the interface scale, or "auto".
 
-    Read from the plugin's settings at LAUNCH, deliberately, rather than baked
-    into the Steam shortcut. Launch options are written once per tile, so
-    putting it there would mean re-syncing hundreds of shortcuts to change one
-    number — and a half-finished re-sync would leave a library scaled two
-    different ways.
+    Read at launch, not baked into the shortcut: else changing one number would
+    mean re-syncing hundreds of shortcuts.
     """
     try:
         with open(SETTINGS_FILE, encoding="utf-8") as handle:
@@ -307,9 +222,8 @@ def configured_scale():
 def display_flags() -> list:
     """Window size and scale for this display, with a line in the log.
 
-    Logged because it is otherwise invisible: the flags are applied before the
-    browser paints anything, so a wrong guess shows up only as a UI that is
-    the wrong size, with nothing to say what was detected or why.
+    Logged because it is set before the browser paints, so a wrong guess only
+    shows up as a wrong-size UI with nothing to say why.
     """
     setting = configured_scale()
     log("display: " + display.describe(setting))
@@ -319,25 +233,15 @@ def display_flags() -> list:
 def resolve_launch(game_id: str, fallback_url: str, provider: str = "") -> tuple:
     """Ask the gateway where this game launches right now.
 
-    The URL used to be frozen into the Steam shortcut at sync time, so a launch
-    never reached the gateway: a URL that changed upstream stayed broken until
-    the next sync, and a changed provider preference needed a re-sync. Asking at
-    launch fixes both, and lets the gateway count what actually gets played.
-
-    The frozen URL is kept as a fallback and that is not belt-and-braces: the
-    gateway is a machine on the user's LAN, and a game must not become
-    unplayable because it is asleep. A slow gateway must not delay a launch
-    either, hence the short timeout.
-
-    Every path out of here is logged with its reason. A fallback is invisible
-    from the user's side — the game starts either way — so without a line
-    saying which route was taken, "the launch was not recorded" and "the
-    gateway was never asked" look identical from the server.
+    The URL used to be frozen into the shortcut at sync time, so a changed URL
+    or provider stayed broken until the next sync. Asking at launch fixes that
+    and lets the gateway count what gets played. The frozen URL is kept as a
+    fallback so a sleeping gateway on the LAN never makes a game unplayable,
+    which is also why the timeout is short. Every path out is logged with its
+    reason, since a fallback looks just like success from the outside.
     """
-    # The offline route, looked up before the gateway is tried so every path
-    # below has something to fall back to. A shortcut written before the URL
-    # moved off the command line still passes one positionally; that keeps
-    # working, and is preferred only when local state has nothing.
+    # Look up the offline URL first so every path below has a fallback. An old
+    # shortcut may still pass one positionally; that wins only when nothing is stored.
     fallback_url = fallback_url or stored_fallback(game_id, provider)
 
     if not game_id:
@@ -352,11 +256,8 @@ def resolve_launch(game_id: str, fallback_url: str, provider: str = "") -> tuple
         log(f"cannot read {SETTINGS_FILE} ({exc}); using the stored link")
         return fallback_url, "baked-in"
 
-    # The address is the constant above, NOT settings["gateway_url"]. That key
-    # still exists in settings written by older builds and points at whatever
-    # the plugin was last aimed at — here, a plaintext LAN address. Reading it
-    # put the bearer token on the wire in clear and took a launch URL from
-    # whoever answered that port.
+    # The constant above, NOT settings["gateway_url"]: older builds still write
+    # that key with a plaintext LAN address, which leaks the token on the wire.
     gateway = GATEWAY
     token = settings.get("api_token")
     if not token:
@@ -365,12 +266,9 @@ def resolve_launch(game_id: str, fallback_url: str, provider: str = "") -> tuple
         return fallback_url, "not signed in"
 
     try:
-        # The provider goes WITH the request. Without it the gateway answers
-        # from the library pin or its own ranking, which is right when a game
-        # has one tile and wrong the moment it has one per service: three
-        # Fortnite tiles share a game_id, so all three would open whichever
-        # service the ranking preferred and two of them would be lying about
-        # what they are.
+        # The provider goes WITH the request. Without it the gateway picks by its
+        # own ranking, wrong when a game has one tile per service: three Fortnite
+        # tiles share a game_id and would all open the same service.
         endpoint = f"{gateway}/api/me/launch/{game_id}"
         if provider:
             endpoint += "?provider=" + urllib.parse.quote(provider, safe="")
@@ -381,30 +279,22 @@ def resolve_launch(game_id: str, fallback_url: str, provider: str = "") -> tuple
             headers={
                 "Authorization": f"Bearer {token}",
                 "Accept": "application/json",
-                # Without this, urllib sends "Python-urllib/3.x" and the
-                # reverse proxy in front of the gateway answers 403 — measured:
-                # every other User-Agent reaches the app and gets a normal 401
-                # for a bad token, that one never arrives at all.
-                #
-                # The failure was invisible, which is why it lasted: the
-                # launcher falls back to the stored URL and the game still
-                # starts, so nothing looked wrong. It only meant no launch was
-                # ever resolved live and none was ever counted. The plugin
-                # backend has always sent a User-Agent; this one never did.
+                # Without this, urllib sends "Python-urllib/3.x" and the proxy
+                # answers 403 before the app sees it. Any other User-Agent gets
+                # through and a bad token gets a normal 401.
                 "User-Agent": USER_AGENT,
             },
         )
         started = time.monotonic()
-        # Verified TLS against the bundled CA bundle, the same one main.py
-        # uses: Decky's embedded Python ships its own libssl and has been seen
-        # missing roots that a Cloudflare-fronted host presents.
+        # Verified TLS against the bundled CA bundle: Decky's Python ships its own
+        # libssl and has been seen missing roots a Cloudflare host presents.
         with urllib.request.urlopen(request, timeout=RESOLVE_TIMEOUT,
                                     context=_ssl_context()) as response:
             payload = json.loads(response.read().decode())
         elapsed = int((time.monotonic() - started) * 1000)
     except Exception as exc:
-        # Distinguish "the gateway said no" from "the gateway is not there":
-        # a 401 needs a re-login, a refused connection needs the box woken up.
+        # Tell "gateway said no" apart from "gateway not there": a 401 needs a
+        # re-login, a refused connection needs the box woken up.
         status = getattr(exc, "code", None)
         detail = f"HTTP {status}" if status else type(exc).__name__
         log(f"gateway {gateway} did not answer for game {game_id} "
@@ -417,10 +307,8 @@ def resolve_launch(game_id: str, fallback_url: str, provider: str = "") -> tuple
             f"({str(payload)[:120]}); using the stored link")
         return fallback_url, "baked-in"
 
-    # Do not trust the gateway with where this device browses. A correct
-    # gateway only ever returns one of the permitted provider hosts; one that
-    # returns anything else is either compromised or answering for someone who
-    # is, and either way this is the point at which it stops.
+    # Do not trust the gateway with where this device browses. A good gateway
+    # only returns a permitted host; anything else is compromised and stops here.
     if not url_is_acceptable(url, provider):
         log(f"gateway returned a URL this tile may not open "
             f"({str(url)[:120]!r}) — REFUSED, using the stored link")
@@ -430,36 +318,21 @@ def resolve_launch(game_id: str, fallback_url: str, provider: str = "") -> tuple
         f"via {payload.get('provider') or '?'} in {elapsed} ms")
     return url, f"gateway ({payload.get('provider')})"
 
-# Where a page tile may go, and which providers get that rule instead of the
-# five-host provider allowlist above. Both live in py_modules/weburl.py, which
-# main.py imports too — the decision to make a shortcut and the decision to
-# open it have to agree, and they only do if there is one copy of the rule.
+# Where a page tile may go, and which providers use that rule instead of the
+# provider allowlist above. In weburl.py, which main.py imports too, so making
+# a shortcut and opening it share one copy of the rule.
 WEBSITE_PROVIDERS = weburl.WEBSITE_PROVIDERS
 is_allowed_website_url = weburl.is_allowed_website_url
 
 
 def build_website_command(app_id: str, profile: str, url: str) -> list:
-    """Chromium command line for a page, which is not the one a game gets.
+    """Chromium command line for a page, not the one a game gets.
 
-    Three deliberate differences, and each is the reason the allowlist can be
-    relaxed for these tiles at all:
-
-    * A SEPARATE PROFILE. The game profile holds live Microsoft, NVIDIA,
-      Boosteroid and Luna sessions. A page somebody added has no business
-      within reach of those, and a separate --user-data-dir is what keeps it
-      out — cookies, storage and saved passwords all live in that directory.
-
-    * NO REMOTE DEBUGGING PORT. A game window opens one so the launcher can
-      press Play through CDP. That port is unauthenticated and accepts commands
-      from anything that can reach it, including script in the page it is
-      debugging; it is worth it for a fixed set of provider sites and is not
-      worth it for an arbitrary one. Nothing here needs it, so it is absent
-      rather than merely unused.
-
-    * NO KIOSK. Kiosk hides the address bar, and the address bar is how a
-      person can tell where they actually are. That is exactly the check the
-      allowlist performs for game tiles, handed back to the user for pages the
-      catalogue cannot vouch for.
+    Three differences, each a reason the allowlist can be looser here:
+    * A separate profile, so a page cannot reach the live provider sessions.
+    * No remote debugging port: it is unauthenticated and only worth it for the
+      fixed set of provider sites, not an arbitrary page.
+    * No kiosk, so the user keeps the address bar to see where they are.
     """
     return [
         "/usr/bin/flatpak", "run",
@@ -481,11 +354,10 @@ def website_profile(profile: str) -> str:
                         os.path.basename(profile.rstrip("/")) + "-web")
 
 def url_is_acceptable(url, provider: str) -> bool:
-    """Which of the two gates applies, decided by what kind of tile this is.
+    """Which of the two gates applies, by the kind of tile this is.
 
-    One function so that the three places a URL is checked — the gateway's
-    answer, the link stored on disk, and the last step before a browser opens —
-    cannot end up disagreeing about which rule a page is held to.
+    One function so the three places a URL is checked cannot disagree about
+    which rule a page is held to.
     """
     if provider in WEBSITE_PROVIDERS:
         return is_allowed_website_url(url)
@@ -496,9 +368,8 @@ def build_browser_command(app_id: str, profile: str, url: str, kiosk: bool = Tru
                           user_agent: str = "") -> list:
     """Chromium command line for one session.
 
-    Kiosk is right for streaming and wrong for signing in: a Microsoft or
-    NVIDIA login can bounce through pages that need a visible tab strip and a
-    way back, and a kiosk window offers neither.
+    Kiosk is right for streaming and wrong for signing in: a login can bounce
+    through pages that need a visible tab strip and a way back.
     """
     return [
         "/usr/bin/flatpak", "run",
@@ -516,44 +387,21 @@ def build_browser_command(app_id: str, profile: str, url: str, kiosk: bool = Tru
     ]
 
 
-# Luna asks the desktop app to take over, and on a Deck there is no desktop app.
+# Luna wants the desktop app to take over, and a Deck has none. It pokes a
+# luna:// scheme at a hidden #hiddenIframe and reads 500ms of silence as "app
+# not installed". Chromium turns that poke into an "open xdg-open?" prompt that
+# sits on top of the game, and no browser flag can switch it off.
 #
-# Read off Luna's own bundle. AppLauncher builds "luna://play.amazon<tld>/..."
-# and hands it to launchProtocol, which for Chrome ends in:
-#
-#     function openUriWithHiddenFrame(uri, fail, success) {
-#         const timer = setTimeout(() => { fail(); ... }, 500);
-#         let frame = document.querySelector("#hiddenIframe")
-#                     || _createHiddenIframe(document.body, "about:blank");
-#         ... window "blur" -> success ...
-#         frame.contentWindow.location.href = uri;
-#     }
-#
-# So it pokes the scheme at a hidden iframe and reads 500ms of silence as "app
-# not installed". Chromium turns that poke into the "This site is trying to
-# open xdg-open" prompt, which sits on top of the game until it is dismissed.
-#
-# There is NO browser flag for this — external-protocol handling is deliberately
-# not switchable, and the enterprise policy that can block it (URLBlocklist)
-# would mean writing a system-wide policy file as root on the user's device.
-#
-# So: supply #hiddenIframe ourselves, with a contentWindow whose location.href
-# setter does nothing. Luna's querySelector finds ours, skips making its own,
-# pokes the stub, hears nothing, and takes its own "not installed" branch —
-# which calls .catch(() => this.provision()) and streams in the browser.
-#
-# That is not a trick to defeat a check. It is the honest answer: there is no
-# Luna desktop app on this machine, and the only thing being suppressed is a
-# prompt asking the user to confirm that.
-#
-# An own property shadows the prototype getter, which is why this works at all:
-# Location.href is [Unforgeable], so the real one can never be overridden.
+# So we make #hiddenIframe ourselves, with a location.href setter that does
+# nothing. Luna finds ours, pokes the stub, hears nothing and takes its own
+# "not installed" branch, which streams in the browser. An own property shadows
+# the prototype getter because Location.href is [Unforgeable].
 
 
 def wake_gamepads(url: str, provider: str = "") -> None:
     """No-op. The virtual gamepad override broke real gamepad detection on
-    Boosteroid and GeForce NOW by masking the native getGamepads() result.
-    Luna's injection lives in hold_platform_override and is unaffected."""
+    Boosteroid and GeForce NOW by hiding the native getGamepads() result.
+    Luna's injection lives in hold_platform_override and is not affected."""
     pass
 
 
@@ -561,9 +409,8 @@ def wake_gamepads(url: str, provider: str = "") -> None:
 def _safely(work, *args) -> None:
     """Run a diagnostic on a thread without letting it take the launch down.
 
-    An exception on a thread does not kill the process, but it does print a
-    traceback into a log people read when something is already wrong. One line
-    naming what failed is more use than twenty naming where.
+    A thread error does not kill the process, but it dumps a traceback into a
+    log people read when something is already wrong. One line is more use.
     """
     try:
         work(*args)
@@ -574,19 +421,15 @@ def _safely(work, *args) -> None:
 def log_stream_resolution(url: str, provider: str = "") -> None:
     """Record what the stream actually came down at, once one is running.
 
-    The open question behind the interface scaling. Raising the scale shrinks
-    the CSS viewport — 1280x720 at 1.25 leaves the page believing it is
-    1024x576 — and whether that costs picture quality depends on whether the
-    provider sizes its stream from CSS pixels or from real ones. That is not
-    documented anywhere and differs per provider, so it is measured here
-    rather than assumed.
+    This is the open question behind the scaling. A higher scale shrinks the CSS
+    viewport, and whether that costs picture quality depends on if the provider
+    sizes its stream from CSS pixels or real ones, which differs per provider and
+    is nowhere documented, so we measure it. Read `stream` against `css` and
+    `physical` in the log:
+      stream == physical  the interface got bigger for nothing
+      stream == css       the scaling costs resolution, check the ladder in display.py
 
-    Read `stream` against `css` and `physical` in the log:
-      stream == physical  the interface got bigger for nothing in return
-      stream == css       the scaling is costing resolution, and the ladder
-                          in py_modules/display.py wants revisiting
-
-    Best effort and never fatal: this is a diagnostic, not a feature.
+    Best effort and never fatal: a diagnostic, not a feature.
     """
     profile = provider_profile(provider)
     marker = profile.get("page_match") or (url.split("/")[2] if "//" in url else url)
@@ -595,9 +438,8 @@ def log_stream_resolution(url: str, provider: str = "") -> None:
         return
     ws_url = target["webSocketDebuggerUrl"]
 
-    # A stream does not start the moment Play is pressed: there is a queue, a
-    # handshake and a first frame. Polling beats one timed guess, and giving
-    # up quietly beats holding the launch open for a session that never began.
+    # A stream does not start the moment Play is pressed: there is a queue and a
+    # first frame. Polling beats one timed guess.
     deadline = time.monotonic() + STREAM_STATS_TIMEOUT
     while time.monotonic() < deadline:
         try:
@@ -611,19 +453,15 @@ def log_stream_resolution(url: str, provider: str = "") -> None:
 
 
 def log_browser_gamepads(url: str, provider: str = "") -> None:
-    """Record what the PAGE sees, which is the only view that decides anything.
+    """Record what the PAGE sees, the only view that decides anything.
 
-    The launcher can list Steam's virtual pads all day; the provider's web
-    player reads navigator.getGamepads() and generally drives whatever sits at
+    The web player reads navigator.getGamepads() and drives whatever sits at
     index 0. If index 0 is the Deck's own controls, an external controller does
-    nothing until Steam's order is changed — and Steam does not persist that
-    order for these tiles, so it is changed again every launch.
+    nothing until Steam's order is changed, and Steam does not keep that order
+    for these tiles. Chrome only shows a pad after it sends input, so an empty
+    list here just means nothing was touched yet.
 
-    Chrome exposes a gamepad to a page only after that pad sends input, so an
-    empty list here is not a fault: it means nothing had been touched yet, and
-    it is worth knowing too.
-
-    Best effort and never fatal: this is a diagnostic, not a feature.
+    Best effort and never fatal: a diagnostic, not a feature.
     """
     profile = provider_profile(provider)
     marker = profile.get("page_match") or (url.split("/")[2] if "//" in url else url)
@@ -645,24 +483,14 @@ def log_browser_gamepads(url: str, provider: str = "") -> None:
 def hold_platform_override(url: str, provider: str = ""):
     """Make the page believe it is on a supported OS, for the whole session.
 
-    Luna has TWO gates, and they read different things:
+    Luna has two gates that read different things. "Unsupported Browser" reads
+    the User-Agent string, which the --user-agent flag settles. "Unsupported OS"
+    reads navigator.platform / userAgentData, which that flag does not touch, so
+    the flag alone lands you straight in the second gate. This closes it.
 
-      "Unsupported Browser" — reads the User-Agent STRING. The --user-agent
-                              flag in build_browser_command settles this one.
-      "Unsupported OS"      — reads navigator.platform / navigator.userAgentData,
-                              which that flag does not touch. Measured with the
-                              flag on: platform "Linux x86_64", uaData "Linux".
-
-    So the flag alone gets past the first gate and straight into the second,
-    which is exactly what happened. This closes the second one.
-
-    Returns the held socket, which the caller must keep alive — see
-    cdp.hold_platform. Returns None when the provider asks for nothing, which
-    is every provider but Luna.
-
-    Best effort, like try_autoplay: if this fails the user is no worse off than
-    before it existed, and a game that does not stream is not worth aborting a
-    launch over.
+    Returns the held socket, which the caller must keep alive (see
+    cdp.hold_platform), or None when the provider wants nothing, which is every
+    provider but Luna. Best effort: if it fails the user is no worse off.
     """
     profile = provider_profile(provider)
     user_agent = profile.get("user_agent")
@@ -683,11 +511,9 @@ def hold_platform_override(url: str, provider: str = ""):
     cdp.add_startup_script(held, VIRTUAL_GAMEPAD_JS)
     cdp.reload_page(held)
     log("injected virtual gamepad for this session")
-    # add_startup_script enables the Page domain, which pushes events into the
-    # socket. Drain them or the socket wedges.
+    # add_startup_script turned the Page domain on, so the browser now pushes
+    # events at this socket. Drain them or it wedges.
     if True:
-        # add_startup_script had to enable the Page domain, so from here on the
-        # browser is pushing events at this socket. Drain them or it wedges.
         cdp.drain_in_background(held)
     log(f"{profile['label']}: reporting {profile.get('platform', 'Windows')} "
         "for this session")
@@ -713,9 +539,7 @@ def _click_fullscreen_if_needed(ws_url, timeout=15):
 def try_autoplay(url: str, provider: str = "") -> None:
     """Press Play once the game page is up. Best effort — never fatal.
 
-    If anything here fails the user simply presses Play themselves, which is the
-    behaviour they would have had anyway. Nothing is worth killing the session
-    over.
+    If anything here fails the user just presses Play themselves, same as before.
     """
     profile = provider_profile(provider)
     click_js = CLICK_PLAY_JS % {
@@ -725,12 +549,9 @@ def try_autoplay(url: str, provider: str = "") -> None:
         "selectors": json.dumps(profile["selectors"]),
     }
 
-    # How to recognise the game's page once the browser has it open.
-    #
-    # The host we asked for is the right default — Boosteroid, GeForce NOW and
-    # Xbox all stay on it (Xbox localises by PATH, /nl-BE/play/..., so its host
-    # never changes). A provider that redirects across country DOMAINS declares
-    # its own marker instead; see amazon_luna above.
+    # How to spot the game's page. The host we asked for is the right default
+    # (Xbox localises by path, so its host stays put). A provider that redirects
+    # across country domains sets its own marker, see amazon_luna above.
     host_marker = url.split("/")[2] if "//" in url else url
     marker = profile.get("page_match") or host_marker
     target = cdp.wait_for_page(CDP_PORT, marker, timeout=PAGE_TIMEOUT)
@@ -750,9 +571,8 @@ def try_autoplay(url: str, provider: str = "") -> None:
                 log("already streaming")
                 return
 
-            # Stop early when the profile simply is not signed in. Clicking has
-            # nothing to find, and spending the full timeout on it buries the
-            # one message the user actually needs in a minute of silence.
+            # Stop early when the profile is not signed in: clicking has nothing
+            # to find, and the full timeout would bury the one message the user needs.
             if cdp.evaluate(ws_url, profile["signed_out"]):
                 log(f"not signed in to {profile['label']} in this browser.")
                 log("Sign in on this page — the profile is kept, "
@@ -775,20 +595,15 @@ def try_autoplay(url: str, provider: str = "") -> None:
             log(f"waiting for Play ({exc})")
         time.sleep(1.5)
 
-    # Nothing is auto-accepted on the user's behalf. Both providers show a
-    # consent dialog on a fresh profile — Microsoft's cookie banner, NVIDIA's
-    # "AGREE & CONTINUE" — and clicking an agreement for someone is not the
-    # launcher's business, so it says so instead.
+    # We never accept a consent dialog for the user. A fresh profile shows a
+    # cookie or terms dialog, and clicking an agreement for someone is not our
+    # business, so we say so instead.
     log(f"Play not found on {profile['label']}. If a cookie or "
           "terms dialog is showing, accept it once and press Play.")
 
-    # Then say what WAS on the page.
-    #
-    # Every provider labels this button differently and changes it without
-    # warning, so "not found" on its own costs a round trip: connect to the
-    # Deck, hope the page is still open, and read the DOM. Listing the
-    # candidates here turns the next failure into a log line that names the
-    # button we should have matched.
+    # Then say what WAS on the page. Every provider names this button
+    # differently and changes it without warning, so listing the candidates here
+    # turns the next failure into a log line that names the button we missed.
     try:
         labels = cdp.evaluate(ws_url, LIST_CANDIDATES_JS)
         if labels:
@@ -799,10 +614,9 @@ def try_autoplay(url: str, provider: str = "") -> None:
 
 
 def active_gamepads() -> list:
-    """Virtual gamepads Steam Input has created, as /dev/input/event* paths.
+    """Virtual gamepads Steam Input made, as /dev/input/event* paths.
 
-    Steam creates one per connected controller when a game starts. The browser
-    enumerates these to expose the Gamepad API.
+    One per connected controller. The browser reads these for the Gamepad API.
     """
     pads = []
     try:
@@ -815,10 +629,8 @@ def active_gamepads() -> list:
         if "X-Box" not in block and "Xbox" not in block:
             continue
         # The NAME is the whole point of logging these. Steam renumbers its
-        # virtual pads every session — the same controller was event19 one
-        # night and event18 the next — so a path says nothing about WHICH
-        # controller it is, while "pad 0" / "pad 1" is Steam's slot order, and
-        # slot order is what decides who is player one.
+        # virtual pads every session, so an event path says nothing about which
+        # controller it is; the slot order is what decides who is player one.
         name = ""
         for line in block.splitlines():
             if line.startswith("N: Name="):
@@ -835,23 +647,15 @@ def active_gamepads() -> list:
 def wait_for_gamepad(timeout: float = 6.0, settle: float = 1.0) -> list:
     """Wait until Steam Input has FINISHED making its virtual pads.
 
-    The browser enumerates input devices once, at startup, and udev hotplug
-    events do not reach it reliably inside the flatpak sandbox — so a pad that
-    appears after it starts may never be noticed at all.
+    The browser reads input devices once at startup and udev hotplug does not
+    reach it inside the flatpak sandbox, so a pad that shows up later is never
+    seen. Returning on the first pad was wrong with two controllers: Steam makes
+    them a fraction apart, so we could start the browser before pad 1 existed and
+    the second controller was dead all session.
 
-    This used to return on the first pad it saw, which is the wrong moment when
-    two controllers are connected: Steam creates them a fraction apart, so
-    returning on pad 0 could launch the browser before pad 1 existed, and the
-    external controller was then invisible for the whole session. The symptom
-    is indistinguishable from the controller being in the wrong slot, which is
-    part of why that was hard to pin down.
-
-    So wait for the set to stop GROWING rather than to become non-empty: once
-    the list has been unchanged for `settle` seconds, Steam is done. Costs
-    about a second on a launch that already takes several.
-
-    Returns whatever exists at `timeout` if pads keep churning, and [] if none
-    ever appear — both are honest answers, and the caller only logs them.
+    So wait for the set to stop GROWING, not just to become non-empty: once it is
+    unchanged for `settle` seconds Steam is done. Returns whatever exists at
+    `timeout` if pads keep churning, and [] if none appear.
     """
     deadline = time.monotonic() + timeout
     pads: list = []
@@ -870,11 +674,9 @@ def wait_for_gamepad(timeout: float = 6.0, settle: float = 1.0) -> list:
 
 def _clear_session_restore(profile: str) -> None:
     """Remove Chrome's session restore files so a killed browser doesn't ask to
-    recover tabs on the next launch. The Deck kills the browser by closing the
-    game, which is always an unclean exit — without this, every launch shows
-    "Restore pages?" with the previous session's tabs."""
+    recover tabs next launch. The Deck closes the game to kill the browser, an
+    unclean exit, so without this every launch shows "Restore pages?"."""
     default_dir = os.path.join(profile, "Default")
-    # Remove the Session and Tabs files
     sessions_dir = os.path.join(default_dir, "Sessions")
     if os.path.isdir(sessions_dir):
         for name in os.listdir(sessions_dir):
@@ -882,7 +684,7 @@ def _clear_session_restore(profile: str) -> None:
                 os.remove(os.path.join(sessions_dir, name))
             except OSError:
                 pass
-    # Mark the exit as clean in Preferences so Chrome doesn't show the bubble
+    # Mark the exit clean in Preferences so Chrome hides the restore bubble
     prefs_path = os.path.join(default_dir, "Preferences")
     if os.path.isfile(prefs_path):
         try:
@@ -918,11 +720,9 @@ def main() -> int:
             argv = argv[:index] + argv[index + 2:]
 
     args = [a for a in argv if not a.startswith("--")]
-    # The URL is OPTIONAL now, and normally absent: a game tile carries
-    # --game-id and the launcher resolves the URL from the gateway, falling
-    # back to synced.json. Two callers still pass one positionally — a shortcut
-    # written before that change, and the website tile, which has no game id to
-    # resolve from.
+    # The URL is optional now and usually absent: a game tile carries --game-id
+    # and we resolve from the gateway. Only an old shortcut and the website tile
+    # still pass one positionally.
     if len(args) < 2:
         print(__doc__)
         return 2
@@ -942,12 +742,9 @@ def main() -> int:
             f"for game {game_id or '?'}. Sync once while the gateway is up.")
         return 4
 
-    # Last gate before a browser opens. resolve_launch already refuses a URL
-    # the gateway should not have sent, but the stored fallback reaches here
-    # too — written by an earlier sync and sat on disk ever since. Refusing to
-    # launch is the right outcome: a game that does not start is a complaint,
-    # and a fullscreen page pretending to be a provider sign-in is a stolen
-    # account.
+    # Last gate before a browser opens. resolve_launch already checks the
+    # gateway's answer, but the stored fallback reaches here too. A game that
+    # does not start is a complaint; a fake fullscreen sign-in is a stolen account.
     is_page = provider in WEBSITE_PROVIDERS
     if not url_is_acceptable(url, provider):
         log(f"REFUSED: {url!r} is not somewhere a "
@@ -958,10 +755,9 @@ def main() -> int:
     _clear_session_restore(profile)
     pads = wait_for_gamepad()
     if len(pads) > 1:
-        # Known issue: with several controllers connected the browser can bind
-        # to the idle virtual pad and report no gamepad at all. Verified on
-        # hardware — 4,473 events on the live pad, zero on the one Chrome
-        # opened. Logged so it is diagnosable rather than mysterious.
+        # Known issue: with several controllers the browser can bind to the idle
+        # virtual pad and see no gamepad at all. Seen on hardware. Logged so it
+        # can be diagnosed.
         log(f"{len(pads)} virtual gamepads: {pads}. "
               "If the controller does not work in-game, disconnect the extra one.")
     elif not pads:
@@ -980,10 +776,8 @@ def main() -> int:
         app_id, profile, url, kiosk,
         user_agent=provider_profile(provider).get("user_agent", "")))
 
-    # Before autoplay, and regardless of it: the OS gate blocks a Play the user
-    # presses by hand just as surely as one the launcher presses.
-    #
-    # `held` is not an unused variable. It is the open socket, and the override
+    # Before autoplay and regardless of it: the OS gate blocks a hand-pressed
+    # Play too. `held` is not unused: it is the open socket, and the override
     # lives exactly as long as this reference does.
     held = None
     try:
@@ -1007,11 +801,8 @@ def main() -> int:
     except Exception as exc:          # diagnostics never break a launch
         log(f"gamepad diagnostic failed, continuing: {exc}")
 
-    # In the background, because it waits for a first frame and a queue on a
-    # busy evening is minutes. Holding the launch open for that would delay
-    # nothing useful — the browser is already up and the game is already
-    # starting — and a daemon thread cannot keep the process alive past the
-    # session it is measuring.
+    # In the background: it waits for a first frame and a queue can be minutes.
+    # The browser is already up, and a daemon thread won't outlive the session.
     try:
         threading.Thread(target=_safely, args=(log_stream_resolution, url, provider),
                          name="stream-stats", daemon=True).start()

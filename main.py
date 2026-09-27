@@ -1,18 +1,11 @@
 # Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """Shelfcloud — Decky plugin backend.
 
-The plugin is a sync agent, not a game browser. Games are chosen on the web,
-where there is a real screen and keyboard; this keeps the Deck's Steam library
-matching that choice.
-
-Responsibilities split by what each half can reach:
-  * Python (here) — network, credentials, disk state, and the poll loop.
-  * Frontend      — anything touching SteamClient, which only exists there.
-
-So this module decides *what* the library should contain and emits an event;
-the frontend makes the shortcuts actually match.
-
-Stdlib only: Decky's Python environment does not guarantee third-party packages.
+A sync agent, not a game browser: games are picked on the web, this keeps the
+Deck's Steam library matching. Python does the network, credentials, disk state
+and the poll loop; the frontend does anything that touches SteamClient. So this
+side decides what the library should hold and emits an event, and the frontend
+makes the shortcuts match. Stdlib only, Decky does not promise extra packages.
 """
 
 import asyncio
@@ -51,8 +44,8 @@ SSL_CTX = get_ssl_context()
 
 DEFAULT_GATEWAY = "https://shelfcloud.cc"
 
-# No install has been started. Also the shape the frontend reads, so it can
-# rely on the keys existing rather than guarding each one.
+# No install started. Also the shape the frontend reads, so the keys are always
+# there and it does not have to check each one.
 IDLE_INSTALL = {
     "running": False, "app_id": None, "label": None,
     "message": "", "error": None, "done": False,
@@ -61,18 +54,14 @@ REQUEST_TIMEOUT = 20
 SYNC_EVENT = "shelfcloud/library"
 
 # Custom layout VDFs, by name: {name: (fetched_at, text)}. See
-# _download_custom_layout for why this exists.
+# _download_custom_layout.
 _LAYOUT_CACHE: Dict[str, Any] = {}
 _LAYOUT_CACHE_TTL = 600
 
-# path -> (etag, raw json text). See _request.
-#
-# The gateway tags every library answer, and the library is polled on a timer
-# while changing hardly at all -- so without this the same few hundred
-# kilobytes came down again on every sync to say nothing had happened. The
-# RAW TEXT is kept rather than the parsed object: handing the same dict back
-# to two callers means the second one sees whatever the first did to it, and
-# re-parsing is still far cheaper than the transfer it replaces.
+# path -> (etag, raw json text). The library is polled on a timer but changes
+# hardly at all, so without this the same few hundred KB came down every sync to
+# say nothing changed. Raw text, not the parsed object: two callers sharing one
+# dict would see each other's edits, and re-parsing is cheaper than the transfer.
 _ETAG_CACHE: Dict[str, Any] = {}
 _ETAG_CACHE_MAX = 8
 
@@ -81,37 +70,27 @@ _LAYOUT_GAMEPAD = "template://controller_neptune_gamepad_fps.vdf"
 _LAYOUT_WEB_BROWSER = "template://controller_neptune_webbrowser.vdf"
 
 
-# Controller types we lay a config down for besides the one the layout was
-# authored against.
-#
-# The point is that plugging a pad in just works. A config for a controller
-# nobody owns costs a few KB and is ignored; a MISSING config means Steam
-# falls back to its own default and the service's shortcuts are unreachable,
-# which is the state every non-Deck pad was in.
-# neptune is FIRST and deliberately included rather than assumed.
-#
-# The authored layout supplies its own type and the rest fall back to Valve's
-# templates -- so listing only the others quietly relied on every layout we
-# ship being a Deck one. A custom VDF exported from an Xbox pad declares
-# controller_xbox360, and then the one controller this plugin exists for is
-# the only one that gets no config at all. Cheap to include, and the loop
-# skips it anyway whenever it IS the authored type.
 # A provider key that survives a shell-quoted command line unchanged.
 _PLAIN_KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 
+# Controller types we write a config for, so plugging a pad in just works. A
+# config for a pad nobody owns costs a few KB and is ignored; a MISSING one lets
+# Steam fall back to its default and the service's shortcuts become unreachable.
+# neptune is first and listed on purpose, not assumed: the loop skips it when it
+# is already the type the layout was made for, but a custom VDF from an Xbox pad
+# would else leave the one controller this plugin exists for with no config.
 CONTROLLER_TYPES = ("neptune", "ps5", "ps4", "xbox360", "xboxone",
                     "switch_pro", "generic")
 
 # controller_neptune_gamepad_fps.vdf -> ("neptune", "gamepad_fps"). Anchored on
-# the known type names because several of them contain an underscore too, so
-# splitting on the first or last one gets switch_pro wrong either way.
+# the known type names: several contain an underscore, so splitting on the first
+# or last one gets switch_pro wrong.
 _re_flavour = re.compile(
     r"^controller_(neptune|ps3|ps4|ps5|xbox360|xboxone|switch_pro|generic|android|apple)"
     r"_(.+)\.vdf$")
 
-# What to fall back to when a type has no template for the flavour we wanted.
-# Not every type ships every flavour: ps4/ps5 have gamepad+mouse, xbox360 and
-# xboxone do not, and only neptune has webbrowser at all. Ordered best first.
+# Fallback when a type has no template for the flavour we wanted. Not every type
+# ships every flavour, so this is ordered best first.
 FLAVOUR_CHAIN = ("gamepad+mouse", "gamepad_fps", "gamepad_joystick", "wasd")
 
 
@@ -129,30 +108,12 @@ def _best_template(steam_root: str, controller_type: str, flavour: str) -> Optio
 def _safe_layout_name(shortcut_name: str) -> bool:
     """Whether a shortcut's name can be used as its config directory.
 
-    A title is not a path, but Steam treats it as one: the configset keys each
-    entry by the shortcut's NAME, and the directory is that name joined onto
-    the per-user config directory. So a title containing a slash NESTS, and
-    Steam resolves it back the same way -- "Disney/Pixar WALL-E (Amazon Luna)"
-    is a real game whose layout lives two directories deep, and Steam finds it
-    there quite happily.
-
-    This used to refuse any separator at all. That was an over-correction:
-    guarding against a title climbing out of the directory is right, but a
-    plain slash is not climbing, and two Luna games silently lost their
-    layout every sync because of it.
-
-    What is refused is a segment that means something to the filesystem rather
-    than naming a folder:
-
-      ".."          climbs, and a title has no reason to
-      ""            a leading or doubled slash -- and join() on an absolute
-                    path DISCARDS everything before it, so "/etc/x" would not
-                    be inside the config directory at all
-      "." only      resolves to the directory itself, so the layout would be
-                    written over whatever shares that name
-
-    The resolved-path check at the destination is still there and is still the
-    one that has to be right; this only makes the refusal legible and early.
+    Steam treats the title as a path, so a plain slash nests and Steam reads it
+    back the same way -- that is fine. Only a part that means something to the
+    filesystem is refused: ".." climbs, "" is a leading or doubled slash (join()
+    on an absolute path throws away everything before it), "." is the directory
+    itself. The resolved-path check at the destination is the one that has to be
+    right; this just makes the refusal early and clear.
     """
     if not shortcut_name or not shortcut_name.strip():
         return False
@@ -165,13 +126,10 @@ def _safe_layout_name(shortcut_name: str) -> bool:
 def _sized(fn):
     """Log a reply big enough to close Decky's websocket.
 
-    aiohttp's WebSocketResponse refuses a message over 4 MB by CLOSING the
-    connection -- no exception on either side, so the plugin does not fail, it
-    stops, and every later call waits for an answer that cannot arrive. A 7 MB
-    Steam hero did that on every sync until artwork was cut into slices, and
-    something else is still doing it at around the eightieth call.
-
-    Guessing which reply took seven attempts last time. This names it.
+    aiohttp closes the connection on a message over 4 MB, with no error on either
+    side -- so the plugin does not fail, it just stops, and every later call
+    waits for an answer that never comes. This names the reply instead of leaving
+    us to guess which one it was.
     """
     @functools.wraps(fn)
     async def wrapper(self, *args, **kwargs):
@@ -189,17 +147,10 @@ def _sized(fn):
     return wrapper
 
 
-# One connection pool for every call this plugin makes.
-#
-# urlopen opens a NEW TCP connection -- and a TLS handshake with it -- for
-# every single request. A sync makes hundreds: a layout per new tile, six
-# artwork slots per changed game, a slice per two megabytes of a hero, a
-# player count per page opened. All to the same two or three hosts, each one
-# paying for a fresh handshake before a byte of payload moves, and each one
-# leaving a socket in TIME_WAIT behind it.
-#
-# urllib3 keeps them alive and hands the same connection back. It is already
-# present -- Decky ships it -- so this costs no new dependency.
+# One connection pool for every call this plugin makes. urlopen opens a new TCP
+# connection, plus a TLS handshake, for every request, and a sync makes hundreds
+# of them to the same two or three hosts. urllib3 keeps them alive and hands the
+# same one back. Decky already ships it, so no new dependency.
 try:
     import urllib3 as _urllib3
 except Exception:                       # pragma: no cover - urllib3 is present
@@ -213,15 +164,13 @@ def _http():
     global _POOL
     if _POOL is None:
         _POOL = _urllib3.PoolManager(
-            # A handful of live connections is plenty: the calls are issued a
-            # few at a time by design, and a bigger pool would only hold
-            # sockets open for work that is not coming.
+            # A few live connections is plenty: calls go out a few at a time, and
+            # a bigger pool would just hold sockets open for work not coming.
             maxsize=4,
             block=False,
-            # Redirects yes, retries no. A CDN moving an image is normal; an
-            # automatic retry is not ours to decide -- the callers already
-            # treat a failure as "skip this one", and a silent second attempt
-            # would double a slow request's cost without telling anybody.
+            # Redirects yes, retries no. A CDN moving an image is normal; a retry
+            # is not ours to decide -- callers already treat a failure as "skip
+            # this one", and a quiet second try would double a slow call's cost.
             retries=_urllib3.Retry(total=0, redirect=5, raise_on_redirect=False,
                                    raise_on_status=False),
             ssl_context=SSL_CTX,
@@ -255,11 +204,11 @@ class _PooledResponse:
 
 
 class _NoRedirects(urllib.request.HTTPRedirectHandler):
-    """Refuse redirects outright on the urllib fallback path.
+    """Refuse redirects on the urllib fallback path.
 
-    urllib re-sends every header to the new location, Authorization included,
-    so one redirect off the gateway would hand our API token to whatever
-    answered. Returning None makes urllib raise instead of following.
+    urllib re-sends every header to the new location, Authorization included, so
+    one redirect off the gateway would hand our API token to whatever answered.
+    Returning None makes urllib raise instead of following.
     """
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -268,49 +217,40 @@ class _NoRedirects(urllib.request.HTTPRedirectHandler):
 
 def _open(url: str, headers: Optional[Dict[str, str]] = None, method: str = "GET",
           body: Optional[bytes] = None, timeout: Optional[float] = None):
-    """A pooled request that FAILS the way urlopen does.
+    """A pooled request that fails the way urlopen does.
 
     Raising HTTPError on a non-2xx is the point. Every caller here already
-    handles that shape -- a 304 meaning "what you hold is current", a 401
-    meaning "sign in again" -- and rewriting all of it around urllib3's
-    status-code-in-the-response would be a second change riding on a first.
+    handles that shape -- 304 means "what you hold is current", 401 means "sign
+    in again" -- and rewriting all of it around urllib3's status-in-the-response
+    would be a second change riding on a first.
     """
     if _urllib3 is None:                # pragma: no cover
         request = urllib.request.Request(url, data=body, method=method,
                                          headers=headers or {})
-        # No redirects on this path. urllib re-sends every header to the new
-        # location, so a redirect off the gateway would hand our API token to
-        # whatever answered -- and this fallback exists precisely for the case
-        # where urllib3 is missing, which is not the moment to be lenient. The
-        # pooled path above does not follow redirects at all.
+        # No redirects here either: urllib re-sends every header, so a redirect
+        # off the gateway would leak our API token to whatever answered.
         opener = urllib.request.build_opener(
             urllib.request.HTTPSHandler(context=SSL_CTX), _NoRedirects)
         return opener.open(request, timeout=timeout or REQUEST_TIMEOUT)
 
     try:
-            # NEVER None. urllib3 reads an explicit timeout=None as "wait for
-        # ever" and it OVERRIDES the pool's default -- so every call without
-        # an explicit one lost its deadline the moment this was pooled. A
-        # stalled read then held a thread-pool worker for good, and after
-        # four of those every asyncio.to_thread queued behind them and the
-        # backend answered nothing at all: get_status, tracked_providers,
-        # the lot. The socket was open the whole time, which is what made it
-        # look like a transport problem for hours.
+        # NEVER None. urllib3 reads timeout=None as "wait for ever" and it
+        # overrides the pool default, so a call without an explicit one loses its
+        # deadline. A stalled read then holds a thread-pool worker for good, and
+        # after four of those every asyncio.to_thread queues up and the backend
+        # answers nothing. The socket stays open, so it looks like a transport
+        # problem for hours.
         raw = _http().request(
             method, url, body=body, headers=headers or {},
             preload_content=False,
             timeout=_urllib3.Timeout(total=timeout or REQUEST_TIMEOUT),
         )
     except _urllib3.exceptions.HTTPError as exc:
-        # Translated, not passed through. urllib3 raises MaxRetryError and
-        # SSLError where urlopen raised URLError, and the callers here are
-        # written against urlopen -- _request's handler that names a
-        # certificate failure in the log catches URLError, so an untranslated
-        # urllib3 error would sail past it and the one diagnostic that says
-        # "your TLS is wrong" would never be printed again.
-        #
-        # Wrapped rather than reraised bare so the original is still attached
-        # for anything that looks.
+        # Translated, not passed through. urllib3 raises MaxRetryError/SSLError
+        # where urlopen raised URLError, and the callers here expect URLError --
+        # _request's handler that logs a certificate failure catches URLError, so
+        # an untranslated urllib3 error would slip past it. Wrapped, not reraised
+        # bare, so the original stays attached for anything that looks.
         raise urllib.error.URLError(exc) from exc
     if not (200 <= raw.status < 300):
         raw.read()                      # drain, so the connection can be reused
@@ -320,48 +260,23 @@ def _open(url: str, headers: Optional[Dict[str, str]] = None, method: str = "GET
     return _PooledResponse(raw)
 
 
-# The characters Steam removes from a shortcut name before using it as a
-# directory: everything Windows forbids in a filename, plus the full stop.
-# Verified against Steam's own answer for all 840 tiles on this Deck.
+# Characters Steam removes from a shortcut name before using it as a directory:
+# everything Windows forbids in a filename, plus the full stop. Checked against
+# Steam's own answer for all 840 tiles on this Deck.
 _STEAM_STRIPS = '\\/:*?"<>|.'
 
 def _layout_key(shortcut_name: str) -> str:
     """The name Steam uses for a shortcut's controller config, LOWERCASED.
 
-    Steam normalises a non-Steam shortcut's name to lower case for both the
-    per-game config directory and the configset entry. Asked directly --
-    GetConfigForAppAndController -- it reports its selection as
-
-        .../config/assetto corsa rally (boosteroid)/FVAA2340A811.vdf
-
-    while this plugin had been writing
-
-        .../config/Assetto Corsa Rally (Boosteroid)/controller_neptune.vdf
-
-    On a case-sensitive filesystem those are two different directories, so
-    Steam never saw a single layout this plugin installed. Measured on this
-    Deck: 899 directories in our casing, ignored; the 86 that work are all
-    lower case, including the hand-made "boosteroid cloud gaming" -- same
-    filename, same contents, different case, and that one applied.
-
-    It looked like a per-provider fault because whichever service was tried
-    was equally invisible.
-
-    Lower case is not the whole rule. Steam also STRIPS the characters that
-    cannot appear in a Windows filename, and the dot with them:
-
-        "R.E.P.O. (Boosteroid)"        -> "repo (boosteroid)"
-        "BLiNX: The Time Sweeper (…)"  -> "blinx the time sweeper (…)"
-        "… Xbox Series X|S (…)"        -> "… xbox series xs (…)"
-
-    Derived by asking Steam for its own answer on every tile and comparing:
-    this rule reproduces all 840 of them exactly. It is why 139 tiles still
-    missed after the lower-casing alone — every one of them had a colon, a
-    pipe or a full stop in its name.
-
-    A pleasant side effect: "/" goes too, so a title like "Disney/Pixar
-    WALL-E" can no longer nest a directory, and the name is a single path
-    segment by construction rather than by checking.
+    Steam lower-cases a non-Steam shortcut's name for both the per-game config
+    directory and the configset entry. On a case-sensitive filesystem our old
+    "Assetto Corsa Rally (Boosteroid)" and Steam's "assetto corsa rally
+    (boosteroid)" are two different directories, so Steam never saw a layout we
+    wrote. Lower case is not the whole rule though: Steam also strips the
+    characters Windows forbids in a filename, and the dot with them
+    ("R.E.P.O. (Boosteroid)" -> "repo (boosteroid)"). This rule reproduces all
+    840 tiles on this Deck exactly. A nice side effect: "/" goes too, so a title
+    can no longer nest a directory.
     """
     return "".join(c for c in shortcut_name.lower() if c not in _STEAM_STRIPS)
 
@@ -370,13 +285,10 @@ def _register_configset(config_dir: str, app_key: str,
                         controller_type: str = "neptune") -> None:
     """Register a per-game config in the configset file so Steam finds it.
 
-    Without this entry Steam ignores the VDF file in the per-game directory.
-    boosteroid-steamos does the same thing in _update_configset.
-
-    One configset per controller type, and it has to match the config it is
-    registering: writing controller_ps5.vdf but only ever touching
-    configset_controller_neptune.vdf leaves the PS5 config on disk and unused,
-    which looks exactly like the layout not working.
+    Without this entry Steam ignores the VDF in the per-game directory. One
+    configset per controller type, and it must match the config it registers:
+    writing controller_ps5.vdf but only touching configset_controller_neptune.vdf
+    leaves the PS5 config unused, which looks just like the layout not working.
     """
     configset = os.path.join(config_dir,
                              f"configset_controller_{controller_type}.vdf")
@@ -384,12 +296,10 @@ def _register_configset(config_dir: str, app_key: str,
         return
     with open(configset, "r", encoding="utf-8", errors="replace") as f:
         text = f.read()
-    # A quote or a brace in the key would END the entry and open a new block:
-    # the key comes from a catalogue game NAME, which is scraped from each
-    # provider's API and is not ours to trust. _layout_key already strips the
-    # quote (it is one of the characters Steam removes), but braces survive it,
-    # and this file is account-wide -- a malformed entry does not break one
-    # game's layout, it breaks the parse for every entry after it.
+    # A quote or a brace in the key would end the entry and open a new block. The
+    # key comes from a game name scraped from each provider's API, so it is not
+    # ours to trust. _layout_key strips the quote but braces get through, and this
+    # file is account-wide -- a bad entry breaks the parse for every entry after.
     if any(ch in app_key for ch in '"{}\n\r\x00'):
         decky.logger.warning("refusing a configset key containing markup: %r",
                              app_key)
@@ -412,74 +322,41 @@ def _provider_default_layout(provider_key: str) -> Optional[str]:
         return _LAYOUT_WEB_BROWSER
     return _LAYOUT_GAMEPAD
 
-# Artwork is fetched here rather than in the browser; see fetch_artwork.
-#
-# The hardware goes in the comment field so the gateway can name this device
-# something a person recognises in a list.
+# Artwork is fetched here, not in the browser; see fetch_artwork. The hardware
+# goes in the comment field so the gateway can name this device in a list.
 ARTWORK_USER_AGENT = (
     f"Shelfcloud/0.1 ({_hardware_label()}; +https://github.com/bschelst/shelfcloud)")
 ARTWORK_MAX_BYTES = 8 * 1024 * 1024
 
-# The most base64 one RPC reply may carry.
-#
-# This is the bug that stopped every sync today, and it is not about size in
-# the abstract -- it is aiohttp's. Decky carries RPC replies over a websocket,
-# and aiohttp's WebSocketResponse refuses a message over 4 MB by CLOSING the
-# connection. No error reaches either side: the socket simply goes, and every
-# call after it waits for an answer that can never come. That is why a sync
-# died at call 475 one run and call 77 the next -- the number never mattered,
-# the first oversized reply did.
-#
-# Steam hero art is 6-7 MB on this Deck, which is 9 MB of base64 in one
-# message. So an image is sent in slices now and the frontend puts it back
-# together. Two megabytes leaves room for the JSON around it and still moves a
-# 7 MB hero in five messages.
-# See docs/RPC-PAYLOAD-LIMITS.md. Decky's websocket closes on a message over
-# 4 MB without raising, so nothing large crosses it whole -- artwork is sliced
-# to this, and the icon is named by URL rather than shipped as bytes.
-# Bumped to force ONE pass that re-selects every layout, ignoring the
-# "leave a user's own choice alone" rule.
-#
-# That rule cannot tell a real choice from the broken state this plugin used to
-# write: both are eSelectionType 1 naming an autosave file in the tile's own
-# directory. So the guard, working exactly as intended, protected the bug from
-# being fixed -- every tile stayed on Steam's default template.
-#
-# Raising this number repairs once and then gets out of the way; a choice made
-# after the repair is respected like any other.
+# Bumped to force one pass that re-selects every layout, ignoring the "leave a
+# user's own choice alone" rule. That rule can't tell a real choice from the
+# broken state we used to write (both are eSelectionType 1 naming an autosave
+# file in the tile's own directory), so it kept protecting the bug. Raising this
+# repairs once and then gets out of the way; a later choice is respected again.
 LAYOUT_REPAIR = 2
 
+# One artwork slice. aiohttp closes the websocket on a message over 4 MB, and a
+# 7 MB Steam hero is 9 MB of base64 -- so an image goes in slices and the
+# frontend joins them. Sized small on purpose: the freezes came from a burst of
+# a few 1-2 MB replies at once, so many small messages beat a few big ones.
 ARTWORK_CHUNK_CHARS = 192 * 1024
 
-# Two megabytes was picked against aiohttp's 4 MB ceiling -- one message under
-# the limit, as few messages as possible. That reasoning was about a single
-# message and the freezes are not: every one of them followed a BURST, five
-# replies of 1-2 MB inside one second, after which the backend answered
-# nothing at all while its socket stayed open and its process stayed idle.
-#
-# So the number is chosen for the burst instead. A 7 MB hero is 52 small
-# messages rather than 5 enormous ones -- more round trips over a local
-# socket, which costs almost nothing, in exchange for never handing the
-# router megabytes faster than it can move them.
-
-# The most any gateway reply may be. Generous on purpose — the biggest is the
-# whole catalogue, a few megabytes — but not unbounded: a captive portal or a
-# broken proxy answering a stream of bytes should fail, not fill the Deck's
-# memory with it.
+# The most any gateway reply may be. Generous -- the biggest is the whole
+# catalogue, a few MB -- but not unbounded: a captive portal or broken proxy
+# streaming bytes should fail, not fill the Deck's memory.
 RESPONSE_MAX_BYTES = 64 * 1024 * 1024
 
-# A controller layout is a few kilobytes of VDF text. The largest this plugin
-# ships is under 20 KB, so a megabyte is already far past anything genuine —
-# and unlike the catalogue, this one is held in a module-level cache.
+# A controller layout is a few KB of VDF text, the biggest we ship under 20 KB.
+# A megabyte is already far past anything real, and this one sits in a cache.
 LAYOUT_MAX_BYTES = 1024 * 1024
 
 # How many library entries one change may carry. The gateway refuses more than
-# 500, and a cancelled bulk add is routinely larger than that, so the caller
-# splits rather than losing the tail to a 422.
+# 500 and a cancelled bulk add is often bigger, so the caller splits rather than
+# losing the tail to a 422.
 _LIBRARY_BATCH = 200
 
-# How often to re-confirm the token with the gateway. Short enough that a
-# revoked session is noticed quickly, long enough not to be chatty.
+# How often to re-check the token with the gateway. Short enough to notice a
+# revoked session quickly, long enough not to be chatty.
 AUTH_RECHECK_SECONDS = 60
 
 # How long to wait for a Steam sign-in, and how often to check.
@@ -497,23 +374,19 @@ def _state_file() -> str:
     return os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "synced.json")
 
 
-# How long the panel may reuse the last display probe. Docking takes seconds;
-# the panel asks every 1.5 of them.
+# How long the panel may reuse the last display probe. Docking takes seconds; the
+# panel asks every 1.5 of them.
 DISPLAY_CACHE_SECONDS = 15.0
 
 
 def _tracking_key(game_id: int, provider: str) -> str:
     """How a tile is identified in synced.json.
 
-    It used to be the game id alone, which was enough while a game could only
-    have one tile. With sync_all_providers on it no longer is: Fortnite gets a
-    tile per service, they all carry game id 42, and a map keyed by game id
-    holds exactly one of them — so the second tile overwrites the first in the
-    record and the first becomes an orphan nothing will ever clean up.
-
-    Composite whether or not the setting is on. A key that changes shape when a
-    toggle flips is a key that orphans every tile the moment it is flipped, and
-    the migration below only has to run once this way.
+    It used to be the game id alone, which was fine while a game had one tile.
+    With sync_all_providers on it is not: Fortnite gets a tile per service, all
+    carrying game id 42, and a map keyed by game id holds only one -- the rest
+    become orphans nothing cleans up. Composite whether or not the setting is on,
+    so flipping the toggle does not orphan every tile.
     """
     return f"{game_id}:{provider}"
 
@@ -534,10 +407,10 @@ def _settings_icon_dir() -> str:
 
 
 def _steam_grid_dir() -> Optional[str]:
-    """Steam's own grid folder for the account that is signed in, if found.
+    """Steam's own grid folder for the signed-in account, if found.
 
-    Picked by the newest shortcuts.vdf: a Deck can hold several accounts and
-    the one being written to is the one in use.
+    Picked by the newest shortcuts.vdf: a Deck can hold several accounts, and the
+    one being written to is the one in use.
     """
     files = shortcuts.shortcuts_files()
     if not files:
@@ -554,10 +427,10 @@ def _steam_grid_dir() -> Optional[str]:
 def _icon_name(game_id: int, app_id: Optional[int], kind: str) -> str:
     """The filename for one tile's icon.
 
-    `<app_id>_icon.<kind>` whenever the shortcut's app id is known, which is
-    the shape every other tool on a Deck writes into Steam's grid folder. The
-    game-id form is the legacy name and only survives so icons written by an
-    older version can still be found and removed.
+    `<app_id>_icon.<kind>` when the shortcut's app id is known, the shape every
+    other tool on a Deck writes into Steam's grid folder. The game-id form is the
+    old name, kept only so icons from an older version can still be found and
+    removed.
     """
     if app_id:
         return f"{int(app_id)}_icon.{kind}"
@@ -567,25 +440,12 @@ def _icon_name(game_id: int, app_id: Optional[int], kind: str) -> str:
 def _icon_dir() -> str:
     """Where shortcut icons live on disk.
 
-    Icons are not like the other artwork. The four library slots are handed to
-    Steam as bytes and Steam stores its own copy; an icon is stored in
-    shortcuts.vdf as a PATH, and Steam reads that file every time it draws the
-    icon. Delete the file and the icon breaks — so this must be somewhere
-    durable, NOT the plugin directory, which install-to-deck.sh overwrites.
-
-    Steam's own grid folder first. The settings directory is durable and was
-    the original choice for exactly that reason, but a durable file Steam will
-    not draw is no better than no file: an icon written there landed correctly
-    in shortcuts.vdf, as a valid PNG the `deck` user could read, and still
-    rendered as a broken image. Every other working shortcut on the same
-    device — sixteen of them — keeps its icon inside
-    `userdata/<id>/config/grid`, and ours was the only one that did not.
-    Steam's UI is a browser process, and a path outside its own tree is the
-    difference that is actually there.
-
-    DECKY_PLUGIN_SETTINGS_DIR stays as the fallback for the case where Steam's
-    directory cannot be found at all, which is better than refusing to write
-    an icon.
+    An icon is stored in shortcuts.vdf as a PATH that Steam re-reads every time it
+    draws it, so the file must be durable, NOT the plugin directory that
+    install-to-deck.sh overwrites. Steam's own grid folder first: an icon in the
+    settings dir rendered as a broken image even as a valid PNG, because Steam's UI
+    is a browser process and a path outside its own tree is the difference. The
+    settings dir stays as the fallback for when Steam's folder can't be found.
     """
     return _steam_grid_dir() or _settings_icon_dir()
 
@@ -593,14 +453,11 @@ def _icon_dir() -> str:
 def as_id(value: Any) -> Optional[int]:
     """An integer id out of JSON, or None if it is anything else.
 
-    JSON promises nothing about types. An id can arrive as a string from a
-    proxy that rewrites bodies, as a float from a language whose numbers are
-    all floats, or as a dict from an error document served with the wrong
-    content type. Everything downstream — a URL path, a dropdown key — wants
-    an int or nothing at all, so the conversion happens once, here.
-
-    bool is rejected before int because it is a SUBCLASS of int: without that
-    line `True` quietly becomes the id 1, which is a real shelf.
+    JSON promises nothing about types: an id can arrive as a string from a proxy
+    that rewrites bodies, a float from a language whose numbers are all floats, or
+    a dict from an error document. Everything downstream wants an int or nothing,
+    so convert once, here. bool is rejected before int because it is a subclass of
+    int -- without that line `True` quietly becomes the id 1, which is a real shelf.
     """
     if value is None or isinstance(value, bool):
         return None
@@ -619,11 +476,10 @@ def as_id(value: Any) -> Optional[int]:
 def clean_shelf(entry: Any) -> Optional[Dict[str, Any]]:
     """One shelf fit to render, or None if there is nothing to select.
 
-    Only a missing id drops the row, because an id is the whole of what a
-    selection sends. A missing name is given one instead of being dropped: the
-    device may be pointed AT this shelf, and a picker whose current value is
-    not among its options draws as an empty control — which reads as the
-    plugin being broken rather than as one shelf being odd.
+    Only a missing id drops the row, since an id is all a selection sends. A
+    missing name gets a made-up one instead of dropping the row: the device may
+    point at this shelf, and a picker whose current value is not in its options
+    draws empty -- which looks like the plugin is broken, not one odd shelf.
     """
     if not isinstance(entry, dict):
         return None
@@ -638,35 +494,33 @@ def clean_shelf(entry: Any) -> Optional[Dict[str, Any]]:
 class Plugin:
     def __init__(self):
         self._settings: Dict[str, Any] = {}
-        # game_id -> {"app_id": int, "name": str, "launch": str}
-        # Without this, a game removed on the web could never be found and
-        # removed here, and re-syncing would create duplicate tiles.
+        # game_id -> {"app_id": int, "name": str, "launch": str}. Without it a
+        # game removed on the web could never be found and removed here, and
+        # re-syncing would make duplicate tiles.
         self._synced: Dict[str, Dict[str, Any]] = {}
         # One-off maintenance, done on the first library read of a session.
         self._pruned_layouts = False
-        # Tracked tiles that shortcuts.vdf did not mention LAST time it was
-        # read. Forgetting one takes two consecutive misses — see
-        # _forget_vanished_tiles for why one is not enough.
+        # Tracked tiles shortcuts.vdf did not mention last time. Forgetting one
+        # takes two misses in a row -- see _forget_vanished_tiles.
         self._vanish_suspects: set = set()
-        # (when, answer) for the display probe, which shells out to xrandr and
-        # is asked for by a panel that polls status every 1.5 seconds.
+        # (when, answer) for the display probe, which shells out to xrandr and is
+        # asked for by a panel that polls status every 1.5 seconds.
         self._players_cache: Dict[str, Any] = {}
         self._display_cache: tuple = (0.0, "")
         self._poll_task: Optional[asyncio.Task] = None
         self._login_task: Optional[asyncio.Task] = None
-        # The pairing code for a sign-in in progress, shown in the panel
-        # so the person can read it while the browser asks for it.
+        # Pairing code for a sign-in in progress, shown in the panel so the person
+        # can read it while the browser asks for it.
         self._pending_login_code: str = ""
         self._pending_login_url: str = ""
         self._last_error: Optional[str] = None
         self._last_sync: Optional[float] = None
-        # Whether the gateway last accepted our token. A token can stop working
-        # without the plugin doing anything, so "we have a string on disk" is
-        # not the same as "we are signed in".
+        # Whether the gateway last accepted our token. A token can stop working on
+        # its own, so "we have a string on disk" is not "we are signed in".
         self._auth_ok: bool = True
         self._auth_checked: float = 0.0
-        # Progress of a browser install, read by the panel through get_status
-        # so it survives the panel being closed mid-download.
+        # Progress of a browser install, read by the panel through get_status so it
+        # survives the panel being closed mid-download.
         self._install: Dict[str, Any] = dict(IDLE_INSTALL)
         self._install_task: Optional[asyncio.Task] = None
 
@@ -688,22 +542,16 @@ class Plugin:
         decky.logger.info("Shelfcloud unloaded")
 
     async def _uninstall(self):
-        # Our own icons, BY NAME. This used to empty the whole directory, which
-        # was safe only while that directory belonged to this plugin alone.
-        # It is now Steam's grid folder, which holds the library artwork of
-        # every game on the machine — emptying it on uninstall would delete
-        # all of it.
-        # The game id is the KEY here, not a field — a tracked entry holds
-        # app_id, name, launch, art, provider and url, and nothing else. Read
-        # as `tracked.get("game_id")` it is always None, which silently skips
-        # the legacy filename half of the cleanup below.
+        # Our own icons, by name. This used to empty the whole directory, safe
+        # only while it was ours alone. It is now Steam's grid folder, which holds
+        # the library art of every game on the machine, so emptying it would wipe
+        # all of that.
         for key, tracked in self._synced.items():
-            # The key is "<game id>:<provider>" now, so the game id has to be
-            # taken back out of it — passed whole it matches no icon filename
-            # and the legacy half of this cleanup silently does nothing.
+            # The key is "<game id>:<provider>" now, so the game id has to come
+            # back out of it -- passed whole it matches no icon filename.
             self._remove_icon_files(_key_game_id(key), tracked.get("app_id"))
 
-        # The old home, which really was ours alone, so it can still go wholly.
+        # The old home really was ours alone, so it can still go wholly.
         legacy = _settings_icon_dir()
         if os.path.isdir(legacy):
             for name in os.listdir(legacy):
@@ -721,9 +569,8 @@ class Plugin:
     def _remove_icon_files(game_id: Any, app_id: Any) -> None:
         """Delete one tile's icon wherever a version of this plugin put it.
 
-        Both directories and both naming schemes, because an icon written by
-        an earlier version is still on disk under the old name and would
-        otherwise be left behind forever.
+        Both directories and both naming schemes: an icon written by an earlier
+        version sits on disk under the old name and would else be left behind.
         """
         for directory in {_settings_icon_dir(), _icon_dir()}:
             for suffix in ("png", "jpg"):
@@ -740,30 +587,14 @@ class Plugin:
 
     @classmethod
     def _load_state(cls) -> Dict:
-        """Which tiles this plugin has made — recovered from Steam if lost.
+        """Which tiles this plugin has made -- recovered from Steam if lost.
 
-        This used to be a plain _read_json, which answers {} for a file that is
-        missing OR unreadable. Reconcile works entirely from this map, so {}
-        does not mean "no tiles", it means "I have never made any" — and every
-        game then reads as desired-but-untracked and gets a BRAND NEW tile.
-
-        The old tiles do not go away. They are untracked, so nothing cleans
-        them up, and the user gets duplicates. Worse, a Steam shortcut's
-        identity IS its app id: playtime, collections, artwork and the
-        per-game controller configuration all hang off it. Recreating a tile
-        silently abandons all of that on an app id nothing points at any more.
-
-        Seen on a real device: a synced.json.bak containing exactly "{}".
-
-        shortcuts.vdf is the authority on what Steam actually has, and every
-        tile this plugin makes carries "--game-id N" in its launch options, so
-        the file says which game each one belongs to. Rebuilding from it is
-        both safer and more correct than trusting our own copy:
-
-          - first run, no tiles          -> {} , which is right
-          - state lost, tiles exist      -> the real app ids, so nothing is
-                                            recreated and nothing is orphaned
-          - tiles the user deleted       -> absent, so they stay deleted
+        A plain _read_json returns {} for a missing or unreadable file, and reconcile
+        reads {} as "never made any tiles", so every game gets a new tile beside the
+        old untracked one -- duplicates on app ids that carry playtime, collections
+        and artwork. shortcuts.vdf is the authority on what Steam has, and every tile
+        carries "--game-id N", so rebuilding from it recovers the real app ids and
+        leaves user-deleted tiles deleted.
         """
         state = cls._read_json(_state_file())
         if state:
@@ -780,15 +611,12 @@ class Plugin:
     def _migrate_keys(state: Dict) -> Dict:
         """Re-key an old synced.json from "42" to "42:boosteroid".
 
-        One-way and idempotent: a key that already holds a colon is left alone,
-        so this can run on every load and only does work once.
-
-        An entry with no provider recorded keeps its bare key. It cannot be
-        given the right one by guessing, and a wrong provider in the key is
-        worse than an old-shaped one — the tile would stop matching anything
-        desired and be deleted as no longer wanted, losing its playtime and its
-        artwork. Left as it is, it is picked up by the compatibility lookup in
-        the frontend and re-keyed the next time it is written.
+        One-way and idempotent: a key that already has a colon is left alone, so
+        this runs on every load and only does work once. An entry with no provider
+        keeps its bare key -- guessing a wrong provider is worse, the tile would
+        stop matching anything and be deleted, losing its playtime and artwork. As
+        is, the frontend's compatibility lookup finds it and re-keys it on the
+        next write.
         """
         if not isinstance(state, dict):
             return {}
@@ -818,8 +646,8 @@ class Plugin:
     def _recover_from_steam() -> Dict:
         """game id -> {app_id}, read back out of Steam's own shortcuts.vdf.
 
-        Only the app id is recovered, because only the app id is irreplaceable
-        — name, exe and launch options are rewritten on every sync anyway.
+        Only the app id is recovered, because only it can't be replaced -- name,
+        exe and launch options are rewritten on every sync anyway.
         """
         try:
             found = shortcuts.shelfcloud_shortcuts()
@@ -831,15 +659,12 @@ class Plugin:
         for entry in found:
             provider = entry.get("provider") or ""
             # Keyed the same way a live sync keys it, so a recovered tile is
-            # matched rather than recreated beside itself. A tile from a build
-            # that wrote no --provider keeps the bare game id: the frontend's
-            # compatibility lookup still finds it, and the next write gives it
-            # the current shape.
+            # matched, not recreated beside itself. A tile from a build that wrote
+            # no --provider keeps the bare game id; the frontend still finds it.
             key = _tracking_key(entry["game_id"], provider) if provider \
                 else str(entry["game_id"])
-            # setdefault: duplicates() documents that Steam's order is oldest
-            # first, and the oldest tile is the one holding the playtime and
-            # the controller layout.
+            # setdefault: Steam's order is oldest first (see duplicates()), and the
+            # oldest tile is the one holding the playtime and the layout.
             found_entry = {"app_id": entry["app_id"]}
             if provider:
                 found_entry["provider"] = provider
@@ -850,31 +675,21 @@ class Plugin:
     def _read_json(path: str) -> Dict:
         """Read a JSON object from disk, or {} for anything else at all.
 
-        Two things this used to get wrong, both of which take the whole plugin
-        down rather than the one file.
-
-        It caught FileNotFoundError and JSONDecodeError only. A settings file
-        with a wrong mode raises PermissionError; one with a corrupted byte
-        raises UnicodeDecodeError, which is NOT a JSONDecodeError; a path that
-        is somehow a directory raises IsADirectoryError. Any of those reached
-        _main and stopped the plugin loading at all.
-
-        And it returned whatever JSON happened to parse to. `[]` in
-        settings.json is valid JSON and not a mapping, so `self._settings`
-        became a list and every `.get()` after it raised AttributeError — a
-        plugin that loads and then fails at everything, which is harder to
-        diagnose than one that does not load.
-
+        Two things this used to get wrong, both taking the whole plugin down
+        rather than the one file. It caught only FileNotFoundError and
+        JSONDecodeError, but a wrong mode raises PermissionError, a corrupted byte
+        UnicodeDecodeError, a directory IsADirectoryError -- any of them reached
+        _main and stopped the plugin loading. And it returned whatever parsed, so
+        `[]` made self._settings a list and every .get() raised AttributeError.
         Returning {} is right for both: an unreadable settings file means "no
-        settings", and the caller that cares about losing state — _load_state
-        — already treats {} as "ask Steam instead" rather than "no tiles".
+        settings", and _load_state already treats {} as "ask Steam instead".
         """
         try:
             with open(path, encoding="utf-8") as handle:
                 loaded = json.load(handle)
         except (OSError, ValueError) as exc:
             # ValueError covers JSONDecodeError and UnicodeDecodeError; OSError
-            # covers missing, unreadable, and not-a-file.
+            # covers missing, unreadable and not-a-file.
             if not isinstance(exc, FileNotFoundError):
                 decky.logger.warning("could not read %s: %s", path, exc)
             return {}
@@ -891,14 +706,10 @@ class Plugin:
         with open(temporary, "w", encoding="utf-8") as handle:
             json.dump(data, handle, indent=2)
 
-        # 0600, because settings.json holds the bearer token.
-        #
-        # Decky runs as root but drops to `deck` for plugin backends — ALL of
-        # them, this one included. At the default 0644 any other installed
-        # plugin could simply read this file and walk off with the credential,
-        # no privilege escalation required. The mode is set on the temporary
-        # file before the rename so the finished file is never briefly
-        # world-readable.
+        # 0600, because settings.json holds the bearer token. Decky drops to
+        # `deck` for all plugin backends, so at the default 0644 any other plugin
+        # could read this file and walk off with the credential. Set on the temp
+        # file before the rename so the final file is never briefly world-readable.
         try:
             os.chmod(temporary, 0o600)
         except OSError:
@@ -930,9 +741,8 @@ class Plugin:
             request.add_header("Content-Type", "application/json")
 
         # Only a plain GET is safe to revalidate: a POST has a side effect and
-        # must never be answered from anything held here. Keyed on the full
-        # path so ?shelf=... is a different entry, because it is a different
-        # answer.
+        # must never be answered from the cache. Keyed on the full path, so
+        # ?shelf=... is a different entry because it is a different answer.
         conditional = method == "GET" and data is None
         cached = _ETAG_CACHE.get(path) if conditional else None
         if cached:
@@ -948,11 +758,9 @@ class Plugin:
             # handshake per call, and a sync makes hundreds of them.
             with _open(url, headers=dict(request.header_items()),
                        method=method, body=data) as response:
-                # Bounded, like fetch_artwork already is. An unbounded read
-                # here trusts whatever answered to be reasonable about size,
-                # and the largest thing this asks for — a whole catalogue — is
-                # a few megabytes. Reading one byte past the cap is what tells
-                # the difference between "at the limit" and "over it".
+                # Bounded, like fetch_artwork. The biggest thing this asks for is
+                # a whole catalogue, a few MB; reading one byte past the cap tells
+                # "at the limit" from "over it".
                 raw = response.read(RESPONSE_MAX_BYTES + 1)
                 if len(raw) > RESPONSE_MAX_BYTES:
                     raise ValueError(
@@ -962,19 +770,17 @@ class Plugin:
                 if conditional:
                     etag = response.headers.get("ETag")
                     if etag:
-                        # Bounded, and cleared wholesale rather than evicted
-                        # one by one: there are a handful of GET paths, so if
-                        # this is ever full something is generating keys and
-                        # the useful response is to stop holding any of them.
+                        # Cleared wholesale, not one by one: there are only a few
+                        # GET paths, so if this ever fills up something is making
+                        # keys and the right answer is to drop them all.
                         if (len(_ETAG_CACHE) >= _ETAG_CACHE_MAX
                                 and path not in _ETAG_CACHE):
                             _ETAG_CACHE.clear()
                         _ETAG_CACHE[path] = (etag, payload)
                 return json.loads(payload) if payload else None
         except urllib.error.HTTPError as exc:
-            # 304 is the gateway agreeing that what we already hold is current.
-            # urllib raises for it because it is not a 2xx, so it arrives here
-            # rather than above.
+            # 304 is the gateway agreeing that what we hold is current. urllib
+            # raises for it because it is not a 2xx, so it lands here.
             if exc.code == 304 and cached:
                 self._auth_ok = True
                 return json.loads(cached[1]) if cached[1] else None
@@ -991,7 +797,7 @@ class Plugin:
 
     async def start_login(self) -> Dict[str, Any]:
         """Begin sign-in. The frontend opens login_url via steam://openurl,
-        because Game Mode has no browser of its own."""
+        since Game Mode has no browser of its own."""
         self._pending_login_code = ""
         self._pending_login_url = ""
         if self._login_task and not self._login_task.done():
@@ -1000,12 +806,10 @@ class Plugin:
             result = await asyncio.to_thread(
                 self._request, "/auth/session?web=0", "POST", None, False
             )
-            # The pairing code is what stops someone else finishing this
-            # sign-in. It is kept HERE rather than only returned once, because
-            # opening Steam's browser closes the panel — the user has to be
-            # able to peek back at the panel to read the code while the browser
-            # is asking for it, and a value that lived only in the panel's
-            # state would be gone by then.
+            # The pairing code stops someone else finishing this sign-in. Kept
+            # here, not just returned once: opening Steam's browser closes the
+            # panel, and the user still has to read the code off the panel while
+            # the browser asks for it, so a value living only in the panel is gone.
             self._pending_login_code = result.get("confirm_code") or ""
             self._pending_login_url = result.get("login_url") or ""
 
@@ -1021,14 +825,11 @@ class Plugin:
     async def _await_login(self, session_token: str) -> None:
         """Wait for the Steam sign-in to complete, then keep the credential.
 
-        This has to live in the backend. Signing in opens Steam's browser,
-        which closes the Quick Access panel — and the panel is a React
-        component, so unmounting it killed the timer that was polling for the
-        result. Steam authenticated the user correctly every time; nobody was
-        left to collect the token, and the plugin stayed signed out.
-
-        The same lesson as the background sync: anything that must outlive the
-        panel cannot live in the panel.
+        This has to live in the backend. Signing in opens Steam's browser, which
+        closes the Quick Access panel; the panel is a React component, so
+        unmounting it killed the timer polling for the result. Steam signed the
+        user in fine every time, but nobody was left to collect the token. Same
+        lesson as the background sync: what must outlive the panel can't live in it.
         """
         deadline = time.monotonic() + LOGIN_TIMEOUT_SECONDS
         while time.monotonic() < deadline:
@@ -1045,8 +846,8 @@ class Plugin:
             if not result or result.get("status") != "ok":
                 continue
 
-            # Paired. The code has served its purpose and should not linger
-            # in the panel for the next person who opens it.
+            # Paired. The code has done its job and should not linger in the
+            # panel for the next person who opens it.
             self._pending_login_code = ""
             api_token = result.get("api_token")
             if not api_token:
@@ -1054,12 +855,12 @@ class Plugin:
                 continue
             self._settings["api_token"] = api_token
             self._settings["steam_id64"] = result.get("steam_id64")
-            # A fresh credential invalidates any cached "not signed in" answer.
+            # A fresh credential clears any cached "not signed in" answer.
             self._auth_ok = True
             self._auth_checked = 0.0
             await self._save_settings()
             decky.logger.info("Signed in as %s", result.get("steam_id64"))
-            # Populate the library straight away rather than waiting a tick.
+            # Fill the library straight away rather than waiting a tick.
             await decky.emit(SYNC_EVENT)
             return
 
@@ -1069,9 +870,9 @@ class Plugin:
     async def poll_login(self, session_token: str) -> Dict[str, Any]:
         """Progress of the sign-in the backend is waiting on.
 
-        The backend does the claiming — a session token is single use, so two
-        claimants would race and one would be told the link was already used.
-        This only reports.
+        The backend does the claiming -- a session token is single use, so two
+        claimants would race and one would be told the link was already used. This
+        only reports.
         """
         if self._token():
             return {"ok": True, "status": "signed_in",
@@ -1082,14 +883,11 @@ class Plugin:
     def _clear_session_state(self) -> None:
         """Drop everything tied to the account that was signed in.
 
-        There are two ways to stop being signed in -- the gateway rejecting
-        the token, and the user pressing Sign out -- and each used to clear
-        this by hand. They drifted the moment anything was added: the ETag
-        cache went into the involuntary path only, so a DELIBERATE sign-out
-        left the previous account's library sitting in memory, which is the
-        one case where somebody has actually asked for it to be gone.
-
-        One place, so the next thing that belongs here cannot miss a path.
+        There are two ways to stop being signed in -- the gateway rejecting the
+        token, and the user pressing Sign out -- and each used to clear this by
+        hand. They drifted: the ETag cache was cleared on the first path only, so
+        a real sign-out left the old account's library in memory, the one case
+        where somebody actually asked for it to go. One place, so nothing is missed.
         """
         self._settings.pop("api_token", None)
         self._settings.pop("steam_id64", None)
@@ -1103,13 +901,13 @@ class Plugin:
         try:
             self._write_json(_settings_file(), self._settings)
         except OSError:
-            pass   # in-memory state is already correct; disk catches up later
+            pass   # in-memory state is already right; disk catches up later
 
     async def logout(self) -> Dict[str, Any]:
         try:
             await asyncio.to_thread(self._request, "/api/me/logout", "POST", {})
         except Exception:
-            pass  # local sign-out must work even when the gateway is unreachable
+            pass  # local sign-out must work even when the gateway is down
         if self._login_task and not self._login_task.done():
             self._login_task.cancel()
         self._clear_session_state()
@@ -1122,17 +920,16 @@ class Plugin:
     def _artwork(game: Dict) -> Dict[str, Optional[str]]:
         """Artwork for each Steam library slot, as resolved by the gateway.
 
-        Deliberately no lookups here: artwork is catalog data, resolved once
-        server-side for every user, so the plugin only renders what it is given.
-        Falls back to provider images for games the gateway could not resolve.
+        No lookups here: artwork is catalog data, resolved once server-side for
+        every user, so the plugin only renders what it is given. Falls back to
+        provider images for games the gateway could not resolve.
         """
         def url(*keys) -> Optional[str]:
-            """First value that is actually a usable URL, else None.
+            """First value that is a usable URL, else None.
 
-            https only, at the point the value is first accepted. fetch_artwork
-            checks again before anything is downloaded, but a plain-http URL
-            would otherwise be baked into a persisted shortcut on the strength
-            of a second, separate check staying correct forever.
+            https only, checked when the value is first accepted. fetch_artwork
+            checks again before downloading, but a plain-http URL would else be
+            baked into a saved shortcut.
             """
             for key in keys:
                 value = game.get(key)
@@ -1142,38 +939,32 @@ class Plugin:
 
         return {
             "capsule": url("capsule_url"),
-            # The game's own picture, for when there is no capsule.
-            #
-            # 79 catalogue games have a cover and no capsule — Amazon Luna's
-            # smaller titles and a few Boosteroid demos. Steam's capsule slot
-            # then stayed empty and the tile fell back to the gateway's
-            # website picture, so eighteen games in one library were the same
-            # blue cloud and a search for any of them looked like duplicates.
-            # The frontend draws a capsule from this instead. Not offered AS
-            # the capsule: these are wide logos, and Steam's capsule is a tall
-            # portrait, so it has to be composed rather than stretched.
+            # The game's own picture, for when there is no capsule. Some catalogue
+            # games have a cover and no capsule, and the empty slot fell back to
+            # the gateway's website picture, so many games showed the same blue
+            # cloud and looked like duplicates. The frontend composes a capsule
+            # from this -- not offered AS the capsule, since these are wide logos
+            # and the capsule is a tall portrait.
             "cover": url("cover_url", "banner_url"),
             "header": url("header_url"),
             "hero": url("hero_url", "banner_url"),
             "logo": url("logo_url"),
-            # Not a library slot. Steam takes an icon as a file PATH, so this
-            # one is downloaded and written to disk rather than handed over as
-            # bytes — see applyArtwork. It is separate from the logo because
-            # the logo is drawn INSTEAD OF the title on a game's page: a tile
-            # that carries one shows a picture where its name should be, which
-            # is why website tiles have no logo and do have this.
+            # Not a library slot. Steam takes an icon as a file PATH, so this one
+            # is downloaded and written to disk, not handed over as bytes -- see
+            # applyArtwork. Separate from the logo, which is drawn instead of the
+            # title on a game's page (that is why website tiles have no logo but
+            # do have this).
             "icon": url("icon_url"),
         }
 
     def _artwork_proxy(self, game: Dict) -> Dict[str, str]:
         """The same artwork, served back through the gateway.
 
-        Steam applies custom art by being handed bytes, so the plugin fetches
-        the image from inside Steam's client — a cross-origin request. Steam's
-        own CDN sends `access-control-allow-origin: *`; SteamGridDB sends no
-        CORS header at all, so the browser discards the response and every
-        cloud-only game kept a blank tile with nothing logged. The gateway does
-        send the header, so it can hand over what the CDN will not.
+        Steam applies custom art from bytes, so the plugin fetches the image from
+        inside Steam's client -- a cross-origin request. Steam's own CDN sends
+        `access-control-allow-origin: *`, but SteamGridDB sends no CORS header, so
+        the browser drops the response and cloud-only games kept a blank tile. The
+        gateway does send the header, so it can hand over what the CDN will not.
         """
         game_id = game.get("id")
         if not isinstance(game_id, int):
@@ -1185,18 +976,12 @@ class Plugin:
     def _to_desired(self, game: Dict) -> List[Dict]:
         """Turn a library entry into the tiles the frontend should make.
 
-        A list, because one game is not always one tile. With
-        sync_all_providers on, a game playable on three services becomes three
-        tiles — one per service, each launching that service — so the library
-        shows where a game can actually be played rather than only where this
-        device would have picked. Off, which is the default, it is the single
-        preferred route and the list has one entry.
-
-        Every field is checked rather than indexed. This reads data from a
-        network service, and one malformed entry used to raise straight out of
-        the loop and abandon the whole sync — so a single odd row in the
-        catalog could stop every other game from appearing. Anything that does
-        not have what a Steam shortcut needs is skipped and counted.
+        A list, because one game is not always one tile. With sync_all_providers
+        on, a game playable on three services becomes three tiles, one per service.
+        Off (the default) it is the single preferred route and the list has one
+        entry. Every field is checked, not indexed: this is network data, and one
+        malformed entry used to raise out of the loop and abandon the whole sync.
+        Anything missing what a Steam shortcut needs is skipped and counted.
         """
         if not isinstance(game, dict):
             return []
@@ -1210,23 +995,18 @@ class Plugin:
         providers = [p for p in raw_providers if isinstance(p, dict)] \
             if isinstance(raw_providers, list) else []
         # A route is only usable with somewhere to go and something to call it.
-        #
-        # Two rules, because there are two kinds of tile. A game is https-only:
-        # its URL is written into a Steam shortcut and opened later in a window
-        # holding live provider sessions, and refusing http here keeps a plain
-        # link from ever being stored. A page is checked by weburl instead,
-        # which permits http but refuses anything inside this network — the same
-        # rule the launcher applies when it opens the thing, so an entry cannot
-        # become a shortcut that then refuses to launch.
+        # Two rules for two kinds of tile: a game is https-only (its URL is
+        # written into a shortcut and opened later, so no plain link is stored); a
+        # page is checked by weburl, which allows http but refuses anything inside
+        # this network -- the same rule the launcher uses, so a shortcut can't be
+        # made that then refuses to launch.
         providers = [
             p for p in providers
-            # A PLAIN TOKEN, because this value has to survive a round trip
-            # through a shell-quoted command line and back out of
-            # shortcuts.vdf. The writer quotes with shlex; the reader matches
-            # \S+ and would stop at the opening quote, so a key containing a
-            # space came back as something else -- and a provider key that does
-            # not match what synced.json recorded makes the sync delete the
-            # tile and build it again, every time, for ever.
+            # A plain token, because this value has to survive a round trip through
+            # a shell-quoted command line and back out of shortcuts.vdf. The reader
+            # matches \S+ and would stop at a quote, so a key with a space comes
+            # back different -- and a key that no longer matches synced.json makes
+            # the sync delete the tile and rebuild it, every time.
             if isinstance(p.get("provider"), str) and p["provider"]
             and _PLAIN_KEY.match(p["provider"])
             and isinstance(p.get("launch_url"), str)
@@ -1237,20 +1017,13 @@ class Plugin:
         if not providers:
             return []
 
-        # A route the subscription cannot reach is not a tile.
-        #
-        # The gateway marks each route with the rung it still needs. Dropping
-        # those matters most with a tile per service on, because that mode
-        # makes a shortcut out of EVERY route: Sonic Frontiers is free on
-        # Boosteroid and "Luna Premium" on Amazon, and a Luna Prime account got
-        # both tiles — the Luna one opening on "Included in Luna Premium, start
-        # your 7-day free trial". Ranking could not fix that; ranking chooses
-        # between routes and this mode keeps all of them.
-        #
-        # Unless that leaves nothing. A game reachable on no route at all is
-        # still a game the user deliberately added, and silently having no tile
-        # looks like the sync lost it. It keeps one, and the gateway's
-        # needs_tier says why it will ask for money.
+        # A route the subscription cannot reach is not a tile. The gateway marks
+        # each route with the tier it still needs. This matters most with a tile
+        # per service on, since that mode makes a shortcut of every route: a game
+        # free on one service and behind a paywall on another would else get a
+        # tile that opens on a "start your free trial" page. Unless dropping them
+        # leaves nothing -- a game the user added on purpose keeps one tile even
+        # when no route is reachable, and needs_tier says why it asks for money.
         reachable = [p for p in providers if not p.get("needs_tier")]
         if reachable:
             providers = reachable
@@ -1258,17 +1031,13 @@ class Plugin:
         chosen = game.get("chosen_provider")
         if self._sync_all_providers():
             # Every route, preferred one first so it keeps whichever tile Steam
-            # happens to order first and the library reads the way it did.
+            # orders first and the library reads the way it did.
             ordered = sorted(providers, key=lambda p: p["provider"] != chosen)
-            # One route per SERVICE, not one per row.
-            #
-            # The catalog can hold several rows for the same game on the same
-            # service — a regional entry, a re-release, a second storefront.
-            # Measured on this account: 402 boosteroid rows across 316 games,
-            # and games listing six, seven and eight "providers" when only
-            # five exist. One tile per row gives them all the same key, so
-            # they collide in synced.json: the sync makes a tile, makes it
-            # again for the next row, and the launch URL flips between them.
+            # One route per SERVICE, not one per row. The catalog can hold several
+            # rows for the same game on the same service (a regional entry, a
+            # re-release, a second storefront). One tile per row gives them the
+            # same key, so they collide in synced.json and the launch URL flips
+            # between them every sync.
             routes = []
             taken = set()
             for route in ordered:
@@ -1286,25 +1055,14 @@ class Plugin:
 
         launcher = os.path.join(decky.DECKY_PLUGIN_DIR, "bin", "shelfcloud-launch.py")
         profile = browsers.profile_dir(browser["app_id"])
-        # NO URL on the command line.
-        #
-        # Steam shows launch options verbatim in a game's properties, so the
-        # provider's deep link sat there in the interface for every tile — and
-        # it is not something a person needs to read, or should have to.
-        #
-        # --game-id is what actually resolves a launch: the launcher asks the
-        # gateway where the game goes right now, which keeps a changed URL or a
-        # changed provider preference working without a re-sync and lets the
-        # gateway count launches. The fallback for a gateway that is asleep now
-        # lives in synced.json beside everything else this plugin remembers,
-        # read by game id — off the command line and out of the interface.
-        #
-        # --provider stays, and now carries a second job: what a signed-out
-        # page looks like and where the Play control lives differ per provider,
-        # and with one tile per service it is also what tells the gateway which
-        # of them this tile is. Three tiles for one game share a game id, so
-        # without it all three resolve to the same service and two of them lie
-        # about what they open.
+        # NO URL on the command line. Steam shows launch options verbatim in a
+        # game's properties, so a provider deep link would sit there for everyone
+        # to read. --game-id resolves a launch instead: the launcher asks the
+        # gateway where the game goes now, which keeps a changed URL or provider
+        # working without a re-sync. The offline fallback lives in synced.json,
+        # read by game id. --provider stays and now also tells the gateway which
+        # tile this is -- three tiles for one game share a game id, so without it
+        # all three resolve to the same service.
         artwork = self._artwork(game)
         artwork_proxy = self._artwork_proxy(game)
 
@@ -1328,16 +1086,10 @@ class Plugin:
                 "artwork_proxy": artwork_proxy,
                 "controller_layout": (provider.get("controller_layout")
                                       or _provider_default_layout(key)),
-                # The game's id on STEAM, carried through so the sync can fill
-                # it in on every tile in one call at the end of its run.
-                #
-                # It was read from the gateway and then dropped here, so
-                # `game.steam_app_id` was undefined on the frontend, the map it
-                # builds was always empty, and set_steam_ids was never called
-                # at all. The player badge therefore had nothing to ask Steam
-                # about on any tile -- the feature was inert by construction,
-                # and looked like it worked only while a hand-written
-                # synced.json survived, which the next save overwrote.
+                # The game's id on STEAM, carried through so the sync can fill it
+                # in on every tile in one call. It was dropped here before, so the
+                # frontend's map was always empty and the player badge had nothing
+                # to ask Steam about -- the feature was inert.
                 "steam_app_id": str(game.get("steam_app_id") or ""),
             })
         return entries
@@ -1345,20 +1097,16 @@ class Plugin:
     async def get_website_launch(self) -> Dict[str, Any]:
         """Launch command for a Steam tile that opens the Shelfcloud website.
 
-        Steam's own in-client browser forwards no controller input to web pages
-        — verified on hardware: zero key events, zero gamepads, so the d-pad is
-        dead there and no page-side code can help. Launching the site as a Steam
-        shortcut instead puts it under Steam Input, which can map the d-pad to
-        arrow keys and make the page navigable.
-
-        Uses the same browser the user picked for games, so there is one choice
-        and one persistent profile — the site and the games share a login.
+        Steam's in-client browser forwards no controller input to web pages
+        (verified on hardware: zero key events, zero gamepads), so the d-pad is
+        dead there. Launching the site as a Steam shortcut instead puts it under
+        Steam Input, which can map the d-pad to arrow keys. Uses the same browser
+        the user picked for games, so the site and games share one login.
         """
         browser = await asyncio.to_thread(browsers.resolve_browser, self._settings.get("browser"))
         if browser is None:
-            # A dict, not None: the frontend reads .ok off every reply, and a
-            # bare None reads as "the call itself broke" rather than "no browser
-            # is set yet". Same envelope as every other call here.
+            # A dict, not None: the frontend reads .ok off every reply, and a bare
+            # None reads as "the call broke", not "no browser set yet".
             return {"ok": False, "error": "no browser configured"}
 
         launcher = os.path.join(decky.DECKY_PLUGIN_DIR, "bin", "shelfcloud-launch.py")
@@ -1380,31 +1128,22 @@ class Plugin:
     async def fetch_artwork(self, url: str, offset: int = 0) -> Dict[str, Any]:
         """Download one artwork image and return it base64-encoded, in slices.
 
-        `offset` asks for the rest of an image already fetched. The reply says
-        `total`, so the caller knows when it has all of it -- see
-        ARTWORK_CHUNK_CHARS for why this cannot be one message.
-
-        The frontend used to fetch these itself, which cannot work in general:
-        that code runs inside Steam's client at https://steamloopback.host, so
-        every image is a cross-origin request. Steam's own CDN happens to send
-        access-control-allow-origin and succeeded; SteamGridDB sends no CORS
-        header, and our own gateway is plain HTTP, which the client blocks as
-        mixed content. Both failed silently and left blank tiles.
-
-        Python has neither restriction, so the bytes are fetched here and
-        handed over ready to use.
+        `offset` asks for the rest of an image already fetched; the reply says
+        `total` so the caller knows when it has all of it (see ARTWORK_CHUNK_CHARS
+        for why it can't be one message). The frontend used to fetch these itself,
+        which can't work: that code runs inside Steam's client, so every image is a
+        cross-origin request and SteamGridDB (no CORS) and our own gateway (mixed
+        content) both failed silently. Python has neither limit, so the bytes are
+        fetched here and handed over ready to use.
         """
-        # https only. http was accepted here when the gateway was a plaintext
-        # box on the LAN; it no longer is, and every artwork URL the catalog
-        # serves — 18,884 of them across five CDNs — is already https. Plain
-        # http would let anything on the path swap the image, and these bytes
-        # are written to disk and handed to Steam as a shortcut icon.
+        # https only. These bytes are written to disk and handed to Steam as a
+        # shortcut icon, so nothing on the path gets to swap the image. Every
+        # artwork URL the catalog serves is already https.
         if not isinstance(url, str) or not url.startswith("https://"):
             return {"ok": False, "error": "unsupported url"}
 
-        # A continuation of the image just sent. Answered from memory: asking
-        # the CDN again for six megabytes we already hold, four more times, is
-        # the sort of thing that turns a fix into a different problem.
+        # A continuation of the image just sent, answered from memory: asking the
+        # CDN again for MB we already hold would turn a fix into a new problem.
         if offset:
             held = getattr(self, "_artwork_part", None)
             if held and held[0] == url:
@@ -1412,21 +1151,17 @@ class Plugin:
             return {"ok": False, "error": "image no longer held; fetch again"}
 
         headers = {"User-Agent": ARTWORK_USER_AGENT}
-        # Our own gateway needs the credential; a provider's CDN must never see
-        # it. The artwork proxy is behind sign-in like every other endpoint, and
-        # this request used to be the one exception — it went out bare, which is
-        # the only reason that endpoint could not be gated.
+        # Our own gateway needs the credential; a provider's CDN must never see it.
+        # The proxy is behind sign-in like every endpoint, and this request used to
+        # go out bare -- the one reason that endpoint could not be gated.
         if url.startswith(self._gateway() + "/"):
             token = self._token()
             if token:
                 headers["Authorization"] = f"Bearer {token}"
 
-        # On a thread. urlopen BLOCKS, and this is an async method on the one
-        # event loop the whole plugin shares — so a slow CDN did not just slow
-        # this image down, it stopped the backend: the poll loop, every other
-        # RPC, the sync's own progress. With a 20 second timeout, several
-        # artwork slots per game and hundreds of games, a single unreachable
-        # host could hold the plugin still for minutes.
+        # On a thread. urlopen blocks, and this runs on the one event loop the
+        # whole plugin shares -- so a slow CDN would stall the backend, not just
+        # this image: the poll loop, every other RPC, the sync's own progress.
         try:
             content_type, raw = await asyncio.to_thread(
                 self._fetch_image, url, headers)
@@ -1440,9 +1175,8 @@ class Plugin:
 
         encoded = base64.b64encode(raw).decode()
         kind = "png" if content_type.endswith("png") else "jpg"
-        # Held so the follow-up slices do not re-download the same picture.
-        # One entry is enough: the caller asks for a whole image before it
-        # moves to the next.
+        # Held so the follow-up slices do not re-download the same picture. One
+        # entry is enough: the caller finishes an image before the next.
         self._artwork_part = (url, encoded, kind)
         return self._artwork_slice(encoded, kind, 0)
 
@@ -1461,8 +1195,8 @@ class Plugin:
     def _fetch_image(url: str, headers: Dict[str, str]) -> tuple:
         """Blocking half of fetch_artwork, for asyncio.to_thread.
 
-        Reads one byte more than the limit so the caller can tell "exactly at
-        the limit" from "too big" without holding the whole thing in memory.
+        Reads one byte over the limit so the caller can tell "at the limit" from
+        "too big" without holding the whole thing in memory.
         """
         with _open(url, headers=headers) as response:
             content_type = response.headers.get("Content-Type", "")
@@ -1488,13 +1222,10 @@ class Plugin:
     async def add_owned_games(self) -> Dict[str, Any]:
         """Add every game the user can play on cloud.
 
-        No provider argument, so the gateway answers for all of them at once:
-        games owned on Steam, free-to-play ones, and — since a subscription is
-        itself the entitlement — whatever the user's Luna or Xbox Cloud tier
-        already covers.
-
-        The alternative is picking a few hundred games one at a time on the
-        website, which is the whole point of having this button.
+        No provider argument, so the gateway answers for all at once: games owned
+        on Steam, free-to-play ones, and whatever the user's Luna or Xbox Cloud
+        tier already covers. Saves picking a few hundred games one at a time on the
+        website.
         """
         try:
             result = await asyncio.to_thread(
@@ -1507,30 +1238,22 @@ class Plugin:
     async def drop_from_library(self, game_ids: List[int]) -> Dict[str, Any]:
         """Take games back out of the library, for a cancelled bulk add.
 
-        "Add all my games" adds every owned game server-side in ONE call and
-        then makes the tiles one at a time. Cancelling stops the tiles, which
-        left the library holding hundreds of games that would simply appear on
-        the next sync — so the cancel undid nothing that lasted.
-
-        Removing them makes cancel mean what it says. Only games this run added
-        and never tiled are passed in; anything already on the shelf is the
-        person's own choice and is not touched.
-
-        Sent in batches because the endpoint caps a change at 500 entries, and
-        a bulk add is routinely larger than that.
+        "Add all my games" adds every owned game server-side in one call and then
+        makes the tiles one at a time. Cancelling stops the tiles but leaves the
+        library holding those games, which would just reappear on the next sync --
+        so the cancel undid nothing lasting. Removing them makes cancel mean what
+        it says. Only games this run added and never tiled are passed in. Sent in
+        batches because the endpoint caps a change at 500 entries.
         """
-        # The ARGUMENT before its contents. This list is built by the frontend
-        # out of a gateway response, so it is exactly as trustworthy as that
-        # response was — and `for g in None` is a TypeError out of a Decky
-        # callable, which surfaces as a dead panel with nothing to explain it.
+        # The argument before its contents. This list comes from the frontend, so
+        # `for g in None` would be a TypeError out of a Decky callable and show up
+        # as a dead panel with nothing to explain it.
         if not isinstance(game_ids, (list, tuple, set)):
             return {"ok": True, "removed": 0}
 
-        # as_id, not a hand-rolled check: JSON promises nothing about types, so
-        # an id arrives as an int here, a float from a language whose numbers
-        # are all floats, and a string from a proxy that rewrote the body. That
-        # conversion already exists and already rejects bool, which is a
-        # subclass of int and would otherwise become the id 1 — a real game.
+        # as_id, not a hand-rolled check: an id can arrive as int, float or string,
+        # and as_id already rejects bool (a subclass of int that would else become
+        # the id 1, a real game).
         ids = [value for value in (as_id(g) for g in game_ids) if value is not None]
         if not ids:
             return {"ok": True, "removed": 0}
@@ -1543,7 +1266,7 @@ class Plugin:
                     self._request, "/api/me/library", "POST", {"remove": batch})
                 removed += int(result.get("removed") or 0)
         except Exception as exc:
-            # Best effort. The tiles are already correct; this is tidying the
+            # Best effort. The tiles are already correct; this just tidies the
             # library behind them, and failing it must not fail the sync.
             decky.logger.warning("Shelfcloud: could not drop %d games: %s",
                                  len(ids), exc)
@@ -1553,14 +1276,12 @@ class Plugin:
     async def restore_to_library(self, game_ids: List[int]) -> Dict[str, Any]:
         """Put games back, for a cancelled "remove all".
 
-        That run empties the library server-side in one call and then deletes
-        the tiles one at a time. Stopping the deletions alone would change
-        nothing that lasts: the library is already empty, so every tile the
-        cancel saved is no longer wanted and the next sync removes it anyway.
-
-        So the games whose tiles survived are added back. Only those — a game
-        whose tile was already deleted is gone, and putting it back would
-        undo a deletion the person watched happen.
+        That run empties the library server-side in one call and then deletes the
+        tiles one at a time. Stopping the deletions alone changes nothing lasting:
+        the library is already empty, so every saved tile is no longer wanted and
+        the next sync removes it anyway. So the games whose tiles survived are added
+        back -- only those, since a game whose tile was already deleted is gone and
+        putting it back would undo a deletion the person watched happen.
         """
         if not isinstance(game_ids, (list, tuple, set)):
             return {"ok": True, "restored": 0}
@@ -1596,14 +1317,10 @@ class Plugin:
     async def get_desired_library(self, known: str = "") -> Dict[str, Any]:
         """What the Steam library should contain, ready to act on.
 
-        `known` is the version the caller already holds. When the answer has
-        not changed since, it is not sent again.
-
-        The HTTP fetch from the gateway has been conditional for a while, so an
-        unchanged library costs a couple of hundred bytes on that hop. This
-        reply was not: the same 1.6 MB crossed Decky\'s websocket every sync,
-        every few minutes, to say nothing had changed -- measured at 1.61 MB a
-        run against a library reporting `+0 -0 ~0`.
+        `known` is the version the caller already holds; when nothing has changed
+        since, the payload is not sent again. The HTTP fetch from the gateway has
+        been conditional for a while, but this reply was not -- the same ~1.6 MB
+        crossed Decky's websocket every few minutes just to say nothing changed.
         """
         try:
             result = await asyncio.to_thread(self._request, "/api/me/library")
@@ -1632,7 +1349,7 @@ class Plugin:
             try:
                 entries = self._to_desired(game)
             except Exception as exc:
-                # One unusable row must never cost the user their whole library.
+                # One bad row must never cost the user their whole library.
                 decky.logger.warning("Skipping a malformed game entry: %s", exc)
                 entries = []
             if entries:
@@ -1645,9 +1362,9 @@ class Plugin:
 
         await self._forget_vanished_tiles()
 
-        # Once per session, off the event loop. Cheap when there is nothing to
-        # do -- it is a listdir per Steam user -- and it only ever has
-        # something to do on a device that ran an older build.
+        # Once per session, off the event loop. Cheap when there is nothing to do
+        # (a listdir per Steam user), and it only has work on a device that ran an
+        # older build.
         if not self._pruned_layouts:
             self._pruned_layouts = True
             try:
@@ -1657,15 +1374,15 @@ class Plugin:
 
         self._last_error = None
 
-        # Versioned over what the caller ACTS on -- the desired tiles and the
-        # tracking record -- rather than over the whole reply, so adding a
-        # field here later cannot quietly stop this from ever matching.
+        # Versioned over what the caller acts on -- the desired tiles and the
+        # tracking record -- not the whole reply, so adding a field later can't
+        # quietly stop this from ever matching.
         version = hashlib.sha256(
             json.dumps([desired, self._synced], sort_keys=True,
                        default=str).encode()
         ).hexdigest()[:16]
         if known and known == version:
-            # Everything the caller needs, minus the megabyte it already holds.
+            # Everything the caller needs, minus the MB it already holds.
             return {"ok": True, "signed_in": True, "unchanged": True,
                     "version": version, "skipped": skipped}
         return {
@@ -1680,21 +1397,13 @@ class Plugin:
     def _prune_stale_layouts(self) -> int:
         """Remove layout directories left behind by an older naming rule.
 
-        The name Steam reads was got wrong twice: first the shortcut's own
-        case, then lower case, and only then lower case with the characters
-        Steam strips. Each attempt wrote a directory, and nothing removed the
-        previous one -- measured on this Deck, 552 dead directories holding
-        9.2 MB, none of which Steam has ever opened.
-
-        Deliberately narrow. A directory is removed only when all three hold:
-
-          - its name is one of OUR shortcut names under a spelling some
-            earlier rule produced, so nothing of the user's own is touched;
-          - the name Steam reads TODAY exists alongside it, so this can never
-            remove the only copy;
-          - it sits in a per-user config directory, checked by realpath.
-
-        Returns how many were removed.
+        The name Steam reads was wrong twice before (the shortcut's own case, then
+        lower case), and each attempt wrote a directory that nothing cleaned up --
+        measured here, 552 dead directories Steam never opened. Kept narrow: a
+        directory goes only when all three hold -- its name is one of our shortcut
+        names under an old spelling, the name Steam reads today exists beside it
+        (so never the only copy), and it sits in a per-user config directory
+        (checked by realpath). Returns how many were removed.
         """
         steam_root = os.path.realpath(os.path.expanduser("~/.steam/steam"))
         configs_root = os.path.join(
@@ -1702,8 +1411,8 @@ class Plugin:
         if not os.path.isdir(configs_root):
             return 0
 
-        # Every name we have ever written a directory under, and the one we
-        # would write now, for each tile we track.
+        # Every name we have ever written a directory under, and the one we would
+        # write now, for each tile we track.
         current, former = set(), set()
         for entry in self._synced.values():
             name = (entry or {}).get("name")
@@ -1749,39 +1458,13 @@ class Plugin:
     async def _forget_vanished_tiles(self) -> int:
         """Drop tracked tiles whose Steam shortcut is gone.
 
-        stray_shortcuts covers one direction — Steam has a tile we never wrote
-        down — and nothing covered the other. A tile removed from shortcuts.vdf
-        behind the plugin's back stays in synced.json forever, and every sync
-        then treats it as present: it is "existing", so no new tile is made,
-        and the reconcile updates a shortcut that is not there. The game simply
-        stops being in the library, and no amount of syncing brings it back.
-
-        It also cannot be filed into its collection, because appStore has never
-        heard of the app id — which is why "Decimated (Boosteroid)" left the
-        Boosteroid collection one short of its tracked count, permanently, for
-        as long as anyone had been looking at it.
-
-        Forgetting the entry is the whole fix: the next sync sees the game as
-        untracked and makes it a fresh tile.
-
-        Reads shortcuts.vdf rather than trusting appStore. A tile Steam simply
-        has not indexed yet is still IN the file, so only a genuinely absent
-        one is dropped — appStore alone would throw away tiles that were merely
-        new.
-
-        TWO STRIKES, because that file is written when Steam feels like it.
-        Measured here: the last sync ran at 01:07 and shortcuts.vdf still had
-        its 01:30 timestamp from a game launch twenty-three minutes later — so
-        a tile created moments ago can be genuinely missing from the copy on
-        disk. Forgetting it there would make the next sync build a SECOND tile
-        for the same game, which is the duplicate-tile disaster _load_state
-        exists to prevent, arrived at from the other direction.
-
-        A tile has to be absent on two consecutive passes, minutes apart. A
-        flush that has not happened yet survives one pass; a shortcut somebody
-        actually deleted survives none. The suspicion is in memory only: after
-        a restart everything gets the benefit of the doubt again, which is the
-        right way round for something whose mistake is a duplicate.
+        A tile removed from shortcuts.vdf behind our back stays in synced.json and
+        every sync treats it as present, so the game drops out of the library for
+        good. Forgetting it lets the next sync remake it. Two strikes though, since
+        Steam writes that file when it feels like it: a tile made moments ago can be
+        missing from the copy on disk, and forgetting it too soon would build a
+        duplicate. So it must be absent on two passes, and the suspicion lives in
+        memory only, cleared by a restart.
         """
         if not self._synced:
             return 0
@@ -1790,9 +1473,9 @@ class Plugin:
         except Exception as exc:                      # never fail a sync over it
             decky.logger.warning("could not read shortcuts.vdf: %s", exc)
             return 0
-        # An empty read means the file could not be parsed, not that Steam has
-        # no shortcuts. Forgetting everything on that would recreate the whole
-        # library under new app ids, losing every playtime and layout with it.
+        # An empty read means the file could not be parsed, not that Steam has no
+        # shortcuts. Forgetting everything then would rebuild the whole library
+        # under new app ids and lose every playtime and layout.
         if not found:
             return 0
 
@@ -1800,8 +1483,8 @@ class Plugin:
         missing = {key for key, entry in self._synced.items()
                    if isinstance(entry, dict) and entry.get("app_id") not in real}
 
-        # Only the ones missing last time too. Everything else is put on the
-        # list and left alone, and anything that came back drops off it.
+        # Only the ones missing last time too. The rest go on the suspect list and
+        # are left alone; anything that came back drops off it.
         gone = sorted(missing & self._vanish_suspects)
         self._vanish_suspects = missing - set(gone)
         if not gone:
@@ -1817,16 +1500,15 @@ class Plugin:
     # ------------------------------------------------------------- shelves
     #
     # A shelf is a named library on the gateway; this device points at one. The
-    # Deck does not create or delete them — that is a job for a real keyboard —
-    # it only chooses which one it shows, which is the part you want to change
-    # while holding the machine.
+    # Deck does not create or delete them (that wants a real keyboard), it only
+    # chooses which one it shows.
 
     async def get_shelves(self) -> Dict[str, Any]:
         """The account's shelves, and which one this device is on.
 
-        Both come from the gateway rather than being cached here: the shelf can
-        be changed from the website or from another device, and a stale local
-        copy would show the wrong library with no way for the user to tell.
+        Both come from the gateway, not a local cache: the shelf can be changed
+        from the website or another device, and a stale copy would show the wrong
+        library with no way for the user to tell.
         """
         try:
             shelves = await asyncio.to_thread(self._request, "/api/me/shelves")
@@ -1839,17 +1521,17 @@ class Plugin:
         if not isinstance(shelves, dict) or not isinstance(devices, dict):
             return {"ok": False, "error": "gateway returned an unexpected response"}
 
-        # `or []` is not enough: it rescues null, but a number or a string
-        # reaches the loop below and raises — a string iterates one character
-        # at a time and an int is not iterable at all.
+        # `or []` is not enough: it rescues null, but a number or string reaches
+        # the loop and raises -- a string iterates one char at a time, an int not
+        # at all.
         shelf_rows = shelves.get("shelves")
         device_rows = devices.get("devices")
         if not isinstance(shelf_rows, list) or not isinstance(device_rows, list):
             return {"ok": False, "error": "gateway returned an unexpected response"}
 
-        # Match on the id this gateway says is us. With no such id there is no
-        # device to speak of, and comparing against None would happily match
-        # the first row whose id is also unreadable.
+        # Match on the id the gateway says is us. With no such id there is no
+        # device, and comparing against None would match the first row whose id is
+        # also unreadable.
         this_id = as_id(devices.get("this_device"))
         mine: Dict[str, Any] = {}
         if this_id is not None:
@@ -1869,27 +1551,24 @@ class Plugin:
         """Point this device at a shelf, or at None for the shared games.
 
         The library this device should hold changes as a result, so the caller
-        syncs immediately afterwards — leaving the old tiles in place until the
-        next poll would look like the setting had not taken.
+        syncs right after -- leaving the old tiles until the next poll would look
+        like the setting did not take.
         """
         current = await self.get_shelves()
         if not current.get("ok"):
             return current
 
         # `is None`, not falsiness: an id of 0 is a device, and treating it as
-        # a missing one would tell a signed-in user to sign in again.
-        #
-        # device_id has been through as_id(), which is what makes it safe to
-        # interpolate into the path below. Straight from the JSON it is
-        # whatever the response said, and a string there writes its own URL.
+        # missing would tell a signed-in user to sign in again. device_id has been
+        # through as_id(), which makes it safe to put into the path below.
         device_id = current.get("device_id")
         if device_id is None:
             # A token issued before shelves existed has no device attached.
             return {"ok": False, "error": "Sign in again to use shelves on this device"}
 
-        # None is a real choice — the shared library — so an unreadable value
-        # must not quietly become it. Anything that is not an id, and any id
-        # this account does not have, is refused rather than sent on.
+        # None is a real choice (the shared library), so an unreadable value must
+        # not quietly become it. Anything that is not an id, or an id this account
+        # does not have, is refused.
         wanted = as_id(shelf_id)
         if shelf_id is not None and wanted is None:
             return {"ok": False, "error": "that is not a shelf"}
@@ -1911,11 +1590,10 @@ class Plugin:
     def _resolve_key(self, key: Any, provider: str = "") -> str:
         """The tracking key to write, accepting either shape.
 
-        A frontend from before the per-provider split sends a bare game id.
-        Rather than trust whatever arrives, it is normalised here: with a
-        provider to hand the composite key is built, and the old-shaped entry
-        it replaces is dropped so the tile is not recorded twice under two
-        different keys.
+        A frontend from before the per-provider split sends a bare game id. It is
+        normalised here: with a provider to hand the composite key is built, and
+        the old-shaped entry it replaces is dropped so the tile is not recorded
+        twice under two keys.
         """
         text = str(key)
         if ":" in text:
@@ -1934,14 +1612,11 @@ class Plugin:
                               url: str = "", steam_app_id: str = "") -> Dict:
         """Remember a tile, and where its game launches if the gateway is down.
 
-        `url` is the offline fallback. It used to be an argument in the Steam
-        shortcut, which put a provider deep link in the game's properties for
-        anyone to read; it lives here instead, keyed by game and provider, and
-        the launcher looks it up only when the gateway does not answer.
-
-        https only, and checked here rather than trusted: this file is what the
-        launcher falls back to, so a bad value written now is a bad URL opened
-        later, when the gateway is unreachable and nothing can correct it.
+        `url` is the offline fallback. It used to sit in the Steam shortcut, which
+        put a provider deep link in the game's properties for anyone to read; it
+        lives here instead, keyed by game and provider, and the launcher reads it
+        only when the gateway does not answer. https only, checked here: a bad
+        value written now is a bad URL opened later when nothing can correct it.
         """
         key = self._resolve_key(game_id, provider)
         previous = self._synced.get(key) or {}
@@ -1950,17 +1625,13 @@ class Plugin:
             "app_id": app_id, "name": name, "launch": options,
             "art": art, "provider": provider,
             # Keep the previous fallback rather than blanking it when a caller
-            # omits one — an older frontend that does not send `url` yet must
-            # not silently strip the offline route from every tile it touches.
+            # omits one -- an older frontend that does not send `url` yet must not
+            # strip the offline route off every tile it touches.
             "url": keep or previous.get("url", ""),
-            # The game's id on STEAM, where it has one -- 83% of the catalogue
-            # does. Only used to ask Steam how many people are playing it: a
-            # cloud tile is a non-Steam shortcut, so Steam will not answer that
-            # about the tile itself.
-            #
-            # Kept from the previous record when a caller omits it, for the
-            # same reason as `url` -- an older frontend must not quietly strip
-            # it off every tile it touches.
+            # The game's id on STEAM, where it has one. Only used to ask Steam the
+            # player count: a cloud tile is a non-Steam shortcut, so Steam won't
+            # answer that about the tile itself. Kept from the previous record when
+            # a caller omits it, same reason as `url`.
             "steam_app_id": (str(steam_app_id) if steam_app_id
                              else previous.get("steam_app_id", "")),
         }
@@ -1971,18 +1642,14 @@ class Plugin:
     async def stray_shortcuts(self) -> Dict:
         """Shelfcloud tiles Steam has that this plugin does not account for.
 
-        Reconcile can only remove what it tracks, so a shortcut created but
-        never recorded — a restart between the two, a rolled-back state file —
-        is invisible to it forever, and the next sync makes a SECOND tile for
-        the same game. That is how "Ad Infinitum" ended up on the shelf twice.
-
-        shortcuts.vdf is the only place that knows the truth, and every tile of
-        ours carries `--game-id N` in its launch options, so the file says which
-        game each one belongs to.
-
-        Reports rather than repairs: removing a shortcut is SteamClient's job,
-        and rewriting this file under a running Steam loses whatever it flushes
-        next.
+        Reconcile can only remove what it tracks, so a shortcut created but never
+        recorded (a restart between the two, a rolled-back state file) stays
+        invisible and the next sync makes a second tile for the same game. That is
+        how "Ad Infinitum" ended up on the shelf twice. shortcuts.vdf is the only
+        place that knows the truth, and every tile of ours carries `--game-id N` in
+        its launch options. Reports, does not repair: removing a shortcut is
+        SteamClient's job, and rewriting this file under a running Steam loses
+        whatever it flushes next.
         """
         try:
             found = await asyncio.to_thread(shortcuts.shelfcloud_shortcuts)
@@ -1990,22 +1657,19 @@ class Plugin:
             decky.logger.error("could not read shortcuts.vdf: %s", exc)
             return {"ok": False, "error": str(exc), "shortcuts": []}
 
-        # What this plugin believes, so the caller can prefer the tile that
-        # already carries artwork and playtime over an accidental twin.
+        # What this plugin believes, so the caller can prefer the tile that already
+        # has artwork and playtime over an accidental twin.
         tracked: Dict[str, int] = {}
         for key, entry in self._synced.items():
             app_id = as_id((entry or {}).get("app_id"))
             if app_id is not None:
                 tracked[str(key)] = app_id
 
-        # Grouped by game AND provider, which is the whole point.
-        #
-        # Grouped by game alone, the caller deletes every tile in a group but
-        # one — and with sync_all_providers on, a game's Boosteroid, Luna and
-        # GeForce NOW tiles ARE one group. Two of the three would be destroyed
-        # on every sync, taking their playtime and controller layout with them.
-        # Two tiles for the same game on the SAME service are still twins, and
-        # those are what this is for.
+        # Grouped by game AND provider. Grouped by game alone, the caller deletes
+        # every tile in a group but one -- and with sync_all_providers on, a game's
+        # tiles on three services are one group, so two would be destroyed every
+        # sync with their playtime and layout. Twins are two tiles for the same
+        # game on the SAME service, and those are what this is for.
         by_route: Dict[str, Dict[str, Any]] = {}
         for entry in found:
             provider = entry.get("provider") or ""
@@ -2024,8 +1688,8 @@ class Plugin:
                     "game_id": row["game_id"],
                     "provider": row["provider"],
                     "app_ids": row["app_ids"],
-                    # Keep the one already tracked; failing that the oldest,
-                    # which is the one likelier to hold playtime.
+                    # Keep the one already tracked; else the oldest, which is
+                    # likelier to hold playtime.
                     "keep": tracked[key] if tracked.get(key) in row["app_ids"]
                             else row["app_ids"][0],
                     "tracked": tracked.get(key),
@@ -2038,13 +1702,10 @@ class Plugin:
         key = str(game_id)
         tracked = self._synced.pop(key, None) or {}
         numeric = _key_game_id(key)
-        # The tile is gone, so its icon file is dead weight. Left alone these
-        # accumulate forever: one per game ever added, never read again.
-        #
-        # Only once the LAST tile for this game is gone. With one tile per
-        # service they share the game's artwork, so removing the Boosteroid
-        # copy of a game still on GeForce NOW must not take the icon the other
-        # tile is drawn with.
+        # The tile is gone, so its icon file is dead weight. But only once the LAST
+        # tile for this game is gone: with one tile per service they share the
+        # game's artwork, so removing one copy must not take the icon another tile
+        # is still drawn with.
         if numeric is not None and not any(
                 _key_game_id(other) == numeric for other in self._synced):
             self._remove_icon_files(numeric, tracked.get("app_id"))
@@ -2055,9 +1716,8 @@ class Plugin:
     def _write_icon(path: str, raw: bytes) -> None:
         """Blocking half of save_icon, for asyncio.to_thread.
 
-        Written whole then moved, so Steam can never read a half-written file
-        -- it re-reads this path every time it draws the icon, not once at
-        save time.
+        Written whole then moved, so Steam never reads a half-written file -- it
+        re-reads this path every time it draws the icon, not once at save time.
         """
         temporary = f"{path}.part"
         with open(temporary, "wb") as handle:
@@ -2068,19 +1728,14 @@ class Plugin:
                         app_id: Optional[int] = None) -> Dict:
         """Write an image to disk and return the path, for SetShortcutIcon.
 
-        Steam takes the four library slots as bytes but takes an icon as a
-        filesystem path, so this is the one piece of artwork that has to exist
-        as a file. The frontend already holds the bytes — it fetched them for
-        the icon slot — so they are passed through rather than downloaded a
-        second time.
-
-        Named after the SHORTCUT's app id, not the game id, and that matters
-        now the file lands in Steam's own grid folder. Steam names its library
-        art `<appid>.png` in that same directory, and our game ids start at 1 —
-        so `23101.png` is both our game 23101 and the header art of whatever
-        Steam app happens to have id 23101. Writing one would silently destroy
-        the other. A shortcut app id is a large generated number and carries
-        the `_icon` suffix every other tool uses, so it collides with nothing.
+        Steam takes the four library slots as bytes but takes an icon as a file
+        path, so this is the one piece of artwork that must exist as a file. The
+        frontend already holds the bytes, so they are passed through rather than
+        downloaded again. Named after the SHORTCUT's app id, not the game id:
+        Steam names its own library art `<appid>.png` in that same grid folder and
+        our game ids start at 1, so `23101.png` would clash with a real Steam app.
+        A shortcut app id is a big generated number with the `_icon` suffix every
+        other tool uses, so it collides with nothing.
         """
         try:
             game_id = int(game_id)
@@ -2101,41 +1756,28 @@ class Plugin:
                                  app_id: Optional[int] = None) -> Dict:
         """Write a shortcut icon from a URL, rather than from handed-over bytes.
 
-        save_icon takes the image as base64, which means the frontend pushes
-        the whole picture back across Decky's websocket. That was the last big
-        message going FRONTEND -> BACKEND and the only one never sliced, while
-        the same image travelling the other way has been chunked at
-        ARTWORK_CHUNK_CHARS for exactly this reason: aiohttp CLOSES a websocket
-        on a message over 4 MB instead of raising.
-
-        A closed socket does not fail a call, it SILENCES it. The promise never
-        settles, so the frontend's own timeout cannot fire either -- the log
-        stops mid-game with no error on either side. Six separate hunts for
-        "the call that hangs" ended here.
-
-        And it was reached on ordinary games. The icon falls back to the
-        CAPSULE for anything shipping no icon of its own, and a capsule is
-        600x900; measured on hardware, the sync died on the FIRST game of every
-        run having logged every step before this one.
-
-        The bytes never needed to travel. This process DOWNLOADED that image --
-        it is what served the slices -- so the frontend names it instead, in a
-        few hundred bytes, and the file is written from what is already here.
+        save_icon takes the image as base64, so the frontend pushes the whole
+        picture back across Decky's websocket. That was the last big message going
+        frontend -> backend and the only one never sliced, and aiohttp closes a
+        websocket on a message over 4 MB instead of raising. A closed socket does
+        not fail a call, it silences it: the promise never settles, the frontend's
+        own timeout can't fire, and the log stops mid-game with no error. Six hunts
+        for "the call that hangs" ended here. The bytes never needed to travel --
+        this process downloaded the image, so the frontend just names it and the
+        file is written from what is already here.
         """
         try:
             game_id = int(game_id)
         except (TypeError, ValueError):
             return {"ok": False, "error": "bad game id"}
-        # https only, same as fetch_artwork: these bytes are written to disk
-        # and handed to Steam as a shortcut icon, so nothing on the path gets
-        # to swap them.
+        # https only, same as fetch_artwork: written to disk and handed to Steam as
+        # a shortcut icon, so nothing on the path gets to swap them.
         if not isinstance(url, str) or not url.startswith("https://"):
             return {"ok": False, "error": "unsupported url"}
 
         # Usually already here. fetch_artwork holds the last image so its own
-        # follow-up slices do not re-download it, and the icon is normally that
-        # very image, collected slice by slice a moment ago. Going back to the
-        # CDN would be a second download of the same picture for every game.
+        # follow-up slices do not re-download it, and the icon is normally that same
+        # image, fetched a moment ago. Going back to the CDN would download it twice.
         held = getattr(self, "_artwork_part", None)
         if held and held[0] == url:
             try:
@@ -2151,8 +1793,8 @@ class Plugin:
             if token:
                 headers["Authorization"] = f"Bearer {token}"
         try:
-            # On a thread: urlopen blocks, and this is the one event loop the
-            # whole plugin shares.
+            # On a thread: urlopen blocks, and this is the one event loop the whole
+            # plugin shares.
             content_type, raw = await asyncio.to_thread(
                 self._fetch_image, url, headers)
         except Exception as exc:
@@ -2173,10 +1815,9 @@ class Plugin:
 
         path = os.path.join(_icon_dir(), _icon_name(game_id, app_id, kind))
         try:
-            # In a thread, like every other write here. This one was left on
-            # the event loop, and the loop is what answers RPCs -- including
-            # the one the panel uses to ask whether it is signed in. Blocking
-            # it stalls the plugin's whole interface, not just this call.
+            # In a thread, like every other write here. The loop answers RPCs --
+            # including the panel's "am I signed in" -- so blocking it stalls the
+            # whole interface, not just this call.
             await asyncio.to_thread(self._write_icon, path, raw)
         except OSError as exc:
             return {"ok": False, "error": str(exc)}
@@ -2185,16 +1826,11 @@ class Plugin:
     def _download_custom_layout(self, name: str) -> Optional[str]:
         """Fetch a custom VDF from the gateway, at most once every ten minutes.
 
-        Cached because install_controller_layout runs for EVERY tile on every
-        sync, and a library with 137 Boosteroid tiles therefore asked the
-        gateway for the same unchanged file 137 times in a row, serially. At
-        85 ms a round trip that is eleven seconds of a sync spent downloading
-        one file over and over — measured, and the whole of the "sync got slow
-        again" report.
-
-        Ten minutes rather than forever: a layout edited in the admin should
-        reach a device without anyone restarting anything, and one request per
-        ten minutes instead of 137 per sync is already the entire win.
+        Cached because install_controller_layout runs for EVERY tile on every sync,
+        so a library with 137 tiles asked the gateway for the same unchanged file
+        137 times in a row -- about eleven seconds of a sync spent downloading one
+        file over and over. Ten minutes, not forever: a layout edited in the admin
+        should still reach a device without a restart.
         """
         cached = _LAYOUT_CACHE.get(name)
         if cached and (time.time() - cached[0]) < _LAYOUT_CACHE_TTL:
@@ -2206,22 +1842,17 @@ class Plugin:
             "Authorization": f"Bearer {token}",
             "User-Agent": ARTWORK_USER_AGENT,
         }
-        # Once the ten minutes are up the question is only "has it changed",
-        # and the gateway has tagged the answer since it started serving these.
-        # Asking conditionally turns the recheck from seventeen kilobytes into
-        # a couple of hundred bytes, which matters on a first sync where every
-        # new tile can reach this.
+        # Once the ten minutes are up the only question is "has it changed", and the
+        # gateway tags the answer. Asking conditionally turns the recheck from ~17 KB
+        # into a couple hundred bytes, which matters on a first sync.
         etag = cached[2] if cached and len(cached) > 2 else None
         if etag:
             headers["If-None-Match"] = etag
         req = urllib.request.Request(url, headers=headers)
         try:
             with _open(url, headers=headers) as resp:
-                # Bounded, like _request and fetch_artwork already are. This
-                # was the one read that trusted whatever answered to be
-                # reasonable about size — a controller layout is a few
-                # kilobytes of text, and the whole of it is held in memory and
-                # then in a module-level cache.
+                # Bounded, like _request and fetch_artwork. A controller layout is a
+                # few KB of text, and the whole of it is held in memory and a cache.
                 raw = resp.read(LAYOUT_MAX_BYTES + 1)
                 if len(raw) > LAYOUT_MAX_BYTES:
                     raise ValueError(
@@ -2230,16 +1861,16 @@ class Plugin:
                 new_etag = resp.headers.get("ETag")
         except urllib.error.HTTPError as exc:
             if exc.code == 304 and cached:
-                # Unchanged. Restart the clock so the next ten minutes are free
-                # rather than asking again on the very next tile.
+                # Unchanged. Restart the clock so the next ten minutes are free, not
+                # asking again on the very next tile.
                 _LAYOUT_CACHE[name] = (time.time(), cached[1], etag)
                 return cached[1]
             decky.logger.warning("custom layout download failed: %s", exc)
             return cached[1] if cached else None
         except Exception as exc:
             decky.logger.warning("custom layout download failed: %s", exc)
-            # A stale copy beats no layout at all: the gateway being briefly
-            # unreachable should not strip a layout off every tile.
+            # A stale copy beats no layout: a brief gateway outage should not strip
+            # a layout off every tile.
             return cached[1] if cached else None
         _LAYOUT_CACHE[name] = (time.time(), text, new_etag)
         return text
@@ -2247,49 +1878,31 @@ class Plugin:
     async def layout_selection_base(self) -> Dict:
         """Where the installed layouts live, so tiles can be SELECTED cheaply.
 
-        Installing a layout and selecting it are two different costs, and they
-        were tied together. Installing is a backend call that writes files, so
-        it is rightly done only for a tile being touched. Selecting is a pure
-        Steam-client call -- no RPC, no disk -- and it has to happen for EVERY
-        tile, every session, because Steam does not select our config on its
-        own: a registered, on-disk, correctly named layout simply sits there
-        unselected.
-
-        That is why it "worked before and then stopped". The selection ran only
-        when a tile was CREATED, so a settled library never ran it again, and
-        every Shelfcloud tile quietly fell back to Steam's default layout.
-
-        One call per sync returns the base directory and the pad's own type;
-        the caller composes a path per tile. The alternative -- asking the
-        backend per tile -- is the 891-calls-a-sync problem that gating was
-        introduced to solve in the first place.
+        Installing a layout (a backend call that writes files) and selecting it (a
+        pure Steam-client call, no RPC, no disk) are separate costs that were tied
+        together. Selecting has to happen for every tile every session, because
+        Steam does not select our config on its own -- a registered, on-disk layout
+        just sits there unselected. That is why it "worked and then stopped": the
+        selection ran only when a tile was created, so a settled library fell back
+        to Steam's default. One call per sync returns the base directory and the
+        pad's type, and the caller builds a path per tile.
         """
-        # Resolved, like install_controller_layout does: the layouts are
-        # written under the REAL path, and a url built through the
-        # ~/.steam/steam symlink is a different string for the same file --
-        # which is exactly the mismatch the layout docs warn about.
+        # Resolved, like install_controller_layout: layouts are written under the
+        # real path, and a url through the ~/.steam/steam symlink is a different
+        # string for the same file -- the mismatch the layout docs warn about.
         steam_root = os.path.realpath(os.path.expanduser("~/.steam/steam"))
         configs_root = os.path.join(
             steam_root, "steamapps", "common", "Steam Controller Configs")
         if not os.path.isdir(configs_root):
             return {"ok": False, "error": "no controller configs directory"}
 
-        # THE SIGNED-IN ACCOUNT's directory, derived from its Steam ID.
-        #
-        # Steam keeps one per account that has ever signed in here, and this
-        # Deck has four. Only the signed-in one is read, and a config selected
-        # under any of the others does not merely fail: Steam CLEARS the
-        # selection back to `default://<appid>`, which looks exactly like the
-        # layout never applying.
-        #
-        # Picking the fullest directory was the obvious heuristic and the wrong
-        # one -- measured here it chose a directory of 1075 entries over the
-        # signed-in account's 911, and every tile lost its layout on the next
-        # sync.
-        #
-        # The account id is the low 32 bits of the Steam ID, which is exactly
-        # what Steam names the directory. Arithmetic on something already
-        # stored, rather than a guess about the filesystem.
+        # THE SIGNED-IN ACCOUNT's directory, from its Steam ID. Steam keeps one per
+        # account that ever signed in here, and this Deck has four. A config selected
+        # under the wrong one does not just fail: Steam clears the selection back to
+        # `default://<appid>`, which looks like the layout never applying. Picking
+        # the fullest directory was the obvious guess and the wrong one. The account
+        # id is the low 32 bits of the Steam ID, exactly what names the directory --
+        # arithmetic on something already stored, not a guess about the filesystem.
         steam_id = str(self._settings.get("steam_id64") or "").strip()
         best = None
         if steam_id.isdigit():
@@ -2299,9 +1912,8 @@ class Plugin:
                 if os.path.isdir(candidate):
                     best = candidate
         if not best:
-            # Not signed in, or a directory Steam has not made yet. The most
-            # recently touched one is the best remaining evidence of who is
-            # actually using the device.
+            # Not signed in, or a directory Steam has not made yet. The most recently
+            # touched one is the best remaining sign of who is using the device.
             newest_at = -1.0
             for user_dir in os.listdir(configs_root):
                 path = os.path.join(configs_root, user_dir, "config")
@@ -2316,10 +1928,9 @@ class Plugin:
         if not best:
             return {"ok": False, "error": "no per-user config directory"}
         return {"ok": True, "base": best, "native": "neptune",
-                # The revision travels with the flag. The caller records THIS
-                # value when it finishes, so a hard-coded number on that side
-                # cannot drift from the constant here and leave the repair
-                # running on every sync for ever.
+                # The revision travels with the flag. The caller records this value
+                # when it finishes, so a hard-coded number on that side can't drift
+                # from the constant here and keep the repair running every sync.
                 "repair": self._settings.get("layout_repair") != LAYOUT_REPAIR,
                 "repair_rev": LAYOUT_REPAIR}
 
@@ -2327,37 +1938,31 @@ class Plugin:
                                         template_url: str) -> Dict:
         """Copy a Steam Input template into the per-game config directory.
 
-        Non-Steam shortcuts use the SHORTCUT NAME as the directory, not the
-        app ID. Verified on hardware: the existing configs on this Deck sit
-        under names like "xbox cloud gaming" and "tiktok", not numeric IDs.
-
-        Accepts two URL schemes:
-          template://  — a built-in Steam template from controller_base/templates/
-          custom://    — a VDF hosted on the gateway, downloaded to the device
+        Non-Steam shortcuts use the SHORTCUT NAME as the directory, not the app id.
+        Verified on hardware: the configs on this Deck sit under names like "xbox
+        cloud gaming", not numeric ids. Two URL schemes:
+          template://  -- a built-in Steam template from controller_base/templates/
+          custom://    -- a VDF hosted on the gateway, downloaded to the device
         """
         if not isinstance(shortcut_name, str) or not shortcut_name.strip():
             return {"ok": False, "error": "bad shortcut_name"}
         if not isinstance(template_url, str):
             return {"ok": False, "error": "bad template_url"}
-        # The name becomes a DIRECTORY, and it is built from the game's title
-        # in the catalogue — which is scraped from each provider's own API and
-        # is not ours to trust. A title containing a separator or a `..` would
-        # have this creating directories and writing files anywhere the plugin
-        # can reach: os.path.join(user_path, "../../x") leaves user_path
-        # without complaint. Checked here AND again on the resolved path
-        # below, because this one is easy to reason about and that one cannot
-        # be fooled by anything clever.
+        # The name becomes a DIRECTORY, and it comes from the game's title, which is
+        # scraped from each provider's API and not ours to trust. A title with a
+        # separator or `..` would let this write files anywhere the plugin can
+        # reach. Checked here and again on the resolved path below: this one is easy
+        # to read, that one can't be fooled.
         if not _safe_layout_name(shortcut_name):
             decky.logger.warning("refusing a layout directory named %r", shortcut_name)
             return {"ok": False, "error": "unsafe shortcut_name"}
 
         steam_root = os.path.realpath(os.path.expanduser("~/.steam/steam"))
 
-        # The flavour we would pick for a pad we have no authored layout for.
-        # A custom layout has no flavour of its own, and gamepad+mouse is the
-        # honest translation of what ours do: a gamepad that can still reach a
-        # cursor, because every one of these services is a web app with a
-        # login box somewhere.
+        # The flavour we pick for a pad we have no layout for. A custom layout has
+        # no flavour of its own, and gamepad+mouse fits what ours do: a gamepad that
+        # can still reach a cursor, since every one of these services is a web app
+        # with a login box somewhere.
         flavour = "gamepad+mouse"
 
         if template_url.startswith("custom://"):
@@ -2366,52 +1971,38 @@ class Plugin:
             if vdf_text is None:
                 return {"ok": False, "error": "could not download custom layout"}
         elif template_url.startswith("template://"):
-            # basename, because this name comes off the NETWORK.
-            #
-            # The gateway chooses it, and it lands in os.path.join: both
-            # "../../.." and a leading "/" escape the templates directory,
-            # because os.path.join discards everything before an absolute
-            # path. That is an arbitrary read as the `deck` user, a
-            # file-existence oracle, and -- when the file happens to match the
-            # patterns below -- a copy of its contents into the Steam
-            # Controller Configs tree.
-            #
-            # The flavour match further down constrains the SHAPE of a name it
-            # recognises, but it runs after the open, so it guards nothing.
+            # basename, because this name comes off the network. The gateway chooses
+            # it, and it lands in os.path.join, where both "../../.." and a leading
+            # "/" escape the templates directory (join discards everything before an
+            # absolute path). That would be an arbitrary read as the `deck` user. The
+            # flavour match below runs after the open, so it guards nothing.
             filename = os.path.basename(template_url.removeprefix("template://"))
             source = os.path.join(steam_root, "controller_base", "templates", filename)
             if not os.path.isfile(source):
                 return {"ok": False, "error": f"template not found: {filename}"}
             with open(source, "r", encoding="utf-8", errors="replace") as f:
                 vdf_text = f.read()
-            # controller_neptune_gamepad_fps.vdf -> gamepad_fps, so the other
-            # pads get the same INTENT rather than a fixed default.
+            # controller_neptune_gamepad_fps.vdf -> gamepad_fps, so the other pads
+            # get the same intent, not a fixed default.
             named = _re_flavour.match(filename)
             if named:
                 flavour = named.group(2)
         else:
             return {"ok": False, "error": "unsupported URL scheme"}
 
-        # Which pad this layout was actually authored for. Ours say neptune:
-        # they bind trackpads, gyro and the L4/R4 back buttons, none of which
-        # a PS5 or Xbox pad has. That is why the others cannot simply be this
-        # file under a different name -- the bindings would reference inputs
-        # that do not exist -- and get Valve's own per-type template instead.
+        # Which pad this layout was made for. Ours say neptune: they bind trackpads,
+        # gyro and the L4/R4 back buttons, which a PS5 or Xbox pad does not have.
+        # That is why the others can't just be this file under a different name --
+        # they get Valve's own per-type template instead.
         declared = re.search(r'"controller_type"\s+"controller_([a-z0-9_]+)"', vdf_text)
         native = declared.group(1) if declared else "neptune"
 
         by_type = {native: vdf_text}
-        # Other pad types only when asked for.
-        #
-        # Writing all seven for every game looked free and was not: seven
-        # files per game per Steam user directory is twenty-eight, and on this
-        # Deck that became 24,813 files and 436 MB. Steam indexes that folder
-        # at startup, and the sync that produced it blocked long enough that
-        # the panel never finished loading.
-        #
-        # Almost all of it is for hardware nobody has attached. The Deck's own
-        # controller is the one certainty, so that is the default, and the
-        # rest are a setting for people who actually play on a PS5 or Xbox pad.
+        # Other pad types only when asked for. Writing all seven per game looked free
+        # and was not: on this Deck it became 24,813 files and 436 MB, and Steam
+        # indexes that folder at startup, so the panel never finished loading. Almost
+        # all of it is for hardware nobody plugged in. The Deck's own pad is the one
+        # certainty and is the default; the rest are a setting for PS5/Xbox players.
         if self._settings.get("extra_pad_layouts"):
             for other in CONTROLLER_TYPES:
                 if other in by_type:
@@ -2423,32 +2014,23 @@ class Plugin:
                     with open(path, "r", encoding="utf-8", errors="replace") as f:
                         by_type[other] = f.read()
                 except (OSError, ValueError):
-                    # ValueError as well as OSError: a path carrying a NUL
-                    # raises ValueError from open(), which is not an OSError,
-                    # so it escaped this guard entirely and took the whole
-                    # layout install with it.
+                    # ValueError as well as OSError: a path with a NUL raises
+                    # ValueError from open(), not an OSError, so it used to slip past
+                    # this guard and take the whole layout install with it.
                     pass
 
-        # Rewrite the url field to point to the actual destination. Custom VDFs
-        # arrive with whatever url the author set (often a path from a different
-        # project), and built-in templates have none at all.
+        # Rewrite the url field to point to the real destination. Custom VDFs arrive
+        # with whatever url the author set, built-in templates have none.
         def _placeholder(text: str) -> Optional[str]:
             """Put a rewritable url in, or say we could not.
 
-            Custom layouts arrive with whatever url their author saved; Valve's
-            built-in templates have none at all and need one inserted.
-
-            The insertion used to match the literal '"controller_mappings"\n{'.
-            That was only ever tried against layouts we authored ourselves, and
-            it is now run over Valve's template for every pad type -- files
-            nobody here has read. A single different byte of whitespace and the
-            replace silently does nothing: no placeholder, so nothing to
-            substitute, so the file lands with no autosave path and Steam
-            treats it as read-only. A layout that quietly does not apply is
-            indistinguishable from one that does not exist.
-
-            So: match tolerantly, and when even that fails say so and skip the
-            type rather than write a file that cannot work.
+            The insertion used to match the literal '"controller_mappings"\n{',
+            which was only ever tried on our own layouts and now runs over Valve's
+            template for every pad type. One different byte of whitespace and the
+            replace silently does nothing, so the file lands with no autosave path
+            and Steam treats it as read-only -- a layout that does not apply looks
+            just like one that does not exist. So: match loosely, and when even that
+            fails say so and skip the type rather than write a dead file.
             """
             text = re.sub(r'"url"\s+"[^"]*"', '"url"\t\t"__PLACEHOLDER__"', text)
             if "__PLACEHOLDER__" in text:
@@ -2473,15 +2055,11 @@ class Plugin:
 
 
 
-        # Off the event loop, always.
-        #
-        # This is plain synchronous file work -- a read and a write per layout,
-        # plus a read and a rewrite of the configset it belongs to -- and it
-        # sat directly in an async method. One game is a handful of files and
-        # nobody noticed; a full re-sync is thousands, and for the whole of it
-        # this coroutine never yielded. Decky's RPC runs on the same loop, so
-        # the panel asking "are you signed in" simply waited, and the plugin
-        # showed "Loading..." until the sync finished.
+        # Off the event loop, always. This is plain synchronous file work that used
+        # to sit in an async method. One game is a few files; a full re-sync is
+        # thousands, and this coroutine never yielded for the whole of it. Decky's
+        # RPC runs on the same loop, so the panel just showed "Loading..." until the
+        # sync finished.
         return await asyncio.to_thread(
             self._write_layouts, steam_root, shortcut_name, by_type, native)
 
@@ -2498,9 +2076,8 @@ class Plugin:
                 continue
             dest_dir = os.path.join(user_path, _layout_key(shortcut_name))
             # Belt and braces: resolve it and confirm it really is inside the
-            # per-user config directory. The check above reads clearly and
-            # catches the obvious shapes; this one catches whatever it did
-            # not, and it is the one that has to be right.
+            # per-user config directory. The check above catches the obvious shapes;
+            # this one catches the rest and is the one that has to be right.
             if not os.path.realpath(dest_dir).startswith(
                     os.path.realpath(user_path) + os.sep):
                 decky.logger.warning(
@@ -2513,19 +2090,17 @@ class Plugin:
                 dest = os.path.join(dest_dir, f"controller_{ctype}.vdf")
                 try:
                     final = text.replace("__PLACEHOLDER__", f"autosave://{dest}")
-                    # The Deck's own pad is the one the caller cares about --
-                    # it is what SetSelectedConfigForApp gets pointed at -- so
-                    # only that one is reported back. The rest are laid down
-                    # for whatever gets plugged in later, and nothing selects
-                    # them up front.
+                    # The Deck's own pad is the one the caller cares about (it is
+                    # what SetSelectedConfigForApp is pointed at), so only that one is
+                    # reported back. The rest are laid down for whatever gets plugged
+                    # in later.
                     if ctype == native:
                         autosave_url = f"autosave://{dest}"
-                    # Only write when it would change something. This runs for
-                    # every tile on every sync across every Steam user
-                    # directory, so on this Deck that was 137 tiles x 4
-                    # directories = 548 rewrites of files that already said
-                    # exactly this -- and it is now one per controller type on
-                    # top of that, which is precisely why the read stays.
+                    # Only write when it would change something. This runs for every
+                    # tile on every sync across every Steam user directory, so on this
+                    # Deck it was 548 rewrites of files that already said exactly this
+                    # -- and now one per controller type on top. That is why the read
+                    # stays.
                     try:
                         with open(dest, "r", encoding="utf-8", errors="replace") as f:
                             unchanged = f.read() == final
@@ -2536,18 +2111,15 @@ class Plugin:
                             f.write(final)
                         decky.logger.info("controller layout: wrote %s", dest)
                     _register_configset(user_path, _layout_key(shortcut_name), ctype)
-                    # Counted HERE, after the write and the registration that
-                    # can both raise. It used to be counted on the way in, so
-                    # a layout that failed to land still reported itself as
-                    # installed -- and that is now up to seven files per
-                    # directory rather than one, so seven chances to say a
-                    # thing happened that did not.
+                    # Counted here, after the write and the registration that can
+                    # both raise. Counted on the way in before, so a layout that
+                    # failed to land still reported itself as installed.
                     written += 1
                 except OSError as exc:
                     decky.logger.warning("controller layout copy failed: %s", exc)
-            # One per DIRECTORY, which is what this number has always meant.
-            # Counting files instead would turn a normal four-user Deck from
-            # "4" into "28" for the same work and make the figure unreadable.
+            # One per DIRECTORY, which is what this number has always meant. Counting
+            # files instead would turn a four-user Deck from "4" into "28" for the
+            # same work.
             if written:
                 installed += 1
         return {"ok": installed > 0, "installed": installed,
@@ -2556,42 +2128,28 @@ class Plugin:
     async def log_note(self, message: str) -> Dict[str, Any]:
         """Put a line from the frontend into the plugin's log.
 
-        The sync runs in Steam's browser context, where console.warn goes to a
-        CEF console nobody is looking at -- least of all afterwards, when the
-        question is "what was it doing when it stopped". This log is a file on
-        disk, which is the only record that survives the thing it describes.
-
-        Deliberately dull: a capped string and nothing else. It is called from
-        code the plugin does not control the inputs of.
+        The sync runs in Steam's browser context, where console.warn goes to a CEF
+        console nobody reads -- least of all afterwards, when the question is "what
+        was it doing when it stopped". This log is a file on disk, the only record
+        that survives. Kept dull: a capped string and nothing else, since it is
+        called from code whose inputs we do not control.
         """
         if not isinstance(message, str):
             return {"ok": False}
         decky.logger.warning("frontend: %s", message[:300])
         return {"ok": True}
 
-    # How long a player count may be reused, and how long a failure is
-    # remembered. Steam's own store refreshes this on the order of minutes,
-    # and a badge on a game page is opened over and over on a Deck -- so the
-    # cache is the difference between one request per game and one per press
-    # of the A button.
-    #
-    # Fifteen minutes rather than five: this number is context, not a
-    # readout. Nobody decides anything differently because a game moved from
-    # 61,000 players to 60,400, and paging through a library is the usual way
-    # to meet it -- so three times fewer requests to a public endpoint costs
-    # the reader nothing they would notice.
+    # How long a player count may be reused. A badge on a game page is opened over
+    # and over on a Deck, so the cache is the difference between one request per game
+    # and one per press of the A button. Fifteen minutes because this number is
+    # context, not a readout -- nobody cares that a game went from 61,000 to 60,400.
     PLAYERS_CACHE_SECONDS = 900.0
 
-    # A FAILURE is remembered for much less time than a count.
-    #
-    # Both used to share the number above, so a minute of bad connectivity --
-    # or Steam having a moment -- left a dash on that game for the full
-    # fifteen, long after everything was working again. The reasons to cache
-    # them are not the same either: a count is stable enough to reuse, while a
-    # failure is a fact about right now.
-    #
-    # Still a cache, not zero: an appid Steam refuses outright -- delisted,
-    # region-locked -- must not be re-asked on every single page open.
+    # A failure is remembered for much less time than a count. Both shared the number
+    # above before, so a minute of bad connectivity left a dash on that game for the
+    # full fifteen. A count is stable enough to reuse; a failure is about right now.
+    # Still a cache, not zero: an appid Steam refuses (delisted, region-locked) must
+    # not be re-asked on every page open.
     PLAYERS_FAILURE_CACHE_SECONDS = 60.0
     PLAYERS_URL = ("https://api.steampowered.com/ISteamUserStats/"
                    "GetNumberOfCurrentPlayers/v1/?appid=%s")
@@ -2599,17 +2157,12 @@ class Plugin:
     async def current_players(self, steam_app_id: str) -> Dict[str, Any]:
         """How many people are playing this game on Steam right now.
 
-        The same public endpoint the PlayCount plugin uses. No key, no
-        account: it answers for any appid.
-
-        This exists because Steam will not answer it for OUR tiles. A cloud
-        game is a non-Steam shortcut, so the client has no appid to ask about
-        and every player-count plugin shows nothing on those pages -- even
-        though the game itself is usually on Steam and the number is public.
-
-        Returns ok=False rather than a zero when there is nothing to say. A
-        game that is not on Steam and a game nobody is playing are different
-        facts, and showing "0 playing" for the first is simply wrong.
+        The same public endpoint the PlayCount plugin uses -- no key, no account,
+        answers for any appid. This exists because Steam won't answer it for our
+        tiles: a cloud game is a non-Steam shortcut, so the client has no appid to
+        ask about, even though the game itself is usually on Steam. Returns ok=False,
+        not a zero, when there is nothing to say -- "not on Steam" and "nobody
+        playing" are different facts.
         """
         if not isinstance(steam_app_id, str) or not steam_app_id.isdigit():
             return {"ok": False, "error": "not on steam"}
@@ -2626,8 +2179,8 @@ class Plugin:
         try:
             payload = await asyncio.to_thread(self._fetch_players, steam_app_id)
         except Exception as exc:
-            # Remembered too. An appid Steam refuses -- delisted, region-locked
-            # -- would otherwise be re-asked on every page open, for ever.
+            # Remembered too, else an appid Steam refuses would be re-asked on every
+            # page open for ever.
             result = {"ok": False, "error": str(exc)}
             self._players_cache[steam_app_id] = (now, result)
             return result
@@ -2643,8 +2196,8 @@ class Plugin:
             raw = response.read(64 * 1024)
         body = json.loads(raw.decode("utf-8", errors="replace"))
         inner = body.get("response") or {}
-        # result 1 is Steam's own "this appid is fine". Anything else means it
-        # has no answer, which is not the same as nobody playing.
+        # result 1 is Steam's "this appid is fine". Anything else means it has no
+        # answer, which is not the same as nobody playing.
         if inner.get("result") != 1 or "player_count" not in inner:
             return {"ok": False, "error": "no player count for this app"}
         return {"ok": True, "players": int(inner["player_count"])}
@@ -2652,17 +2205,13 @@ class Plugin:
     async def set_steam_ids(self, ids: Dict[str, Any]) -> Dict[str, Any]:
         """Fill in the Steam appid for tiles that already exist.
 
-        The appid is written by record_shortcut -- but a sync only records a
-        tile that CHANGED, so on a settled library nothing is recorded and the
-        field stayed empty on all 890 tiles. The player badge then had nothing
-        to ask Steam about and never drew, which is the feature being inert by
-        construction rather than merely unfinished.
-
-        Bumping ART_REVISION would have reached every tile, at the price of
-        re-applying artwork across the whole library to backfill one string.
-        This is the same reach for a single call: the sync already holds every
-        desired game, so it sends the whole map once and the tiles it does not
-        mention are left alone.
+        The appid is written by record_shortcut, but a sync only records a tile that
+        CHANGED, so on a settled library nothing is recorded and the field stayed
+        empty on every tile -- so the player badge had nothing to ask Steam about.
+        Bumping ART_REVISION would reach every tile but re-apply all artwork to
+        backfill one string. This is the same reach for one call: the sync already
+        holds every desired game, so it sends the whole map once and leaves the tiles
+        it does not mention alone.
         """
         if not isinstance(ids, dict):
             return {"ok": False, "error": "bad ids"}
@@ -2686,14 +2235,11 @@ class Plugin:
     async def tracked_providers(self) -> Dict[str, Any]:
         """app id -> which service that tile launches, for the library badge.
 
-        Its own call rather than reading the whole library: the badge runs on
-        a patched Steam route, once per game page opened, and asking the
-        gateway for several hundred games to learn one word would be absurd.
-        This reads only what is already in memory.
-
-        Keys are strings because they cross to JavaScript, where a number that
-        large is fine but an object key is a string regardless — returning
-        ints would make the frontend convert them back on every lookup.
+        Its own call, not a whole-library read: the badge runs on a patched Steam
+        route once per game page opened, and asking the gateway for hundreds of games
+        to learn one word would be silly. This reads only what is in memory. Keys are
+        strings because they cross to JavaScript, where an object key is a string
+        anyway -- returning ints would just make the frontend convert them back.
         """
         out: Dict[str, str] = {}
         steam_ids: Dict[str, str] = {}
@@ -2704,10 +2250,8 @@ class Plugin:
             provider = entry.get("provider")
             if isinstance(app_id, int) and isinstance(provider, str) and provider:
                 out[str(app_id)] = provider
-                # Absent for the one game in six that is not on Steam, and for
-                # tiles recorded before this was kept. Absent means "no player
-                # count for this one", which is the honest answer rather than
-                # a zero.
+                # Absent for a game not on Steam, and for tiles recorded before this
+                # was kept. Absent means "no player count for this one", not a zero.
                 steam = entry.get("steam_app_id")
                 if steam:
                     steam_ids[str(app_id)] = str(steam)
@@ -2724,10 +2268,10 @@ class Plugin:
     def _provider_counts(self) -> Dict[str, int]:
         """How many synced tiles belong to each provider, for the panel chips.
 
-        Tiles recorded before providers were tracked have no provider. They are
-        counted as unknown rather than assumed to be Boosteroid: that guess was
-        harmless while Boosteroid was the only provider and is simply wrong now
-        that a tile could equally be Xbox Cloud. The next sync fills it in.
+        Tiles recorded before providers were tracked have none. They are counted as
+        unknown, not assumed to be Boosteroid: that guess was fine while Boosteroid
+        was the only provider and is wrong now a tile could be Xbox Cloud. The next
+        sync fills it in.
         """
         counts: Dict[str, int] = {}
         for entry in self._synced.values():
@@ -2738,18 +2282,13 @@ class Plugin:
     def _detected_display(self) -> str:
         """What the panel shows under the scale dropdown.
 
-        The same answer the launcher will act on, from the same code, so the
-        line in the panel and the line in the launch log cannot disagree —
-        and so "Auto" is not a number the user has to take on trust.
-
-        Cached, because this shells out to xrandr and the panel polls status
-        every 1.5 seconds while a sync runs: uncached, the eleven-minute sync
-        measured here would have spawned four hundred processes to answer a
-        question whose answer does not change. A display is docked or
-        undocked in seconds, never in milliseconds, so a short life is plenty.
-
-        The launcher does NOT share this cache. It probes once per launch,
-        where the cost is nothing and the answer has to be current.
+        The same answer the launcher acts on, from the same code, so the panel and
+        the launch log can't disagree, and "Auto" is not a number the user has to
+        trust. Cached, because this shells out to xrandr and the panel polls status
+        every 1.5 seconds while a sync runs -- uncached, a long sync would spawn
+        hundreds of processes to answer a question that does not change. A display is
+        docked in seconds, not milliseconds. The launcher does NOT share this cache:
+        it probes once per launch, where the answer has to be current.
         """
         now = time.monotonic()
         when, answer = self._display_cache
@@ -2765,10 +2304,9 @@ class Plugin:
     def _sync_all_providers(self) -> bool:
         """Make a tile per service a game is on, instead of just the best one.
 
-        Off unless explicitly turned on. It multiplies the library — measured
-        here, 387 tiles become 636 — and most people want the one route their
-        preferred service gives them, so this is a choice someone makes rather
-        than one they have made for them.
+        Off unless turned on. It multiplies the library (measured here, 387 tiles
+        become 636), and most people want the one route their preferred service
+        gives, so this is a choice someone makes on purpose.
         """
         return self._settings.get("sync_all_providers") is True
 
@@ -2783,9 +2321,8 @@ class Plugin:
     async def _verify_auth(self) -> bool:
         """Is the stored token still accepted? Re-checked at most once a minute.
 
-        Without this the panel trusted a string on disk. A revoked or expired
-        token then looked like a working session: every button was enabled and
-        every one of them failed.
+        Without this the panel trusted a string on disk, so a revoked or expired
+        token looked like a working session: every button enabled, every one failing.
         """
         if not self._token():
             return False
@@ -2799,8 +2336,8 @@ class Plugin:
         except PermissionError:
             self._auth_ok = False      # _request already cleared the token
         except Exception:
-            # Gateway unreachable is not "signed out" — do not throw away a
-            # perfectly good credential because the network blipped.
+            # Gateway unreachable is not "signed out" -- do not throw away a good
+            # credential because the network blipped.
             pass
         return self._auth_ok
 
@@ -2827,13 +2364,12 @@ class Plugin:
             "sync_all_providers": self._sync_all_providers(),
             "ui_scale": self._settings.get("ui_scale", "auto"),
             "ui_scale_detected": await asyncio.to_thread(self._detected_display),
-            # On unless turned off: a badge that says where a tile streams
-            # from is the point of having the tiles look different at all.
+            # On unless turned off: a badge saying where a tile streams from is the
+            # whole point of the tiles looking different.
             "badge_enabled": self._settings.get("badge_enabled") is not False,
-            # The mark on the highlighted card in the home carousel and the
-            # grid. Its own switch rather than sharing one with the game page:
-            # they are two places, and wanting one without the other is a
-            # perfectly ordinary thing to want.
+            # The mark on the highlighted card in the home carousel and grid. Its own
+            # switch, not shared with the game page: two places, and wanting one
+            # without the other is normal.
             "badge_on_cards": self._settings.get("badge_on_cards") is not False,
             "players_enabled": bool(self._settings.get("players_enabled")),
             "players_position": (self._settings.get("players_position")
@@ -2843,8 +2379,8 @@ class Plugin:
                                if self._settings.get("badge_position")
                                in self.BADGE_POSITIONS else "bl"),
             "last_error": self._last_error,
-            # Only while a sign-in is in flight; the browser that
-            # asks for this closed the panel that first showed it.
+            # Only while a sign-in is in flight; the browser that asks for this
+            # closed the panel that first showed it.
             "pending_login_code": (
                 self._pending_login_code
                 if self._login_task is not None and not self._login_task.done()
@@ -2862,14 +2398,10 @@ class Plugin:
     async def install_browser(self, app_id: str) -> Dict[str, Any]:
         """Install one of the offered browsers, in the background.
 
-        Returns immediately. Progress is read from get_status(), so the panel
-        can be closed and reopened mid-download without losing it — the same
-        reason the sync reports that way.
-
-        Refuses anything not on the offer list. `app_id` arrives from the
-        frontend and ends up in an argv, and while the command is never run
-        through a shell, "the caller is our own UI" is not a thing worth
-        relying on when the check is one line.
+        Returns immediately. Progress is read from get_status(), so the panel can be
+        closed and reopened mid-download without losing it. Refuses anything not on
+        the offer list: `app_id` comes from the frontend and ends up in an argv, and
+        "the caller is our own UI" is not worth relying on when the check is one line.
         """
         if not browsers.is_installable(app_id):
             return {"ok": False, "error": "That browser is not one Shelfcloud installs."}
@@ -2890,10 +2422,9 @@ class Plugin:
         """A subprocess environment free of Decky's bundled libraries.
 
         Decky's embedded Python ships its own libssl/libcrypto and sets
-        LD_LIBRARY_PATH to find them. That works for Python, but poisons
-        any subprocess that links the system OpenSSL — flatpak in particular
-        needs the system's version and crashes with "OPENSSL_3.5.0 not found"
-        when it picks up Decky's older copy instead.
+        LD_LIBRARY_PATH to find them. Fine for Python, but it poisons any subprocess
+        that links the system OpenSSL -- flatpak needs the system version and crashes
+        with "OPENSSL_3.5.0 not found" when it picks up Decky's older copy.
         """
         env = os.environ.copy()
         env.pop("LD_LIBRARY_PATH", None)
@@ -2984,31 +2515,29 @@ class Plugin:
             self._install = dict(IDLE_INSTALL)
         return await self.get_status()
 
-    # Keys the frontend may write. Anything else — especially api_token — is
-    # rejected. Shelf selection goes through set_shelf, not here.
-    # If a new dropdown is added to the panel, its key must be listed here.
+    # Keys the frontend may write. Anything else, api_token above all, is rejected.
+    # Shelf selection goes through set_shelf, not here. A new panel dropdown must be
+    # listed here.
     ALLOWED_SETTINGS = {"browser", "sync_minutes", "sync_all_providers", "ui_scale",
                         "badge_enabled", "badge_on_cards", "badge_position",
                         "extra_pad_layouts", "players_enabled",
                         "players_position",
-                        # Not a preference: the marker recording that the
-                        # one-off layout re-selection has been done on this
-                        # device. See LAYOUT_REPAIR.
+                        # Not a preference: marks that the one-off layout re-selection
+                        # has been done on this device. See LAYOUT_REPAIR.
                         "layout_repair"}
 
-    # Where the provider badge sits on a game's page. Validated as a set
-    # rather than trusted: this value is written into a style, and a dropdown
-    # is not the only thing that can call set_setting.
+    # Where the provider badge sits on a game's page. Checked against a set, not
+    # trusted: this value is written into a style, and a dropdown is not the only
+    # thing that can call set_setting.
     BADGE_POSITIONS = ("tl", "tm", "tr", "bl", "bm", "br")
 
     async def set_setting(self, key: str, value: Any) -> Dict[str, Any]:
         if key not in self.ALLOWED_SETTINGS:
             decky.logger.warning("Rejected setting key: %s", key)
             return await self.get_status()
-        # badge_position is written into a CSS rule on a patched Steam page,
-        # so it is checked against the list rather than taken on trust. The
-        # dropdown can only send one of four values; set_setting is an RPC and
-        # the dropdown is not the only thing that can call it.
+        # badge_position is written into a CSS rule on a patched Steam page, so it is
+        # checked against the list, not trusted -- set_setting is an RPC and the
+        # dropdown is not the only thing that can call it.
         if key == "badge_position" and value not in self.BADGE_POSITIONS:
             decky.logger.warning("Rejected badge position: %r", value)
             return await self.get_status()
@@ -3021,13 +2550,12 @@ class Plugin:
     async def _poll_loop(self):
         """Ask the gateway for changes periodically and nudge the frontend.
 
-        Python cannot create shortcuts — only the frontend can reach
-        SteamClient — so this emits an event rather than acting directly.
+        Python cannot make shortcuts -- only the frontend can reach SteamClient -- so
+        this emits an event rather than acting directly.
         """
-        # Let Steam settle, then a random extra wait so a fleet that updated
-        # together does not poll together. Without it, every copy of the plugin
-        # rolled out in one release starts within seconds of the others and
-        # stays in lockstep for as long as it runs.
+        # Let Steam settle, then a random extra wait so a fleet that updated together
+        # does not poll together. Without it every copy rolled out in one release
+        # starts within seconds of the others and stays in lockstep.
         base = max(MIN_SYNC_SECONDS, self._sync_minutes() * 60)
         spread = random.uniform(0, min(base, STARTUP_SPREAD_MAX_SECONDS))
         await asyncio.sleep(STARTUP_SETTLE_SECONDS + spread)
@@ -3041,9 +2569,8 @@ class Plugin:
             except Exception as exc:
                 decky.logger.warning("Poll failed: %s", exc)
 
-            # Read the interval each tick rather than capturing it once, so
-            # changing the setting takes effect on the next tick instead of
-            # needing a plugin reload.
+            # Read the interval each tick, not once, so changing the setting takes
+            # effect on the next tick without a plugin reload.
             await asyncio.sleep(next_poll_delay(
                 max(MIN_SYNC_SECONDS, self._sync_minutes() * 60)
             ))
