@@ -13,3 +13,6 @@ settings.json
 # scripting
 .cl*
 .ct*
+
+# internal notes, not shipped
+docs/
