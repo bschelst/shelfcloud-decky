@@ -188,6 +188,70 @@ def test_phrases_do_not_swallow_real_play_labels():
         assert round_of(label) is not None, label
 
 
+# ------------------------------------------------- the same rules, everywhere
+#
+# The word lists are shared by every provider, so these hold for Xbox Cloud,
+# GeForce NOW, Boosteroid and Luna alike. They are listed per language because
+# that is how the lists drifted: PLAY_WORDS grew to cover ~25 languages while
+# the deny lists covered 14, so in the other eleven a play word matched with
+# nothing able to refuse it. Providers localise by IP, which means which half
+# of that gap a user lands in is decided by where they are.
+#
+# Each entry is (a real play label, labels that must NEVER be clicked).
+LOCALISED = {
+    "Czech":      ("Hrát",      ["Koupit a hrát", "Předplatné a hrát"]),
+    "Slovak":     ("Hrať",      ["Kúpiť a hrať"]),
+    "Romanian":   ("Joacă",     ["Cumpără și joacă", "Abonament și joacă"]),
+    "Hungarian":  ("Játék",     ["Vásárlás és játék"]),
+    "Ukrainian":  ("Грати",     ["Купити та грати", "Підписка та грати"]),
+    "Croatian":   ("Igraj",     ["Kupi i igraj", "Pretplata i igraj"]),
+    "Greek":      ("Παίξε",     ["Αγορά και παίξε", "Συνδρομή και παίξε"]),
+    "Japanese":   ("プレイ",      ["購入してプレイ", "定期購入してプレイ"]),
+    "Chinese":    ("开始游戏",    ["购买并玩", "订阅并玩"]),
+    "Korean":     ("플레이",      ["구매하고 플레이", "구독하고 플레이"]),
+    # the ones that already worked, kept so a future edit cannot quietly drop them
+    "English":    ("Play",      ["Subscribe and Play", "Buy and play"]),
+    "Dutch":      ("Nu spelen", ["Abonneren en spelen", "Kopen en spelen"]),
+    "German":     ("Jetzt spielen", ["Abonnieren und spielen"]),
+}
+
+
+def test_every_language_that_can_play_can_also_refuse_a_purchase():
+    for language, (play, hostile) in LOCALISED.items():
+        assert hits(play), f"{language}: the play label stopped matching"
+        for label in hostile:
+            assert round_of(label) is None, f"{language}: would click {label!r}"
+
+
+def test_the_free_to_play_chip_is_refused_in_every_language():
+    """The chip that sent the launcher to the games browser. It was fixed in
+    English only, and every other language spells it with its own play word."""
+    for label in ("Free to Play", "Kostenlos spielen", "Gratis spielen",
+                  "Jouer gratuitement", "Juega gratis", "Jugar gratis",
+                  "Gioca gratis", "Jogar grátis", "Spela gratis",
+                  "Graj za darmo", "Hrát zdarma", "Играть бесплатно",
+                  "Ücretsiz oyna", "Gratis spelen"):
+        assert round_of(label) is None, label
+
+
+def test_cjk_commerce_is_denied_by_phrase_not_by_word():
+    """DENY_WORDS compares whole tokens, and a script with no word breaks gives
+    one token for the entire line — so a CJK word added there would never fire.
+    Phrases are substrings, which is why they live in that list instead."""
+    assert "購入" in PHRASES and "購入" not in DENY
+    assert words_of("購入してプレイ") == ["購入してプレイ"]   # one token, not two
+    assert not hits("購入してプレイ")
+
+
+def test_the_named_subscriptions_do_not_break_the_xbox_button():
+    """"Game Pass" is denied only in its join/buy forms. The bare name appears
+    in Xbox's real Play button, and denying it would throw that button away."""
+    assert hits("PLAY Included with Game Pass Ultimate")
+    assert hits("PLAY\nIncluded with Game Pass")
+    for label in ("Join Game Pass", "Get Game Pass", "Buy Game Pass"):
+        assert round_of(label) is None, label
+
+
 def test_other_hyphenated_labels_that_end_in_a_play_word():
     for label in ("Free-to-play", "Play-to-earn", "Cross-play", "Couch-play",
                   "Free-To-Play", "cloud-play"):

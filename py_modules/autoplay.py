@@ -180,6 +180,22 @@ DENY_WORDS = [
     # accounts
     "account", "profile", "profiel", "signin", "signup", "register",
     "registreren", "inloggen", "aanmelden", "connexion", "anmelden",
+    # Central and Eastern Europe, and Greek. These languages had a play word in
+    # PLAY_WORDS and nothing here, so the lists disagreed about which markets
+    # exist: a "Buy and play" was refused in English and clicked in Czech. The
+    # providers localise by IP, so which list applies is decided by where the
+    # user is, not by anything we control.
+    "koupit", "předplatné", "predplatne", "nákup", "nakup",
+    "kúpiť", "kupit", "predplatné",
+    "cumpără", "cumpara", "abonament",
+    "vásárlás", "vasarlas", "vásárol", "előfizetés", "elofizetes",
+    "купити", "підписка", "передплата",
+    "kupi", "kupite", "pretplata", "naročnina", "narocnina",
+    "αγορά", "αγορα", "συνδρομή", "συνδρομη", "εγγραφή", "εγγραφη",
+    # Membership tiers, whatever a provider calls its own. GeForce NOW sells
+    # these beside the Play button on the same page.
+    "membership", "lidmaatschap", "mitgliedschaft", "adhésion", "adhesion",
+    "membresía", "membresia", "medlemskap", "członkostwo",
 ]
 
 # Phrases that name a category, not a "play" action. "Free to Play" is a genre
@@ -198,6 +214,30 @@ DENY_PHRASES = [
     # Signed out, Luna shows "Play free with Prime" which goes to a signup. Third
     # layer of defence, the signed-out check and :not(_log_in) also stop it.
     "free with prime", "gratis met prime",
+    # The same genre filter, in the other languages the providers serve. Every
+    # one of these carries its own play word, so the English phrase alone left
+    # the chip clickable everywhere else — the bug that sent the launcher to the
+    # games browser was only ever fixed for an English Deck.
+    "kostenlos spielen", "gratis spielen", "jouer gratuitement",
+    "juega gratis", "jugar gratis", "juegos gratis",
+    "gioca gratis", "giochi gratis", "jogar grátis", "jogue grátis",
+    "spela gratis", "spill gratis", "spil gratis", "pelaa ilmaiseksi",
+    "graj za darmo", "darmowe gry", "hrát zdarma", "hrat zdarma",
+    "играть бесплатно", "ücretsiz oyna",
+    # CJK commerce. These CANNOT go in DENY_WORDS: that list is compared by
+    # whole token, and a script with no word breaks gives one token for the
+    # entire line, which never equals a single word. Phrases are matched as
+    # substrings, which is the only form that catches them at all.
+    "購入", "定期購入", "サブスク",
+    "购买", "購買", "订阅", "訂閱", "充值",
+    "구매", "구독", "결제",
+    # Subscription products by name. Brand names go untranslated on every
+    # market, so one entry each covers all of them. Deliberately the JOIN/GET
+    # forms and not "game pass" alone: Xbox's real Play button reads
+    # "PLAY Included with Game Pass Ultimate", and denying the bare name would
+    # throw away the button this whole matcher exists to press.
+    "join game pass", "get game pass", "buy game pass",
+    "subscribe to luna", "luna+",
 ]
 
 # Is the game really running yet? Not just "is there a <video>": Luna's page has
