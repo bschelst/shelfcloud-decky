@@ -233,6 +233,12 @@ function steam(): SteamWindow {
 // Find the Deck's built-in controller index (type 4 = SteamControllerNeptune).
 // Returns null if not found. A moonlight-steam-sync-decky probe showed the index
 // is not always 0.
+//
+// Deliberately ONE controller, not all of them. Applying the layout to every
+// index ControllerStore reports was tried on hardware and is much worse: Steam
+// emits a virtual X-Box 360 pad per slot that has a gamepad layout assigned, so
+// the count went 2 -> 16 within minutes and the browser then saw none of them.
+// Whatever fixes an external pad, it is not this.
 function deckControllerIndex(): number | null {
   try {
     const store = steam().ControllerStore ?? steam().controllerStore;
