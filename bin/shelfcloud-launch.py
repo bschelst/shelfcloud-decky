@@ -16,9 +16,11 @@ the offline fallback. [url] is still taken for the website tile and old
 shortcuts. Exits when the browser exits so Steam counts playtime right.
 """
 
+import glob
 import ipaddress
 import json
 import os
+import signal
 import ssl
 import subprocess
 import threading
@@ -700,6 +702,39 @@ def _clear_session_restore(profile: str) -> None:
             pass
 
 
+def _kill_browser(profile: str) -> None:
+    """Close only OUR kiosk browser, matched by its own user-data-dir. The
+    browser runs in a flatpak sandbox, so killing the launcher's child leaves it
+    alive holding the gamepad - that is the orphan that broke the Deck's internal
+    controller. A blunt `flatpak kill` would reach it but also every other Edge
+    window the user has open, so match on the dedicated profile instead.
+
+    An EXACT argv-element match, not a substring: the website tile's profile is
+    this one with a `-web` suffix, and a substring match would take it down too.
+    Scans /proc so there is no shell regex to mis-escape. Never raises.
+    """
+    marker = ("--user-data-dir=" + profile).encode()
+    me = os.getpid()
+    for path in glob.glob("/proc/[0-9]*/cmdline"):
+        try:
+            with open(path, "rb") as handle:
+                argv = handle.read().split(b"\x00")
+        except OSError:
+            continue                       # the process went away; fine
+        if marker not in argv:
+            continue
+        try:
+            pid = int(path.rsplit("/", 2)[1])
+        except (IndexError, ValueError):
+            continue
+        if pid == me:
+            continue                       # never signal the launcher itself
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            pass
+
+
 def main() -> int:
     argv = sys.argv[1:]
     autoplay = "--no-autoplay" not in argv
@@ -776,6 +811,19 @@ def main() -> int:
         app_id, profile, url, kiosk,
         user_agent=provider_profile(provider).get("user_agent", "")))
 
+    # When Steam closes the game it SIGTERMs this launcher. Take the kiosk
+    # browser down with us - otherwise the flatpak app lives on and keeps the
+    # gamepad, which is exactly how the Deck's internal controller stopped
+    # working. Handlers, not just a finally, because SIGTERM skips finally.
+    def _on_term(_signum, _frame):
+        _kill_browser(profile)
+        os._exit(0)
+    for _sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        try:
+            signal.signal(_sig, _on_term)
+        except (ValueError, OSError):
+            pass
+
     # Before autoplay and regardless of it: the OS gate blocks a hand-pressed
     # Play too. `held` is not unused: it is the open socket, and the override
     # lives exactly as long as this reference does.
@@ -811,6 +859,9 @@ def main() -> int:
 
     started = time.monotonic()
     code = browser.wait()
+    # Even on a clean exit, a sandboxed renderer can linger; make sure none of
+    # ours is left holding the controller.
+    _kill_browser(profile)
     if held is not None:
         held.close()
     log(f"--- session ended after {int(time.monotonic() - started)}s "
