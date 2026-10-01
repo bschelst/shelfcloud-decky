@@ -40,6 +40,15 @@ describe("what a cancelled run hands back", () => {
     expect(untiledFromRun(new Set(), desired, tracked)).toEqual([]);
   });
 
+  it("recognises tiles tracked by the real composite key (id:provider)", () => {
+    // The backend keys tracked "gameId:provider", not the bare id. Matching the
+    // whole key against the id missed every tile, so a cancel used to hand back
+    // games that WERE tiled - the same bug that made the count collapse.
+    const desired = [game(20), game(21, "geforce_now")];
+    const tracked = { "20:boosteroid": {}, "21:geforce_now": {} };
+    expect(untiledFromRun(new Set(), desired, tracked)).toEqual([]);
+  });
+
   it("never takes a web page", () => {
     // pages are exemt from cancel, so it must not reach them by the back door.
     const desired = [

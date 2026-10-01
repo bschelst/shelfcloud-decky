@@ -354,10 +354,16 @@ async function doRemoveAll(): Promise<void> {
       // do not reuse `tracked` - that copy would restore the already-deleted
       // tiles, the opposite of what we want.
       const after = await getDesiredLibrary().catch(() => null);
-      const survivors = Object.keys(
-        (after?.ok && after.tracked && typeof after.tracked === "object")
-          ? after.tracked : {},
-      ).map(Number).filter((id) => Number.isInteger(id));
+      // tracked is keyed "gameId:provider" (one key per tile), so Number(key)
+      // on the whole key is NaN and every surviving tile was dropped - restore
+      // put back almost nothing and the library count collapsed to a handful.
+      // Split off the game id, and dedupe: a game on two services has two keys.
+      const survivors = [...new Set(
+        Object.keys(
+          (after?.ok && after.tracked && typeof after.tracked === "object")
+            ? after.tracked : {},
+        ).map((key) => Number(key.split(":")[0])).filter((id) => Number.isInteger(id)),
+      )];
 
       if (!survivors.length) return `Stopped — removed ${syncResult.removed}.`;
       const kept = await restoreToLibrary(survivors).catch(() => null);

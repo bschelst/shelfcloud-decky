@@ -24,13 +24,18 @@ export function untiledFromRun(
   tracked: Record<string, unknown>,
 ): number[] {
   if (!before || !Array.isArray(desired)) return [];
+  // tracked is keyed "gameId:provider", so `String(id) in tracked` never matched
+  // a composite key: every tiled game looked untiled and a cancel handed them all
+  // back for removal. Build the set of game ids that DO have a tile instead.
+  const tiled = new Set(
+    Object.keys(tracked).map((key) => Number(key.split(":")[0]))
+      .filter((id) => Number.isInteger(id)),
+  );
   return desired
     .filter((game) => game && typeof game === "object")
     .filter((game) => !WEBSITE_PROVIDERS.has(String(game.provider ?? "")))
     .map((game) => Number(game.game_id))
-    .filter((id) => Number.isInteger(id)
-      && !before.has(id)
-      && !(String(id) in tracked));
+    .filter((id) => Number.isInteger(id) && !before.has(id) && !tiled.has(id));
 }
 
 // How a tile is named in our own record. The backend sends `key`; we only build
