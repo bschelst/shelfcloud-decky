@@ -117,6 +117,14 @@ export function cancelJob(): void {
       // after that must build its own promise, not wait on the one nobody reaches.
       try { onAbandoned?.(); } catch { /* never block the reset */ }
       finishJob("Stopped responding, so the panel was reset.");
+      // ... but KEEP asking it to stop. A single tile can take up to
+      // PER_GAME_TIMEOUT (40s), well past this 10s deadline, so the loop is
+      // usually not stuck - just mid-tile. finishJob cleared the flag, which
+      // let the tile finish and the loop see "not cancelled" and plough through
+      // all of them. Re-assert it so the run breaks at its next tile boundary;
+      // that break calls finishJob again and clears it for good. A new run wipes
+      // it at setJob(busy) regardless.
+      cancelling = true;
     }
   }, FORCE_IDLE_AFTER);
 }

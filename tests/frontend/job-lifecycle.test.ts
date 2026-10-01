@@ -166,6 +166,26 @@ describe("a run that stops responding", () => {
     }
   });
 
+  it("keeps asking the abandoned run to stop after the deadline", () => {
+    // Giving the panel back must not let the run off the hook. A tile can take
+    // longer than the 10s deadline (PER_GAME_TIMEOUT is 40s), so when the
+    // deadline fires the run is usually mid-tile, not stuck. If the flag were
+    // cleared there the tile would finish, the loop would read "not cancelled"
+    // and plough through every remaining game. It must stay set so the loop
+    // breaks at its next tile.
+    vi.useFakeTimers();
+    try {
+      setJob({ busy: true, message: "Syncing…" });
+      void new Promise<void>(() => {});
+      cancelJob();
+      vi.advanceTimersByTime(11000);          // past the 10s deadline
+      expect(getJob().busy).toBe(false);      // panel handed back
+      expect(cancelRequested()).toBe(true);   // run still being asked to stop
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("does not reset a job that stopped on its own in time", () => {
     // honouring Cancel must not be undone by a later deadline clearing a new run.
     vi.useFakeTimers();
