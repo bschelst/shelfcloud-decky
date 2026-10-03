@@ -77,7 +77,7 @@ export const SettingsSection: FC<SettingsSectionProps> = ({
           selectedOption={status.sync_minutes}
           rgOptions={status.sync_choices.map((m) => ({
             data: m,
-            label: m === 60 ? "1 hour" : `${m} min`,
+            label: m === 0 ? "Off" : m === 60 ? "1 hour" : `${m} min`,
           }))}
           onChange={(option) => { void onSetSetting("sync_minutes", option.data).then(setStatus); }}
         />

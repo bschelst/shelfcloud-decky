@@ -529,6 +529,18 @@ async function adoptStrayShortcuts(
     }
 
     if (abandoned.abandoned) return;
+    // A tile removed from running Steam but still sitting in shortcuts.vdf would
+    // be re-adopted here, then removed again as unwanted, on EVERY sync - Steam
+    // writes the file lazily, so a RemoveShortcut does not clear it at once. That
+    // is the loop that never settles, and the reason collections come up empty:
+    // the tiles never stay put long enough to file. appStore is the live truth -
+    // an id it does not know is already gone from Steam, so do not adopt it; the
+    // file catches up on Steam's own next write. Only when appStore is actually
+    // there to ask: with no store (Steam not ready) fall back to adopting, or a
+    // momentary gap would strand every stray.
+    const liveStore = steam().appStore;
+    if (liveStore?.GetAppOverviewByAppID
+        && !liveStore.GetAppOverviewByAppID(entry.keep)) continue;
     const known = tracked[key];
     if (known && known.app_id === entry.keep) continue;     // already agreed
 

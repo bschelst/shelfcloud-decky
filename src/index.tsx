@@ -891,15 +891,23 @@ export default definePlugin(() => {
   // Registered here, NOT in the panel: Decky keeps this alive for the whole Steam
   // session, but the panel only exists while open. In the component, "background" sync ran only while the user watched.
   const onLibraryChanged = () => {
-    void runSync()
+    // Mark the panel busy for the whole run, exactly like a manual sync, so
+    // "Sync now" and "Add all my games" grey out and a "Syncing…" line shows
+    // while the auto-sync works. Without this the auto-sync was invisible, and
+    // pressing Add-all over the top of it joined the already-running sync - which
+    // had read the library BEFORE the add, so the newly added games got no tiles
+    // or collections. Disabling the buttons while it runs is what prevents that.
+    setJob({ busy: true, message: "Syncing…" });
+    void runSync((line) => setJob({ message: line, progress: getJob().progress }))
       .then(({ result, owned }) => {
+        finishJob();
         // Only the run that did the work notifies, and only when something arrived.
-        // A sync runs every minute and mostly finds nothing.
         if (owned && result.added > 0) toaster.toast(newGamesToast(result.addedNames));
         // Tiles were made or removed, so the badge's app-id map is stale. Cheaper than a shorter cache life, and exact.
         invalidateBadgeData();
       })
       .catch((error) => {
+        finishJob();
         console.error("[shelfcloud] background sync failed", error);
       });
   };

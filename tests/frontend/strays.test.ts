@@ -199,3 +199,41 @@ describe("tiles that agree already", () => {
     expect(added).toBe(0);
   });
 });
+
+describe("a stray Steam no longer has", () => {
+  // The churn: a tile removed from running Steam stays in shortcuts.vdf until
+  // Steam flushes it, so strayShortcuts keeps reporting it. Adopting it then
+  // removing it again, every sync, is the loop that never settles.
+  it("is NOT re-adopted when appStore does not know it", async () => {
+    (globalThis as Record<string, unknown>).window = {
+      appStore: { GetAppOverviewByAppID: (id: number) => (id === 4242 ? undefined : {}) },
+    };
+    vi.mocked(strayShortcuts).mockResolvedValue({
+      ok: true,
+      shortcuts: [{ game_id: 1196, app_ids: [4242], keep: 4242, tracked: null }],
+    } as never);
+    const cb = callbacks();
+
+    await syncLibrary([], {}, cb);   // empty library — nothing desired
+
+    expect(added).toBe(0);
+    expect(cb.record).not.toHaveBeenCalled();   // never adopted -> no loop
+    delete (globalThis as Record<string, unknown>).window;
+  });
+
+  it("IS adopted when appStore confirms it still exists", async () => {
+    (globalThis as Record<string, unknown>).window = {
+      appStore: { GetAppOverviewByAppID: () => ({}) },
+    };
+    vi.mocked(strayShortcuts).mockResolvedValue({
+      ok: true,
+      shortcuts: [{ game_id: 1196, app_ids: [4242], keep: 4242, tracked: null }],
+    } as never);
+    const cb = callbacks();
+
+    await syncLibrary([GAME], {}, cb);
+
+    expect(cb.record.mock.calls.some((c) => c[1] === 4242)).toBe(true);
+    delete (globalThis as Record<string, unknown>).window;
+  });
+});

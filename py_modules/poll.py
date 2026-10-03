@@ -3,7 +3,9 @@
 
 import random
 
-SYNC_INTERVAL_CHOICES = [3, 5, 10, 30, 60]
+# 0 means "Off": the loop keeps running but never syncs, so it can be turned
+# back on without a reload.
+SYNC_INTERVAL_CHOICES = [0, 3, 5, 10, 30, 60]
 DEFAULT_SYNC_MINUTES = 5
 MIN_SYNC_SECONDS = 3 * 60
 SYNC_JITTER = 0.15

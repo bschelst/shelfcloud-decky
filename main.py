@@ -2311,12 +2311,13 @@ class Plugin:
         return self._settings.get("sync_all_providers") is True
 
     def _sync_minutes(self) -> int:
-        """Minutes between automatic syncs, clamped to a sane range."""
+        """Minutes between automatic syncs, clamped to a sane range. 0 is a real
+        value here - it means the auto-sync is turned off."""
         try:
             minutes = int(self._settings.get("sync_minutes", DEFAULT_SYNC_MINUTES))
         except (TypeError, ValueError):
             return DEFAULT_SYNC_MINUTES
-        return max(1, min(minutes, 24 * 60))
+        return max(0, min(minutes, 24 * 60))
 
     async def _verify_auth(self) -> bool:
         """Is the stored token still accepted? Re-checked at most once a minute.
@@ -2561,16 +2562,19 @@ class Plugin:
         await asyncio.sleep(STARTUP_SETTLE_SECONDS + spread)
 
         while True:
+            # Read the interval each tick, not once, so changing the setting takes
+            # effect on the next tick without a plugin reload. 0 is "off": skip the
+            # sync but keep looping, so turning it back on resumes on its own.
+            minutes = self._sync_minutes()
             try:
-                if self._token():
+                if self._token() and minutes > 0:
                     await decky.emit(SYNC_EVENT)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
                 decky.logger.warning("Poll failed: %s", exc)
 
-            # Read the interval each tick, not once, so changing the instellingen takes
-            # effect on the next tick without a plugin reload.
-            await asyncio.sleep(next_poll_delay(
-                max(MIN_SYNC_SECONDS, self._sync_minutes() * 60)
-            ))
+            await asyncio.sleep(
+                MIN_SYNC_SECONDS if minutes <= 0
+                else next_poll_delay(max(MIN_SYNC_SECONDS, minutes * 60))
+            )
