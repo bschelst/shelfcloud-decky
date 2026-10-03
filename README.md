@@ -73,7 +73,7 @@ Shelfcloud is a **sync agent**, not a game browser. The workflow is split:
 | &#128268; **Decky plugin** | Sync your choices to Steam, apply artwork, handle launches |
 | &#128424; **Gateway** | Serve the catalog, resolve artwork, track what you play |
 
-The plugin polls the gateway on a configurable interval (default: every 5 minutes) and reconciles your Steam library — adding new tiles, removing ones you un-selected, and updating artwork when better art becomes available.
+The plugin polls the gateway on a configurable interval (default: every 5 minutes, or **Off** to sync only when you press Sync now) and reconciles your Steam library — adding new tiles, removing ones you un-selected, and updating artwork when better art becomes available.
 
 ### Shelves
 
@@ -114,7 +114,7 @@ You can also add a **custom provider** by pasting any URL on the Shelfcloud webs
 Boosteroid and GeForce NOW stream games you already own. Xbox Cloud Gaming and
 Amazon Luna are the other kind — the subscription *is* the catalog, so owning a
 game on Steam grants nothing there. Both are **off by default** and must be
-switched on in **My Services** on the website, so a tile never launches into a
+switched on in **Settings** on the website, so a tile never launches into a
 paywall you did not ask for.
 
 Both also sell more than one plan, with different games on each (Game Pass
@@ -135,6 +135,7 @@ More providers may be added over time. Shelfcloud does not buy subscriptions or 
 - **&#127918; One-click launch** — tile opens the browser and starts the game automatically
 - **&#128218; Bulk import** — "Add all my games" finds every Steam game you own that's also on a cloud service
 - **&#128268; Multi-provider** — one library, multiple cloud services, one Deck
+- **&#127918; A tile per service** — optionally give a game its own tile for each service it's on, one in each provider's collection, instead of a single tile on the best service
 - **&#128218; Shelves** — curate different game lists for different devices; each device picks its shelf from Settings
 - **&#128247; Per-provider chips** — see at a glance how your library breaks down
 - **&#128268; Browser installer** — no browser? The plugin installs Edge or Chrome for you straight from the panel
