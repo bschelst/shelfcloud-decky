@@ -6,11 +6,21 @@
 
 import { describe, expect, it } from "vitest";
 
-import { changeSummary, syncSummary } from "../../src/lib/summary";
+import { changeSummary, plural, syncSummary } from "../../src/lib/summary";
 import type { SyncResult } from "../../src/lib/types";
 
 const result = (over: Partial<SyncResult> = {}): SyncResult => ({
   added: 0, removed: 0, updated: 0, failed: 0, addedNames: [], ...over,
+});
+
+describe("singular vs plural", () => {
+  it("says one game, not one games", () => {
+    expect(plural(1, "game")).toBe("game");
+    expect(plural(0, "game")).toBe("games");
+    expect(plural(2, "game")).toBe("games");
+    expect(syncSummary(1, result())).toBe("1 game — already up to date");
+    expect(syncSummary(2, result())).toBe("2 games — already up to date");
+  });
 });
 
 describe("the finished-sync line", () => {

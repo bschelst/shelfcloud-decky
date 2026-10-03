@@ -4,6 +4,7 @@
 // ~300px panel a big figure and a bar read better than a pie of two numbers.
 // The bar doubles as the live sync progress.
 
+import { plural } from "../lib/summary";
 import { theme } from "../lib/theme";
 import { KNOWN_PROVIDERS, providerLabel } from "../lib/types";
 
@@ -68,7 +69,9 @@ export function LibrarySummary({
             // Both halves, so the total adds up: 3 on Bart + 3 shared is 6.
             // "6 on Bart" would be false about a shelf the user knows holds 3.
             ? `${onShelfCount} on ${shelfName} + ${sharedCount} shared`
-            : available > synced ? `of ${available} games` : "games in your library"}
+            : available > synced
+              ? `of ${available} ${plural(available, "game")}`
+              : `${plural(synced, "game")} in your library`}
         </div>
       </div>
 

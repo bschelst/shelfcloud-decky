@@ -5,6 +5,11 @@
 
 import type { SyncResult } from "./types";
 
+/** The noun, singular for one: plural(1, "game") -> "game", plural(2, …) -> "games". */
+export function plural(n: number, singular: string): string {
+  return n === 1 ? singular : `${singular}s`;
+}
+
 /**
  * The one-line result shown when a sync finishes. `total` must be the WHOLE
  * library -- added, unchanged and skipped alike. It shipped once as
@@ -21,7 +26,7 @@ export function syncSummary(
   if (result.cancelled) {
     return `Stopped — ${changeSummary(result)}${skippedNote}`;
   }
-  return `${total} games — ${changeSummary(result)}${skippedNote}`;
+  return `${total} ${plural(total, "game")} — ${changeSummary(result)}${skippedNote}`;
 }
 
 /**
