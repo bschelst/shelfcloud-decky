@@ -5,7 +5,7 @@
 // The bar doubles as the live sync progress.
 
 import { theme } from "../lib/theme";
-import { providerLabel } from "../lib/types";
+import { KNOWN_PROVIDERS, providerLabel } from "../lib/types";
 
 // The header uses the accent blue whether idle or working. Green when idle used
 // to read as a status light for "healthy", which it never reported. Idle and
@@ -103,7 +103,19 @@ export function LibrarySummary({
         </div>
       ) : (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 5, minHeight: "1.2em" }}>
-          {Object.entries(byProvider).map(([provider, count]) => (
+          {Object.entries(byProvider)
+            // Fixed order, so a chip keeps its place while the counts tick up
+            // during a sync. Object key order shifts as byProvider is rebuilt,
+            // which read as the chips jumping around. Known services in their
+            // canonical order, anything unknown after them by name.
+            .sort(([a], [b]) => {
+              const ia = KNOWN_PROVIDERS.indexOf(a);
+              const ib = KNOWN_PROVIDERS.indexOf(b);
+              return (ia === -1 ? KNOWN_PROVIDERS.length : ia)
+                - (ib === -1 ? KNOWN_PROVIDERS.length : ib)
+                || a.localeCompare(b);
+            })
+            .map(([provider, count]) => (
             <span
               key={provider}
               style={{
