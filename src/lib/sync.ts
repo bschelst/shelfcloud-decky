@@ -494,7 +494,12 @@ async function adoptStrayShortcuts(
   let report;
   try {
     await phase("scan stray shortcuts");
-  report = await withTimeout(strayShortcuts(), undefined, RPC_TIMEOUT);
+  // A short deadline, not the full RPC one. Reading shortcuts.vdf is a few
+  // milliseconds; if the answer is not back in six seconds the call is wedged,
+  // not working, and a settled library should not spend twenty seconds a sync
+  // waiting on it. Best-effort: a missed scan costs a late-cleaned duplicate,
+  // never a tile.
+  report = await withTimeout(strayShortcuts(), undefined, 6000);
   } catch {
     return;
   }

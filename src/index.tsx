@@ -897,17 +897,22 @@ export default definePlugin(() => {
     // pressing Add-all over the top of it joined the already-running sync - which
     // had read the library BEFORE the add, so the newly added games got no tiles
     // or collections. Disabling the buttons while it runs is what prevents that.
-    setJob({ busy: true, message: "Syncing…" });
-    void runSync((line) => setJob({ message: line, progress: getJob().progress }))
+    // One clear line for the whole run, not the per-tile "Checking X (0/0)"
+    // scan text -- that read as a stuck error, and because the background sync
+    // ended on finishJob() with no message, the last such line was never
+    // cleared and sat there forever. "Syncing…" stays up while busy, then is
+    // cleared on finish. No onProgress, so nothing overwrites it.
+    setJob({ busy: true, message: "Syncing…", progress: null });
+    void runSync()
       .then(({ result, owned }) => {
-        finishJob();
+        finishJob("");
         // Only the run that did the work notifies, and only when something arrived.
         if (owned && result.added > 0) toaster.toast(newGamesToast(result.addedNames));
         // Tiles were made or removed, so the badge's app-id map is stale. Cheaper than a shorter cache life, and exact.
         invalidateBadgeData();
       })
       .catch((error) => {
-        finishJob();
+        finishJob("");
         console.error("[shelfcloud] background sync failed", error);
       });
   };
