@@ -60,6 +60,42 @@ const GITHUB_URL = "https://github.com/bschelst/shelfcloud-decky";
 /** How often to re-read the library count during a sync - it climbs, but is not a call per tile. */
 const COUNT_POLL_MS = 1500;
 
+// The spin for the "Syncing…" banner. Injected once: Game Mode has no stylesheet
+// of ours, and inline styles cannot hold a @keyframes.
+const SPIN_STYLE_ID = "shelfcloud-spin-style";
+function ensureSpinStyle(): void {
+  if (typeof document === "undefined" || document.getElementById(SPIN_STYLE_ID)) return;
+  const style = document.createElement("style");
+  style.id = SPIN_STYLE_ID;
+  style.textContent = "@keyframes shelfcloud-spin{to{transform:rotate(360deg)}}";
+  document.head.appendChild(style);
+}
+
+/** A loud, unmistakable "a sync is running" banner. Greyed buttons alone were
+ *  too quiet - a spinner and a line that says so, at the top of the panel. */
+function SyncBanner({ message }: { message: string }) {
+  ensureSpinStyle();
+  return (
+    <PanelSectionRow>
+      <div style={{
+        display: "flex", alignItems: "center", gap: 10, width: "100%",
+        padding: "9px 12px", borderRadius: 8, boxSizing: "border-box",
+        background: theme.tint(theme.accent, 0.18),
+        border: `1px solid ${theme.tint(theme.accent, 0.55)}`,
+        color: theme.accentText, fontWeight: 700,
+      }}>
+        <div style={{
+          width: 16, height: 16, borderRadius: "50%", flex: "none",
+          border: `2px solid ${theme.tint(theme.accentText, 0.3)}`,
+          borderTopColor: theme.accentText,
+          animation: "shelfcloud-spin 0.8s linear infinite",
+        }} />
+        <span>{message && message.trim() ? message : "Syncing…"}</span>
+      </div>
+    </PanelSectionRow>
+  );
+}
+
 /** No install started. Mirrors IDLE_INSTALL in main.py so the panel reads the fields even on an older backend. */
 const IDLE_INSTALL: InstallState = {
   running: false, app_id: null, label: null, message: "", error: null, done: false,
@@ -701,6 +737,7 @@ function Content() {
         </PanelSection>
       ) : null}
       <PanelSection title="Shelfcloud">
+        {busy && <SyncBanner message={message} />}
         <PanelSectionRow>
           {/* Focusable, even with nothing to activate. The Quick Access menu
               scrolls to whatever has focus, so a block that cannot take focus
