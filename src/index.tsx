@@ -60,37 +60,42 @@ const GITHUB_URL = "https://github.com/bschelst/shelfcloud-decky";
 /** How often to re-read the library count during a sync - it climbs, but is not a call per tile. */
 const COUNT_POLL_MS = 1500;
 
-// The spin for the "Syncing…" banner. Injected once: Game Mode has no stylesheet
-// of ours, and inline styles cannot hold a @keyframes.
-const SPIN_STYLE_ID = "shelfcloud-spin-style";
-function ensureSpinStyle(): void {
-  if (typeof document === "undefined" || document.getElementById(SPIN_STYLE_ID)) return;
-  const style = document.createElement("style");
-  style.id = SPIN_STYLE_ID;
-  style.textContent = "@keyframes shelfcloud-spin{to{transform:rotate(360deg)}}";
-  document.head.appendChild(style);
-}
-
 /** A loud, unmistakable "a sync is running" banner. Greyed buttons alone were
- *  too quiet - a spinner and a line that says so, at the top of the panel. */
-function SyncBanner({ message }: { message: string }) {
-  ensureSpinStyle();
+ *  too quiet. The spinner is an SVG that animates itself (SMIL): a CSS
+ *  @keyframes needs a stylesheet in the panel's own document, which Game Mode
+ *  does not give us, so it never span. The text is one fixed line that never
+ *  wraps, so the panel cannot jump between one and two rows as it changes. */
+function SyncBanner() {
+  // Deliberately NOT the per-tile scan line ("Checking X (0/0)"). That read as
+  // stuck and told the user nothing useful; one calm word is what they asked for.
+  const text = "Syncing…";
+  // When a sync starts the banner mounts; scroll the panel up so it is in view.
+  // Pressing "Sync now" lower down otherwise left the banner off-screen.
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => { scrollAncestorToTop(ref.current); }, []);
   return (
     <PanelSectionRow>
-      <div style={{
+      <div ref={ref} style={{
         display: "flex", alignItems: "center", gap: 10, width: "100%",
-        padding: "9px 12px", borderRadius: 8, boxSizing: "border-box",
+        height: 36, padding: "0 12px", borderRadius: 8, boxSizing: "border-box",
         background: theme.tint(theme.accent, 0.18),
         border: `1px solid ${theme.tint(theme.accent, 0.55)}`,
-        color: theme.accentText, fontWeight: 700,
+        color: theme.accentText, fontWeight: 700, overflow: "hidden",
       }}>
-        <div style={{
-          width: 16, height: 16, borderRadius: "50%", flex: "none",
-          border: `2px solid ${theme.tint(theme.accentText, 0.3)}`,
-          borderTopColor: theme.accentText,
-          animation: "shelfcloud-spin 0.8s linear infinite",
-        }} />
-        <span>{message && message.trim() ? message : "Syncing…"}</span>
+        <svg width="16" height="16" viewBox="0 0 24 24" style={{ flex: "none" }} aria-hidden="true">
+          <circle cx="12" cy="12" r="9" fill="none"
+                  stroke={theme.tint(theme.accentText, 0.25)} strokeWidth="3" />
+          <path d="M12 3 a 9 9 0 0 1 0 18" fill="none"
+                stroke={theme.accentText} strokeWidth="3" strokeLinecap="round">
+            <animateTransform attributeName="transform" attributeType="XML"
+              type="rotate" from="0 12 12" to="360 12 12" dur="0.8s"
+              repeatCount="indefinite" />
+          </path>
+        </svg>
+        <span style={{
+          flex: 1, minWidth: 0, whiteSpace: "nowrap",
+          overflow: "hidden", textOverflow: "ellipsis",
+        }}>{text}</span>
       </div>
     </PanelSectionRow>
   );
@@ -115,8 +120,8 @@ async function startBrowserInstall(appId: string): Promise<Status | null> {
  *  what has focus, and the header cannot take focus, so once it went off the top
  *  pushing up could not bring it back. When focus reaches the top control,
  *  scroll its container all the way up so the header shows again. */
-function scrollPanelToTop(event: React.FocusEvent<HTMLDivElement>): void {
-  let node: HTMLElement | null = event.currentTarget;
+function scrollAncestorToTop(start: HTMLElement | null): void {
+  let node: HTMLElement | null = start;
   while (node) {
     const style = window.getComputedStyle(node);
     const scrolls = style.overflowY === "auto" || style.overflowY === "scroll";
@@ -126,6 +131,10 @@ function scrollPanelToTop(event: React.FocusEvent<HTMLDivElement>): void {
     }
     node = node.parentElement;
   }
+}
+
+function scrollPanelToTop(event: React.FocusEvent<HTMLDivElement>): void {
+  scrollAncestorToTop(event.currentTarget);
 }
 
 /** Open a URL in Steam's built-in browser, the only one Game Mode has. The cast
@@ -737,7 +746,7 @@ function Content() {
         </PanelSection>
       ) : null}
       <PanelSection title="Shelfcloud">
-        {busy && <SyncBanner message={message} />}
+        {busy && <SyncBanner />}
         <PanelSectionRow>
           {/* Focusable, even with nothing to activate. The Quick Access menu
               scrolls to whatever has focus, so a block that cannot take focus
@@ -760,7 +769,10 @@ function Content() {
                 : (owned ?? 0) + status.tracked}
               byProvider={status.by_provider}
               progress={busy ? progress : null}
-              progressLabel={message}
+              // The banner above says "Syncing…" now; leaving the per-tile line
+              // here too showed "(0/0)" and jumped the chips in and out. Keep the
+              // chips steady during a run.
+              progressLabel={busy ? "" : message}
             />
           </Focusable>
         </PanelSectionRow>

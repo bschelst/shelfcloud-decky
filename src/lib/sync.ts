@@ -724,7 +724,19 @@ export async function syncLibrary(
       result.cancelled = true;
       break;
     }
-    const existing = trackedFor(tracked, game);
+    let existing = trackedFor(tracked, game);
+    // Dead tracking heals itself. A tracked tile Steam no longer has (its app id
+    // resolves to nothing in appStore) cannot be updated or filed into a
+    // collection -- that is why the Shelfcloud page sat in an empty collection.
+    // Treat it as absent so a fresh tile is made and recorded over the dead id.
+    // appStore is the live truth; only act when it is actually there to ask, or a
+    // momentary gap while Steam loads would re-add everything.
+    if (existing) {
+      const live = steam().appStore;
+      if (live?.GetAppOverviewByAppID && !live.GetAppOverviewByAppID(existing.app_id)) {
+        existing = undefined;
+      }
+    }
     const title = shortcutTitle(game);
     const art = artworkFingerprint(game);
     scanning(game.name);
