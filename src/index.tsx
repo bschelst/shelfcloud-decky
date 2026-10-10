@@ -36,6 +36,7 @@ import {
 } from "./lib/api";
 import { syncLibrary, untiledFromRun } from "./lib/sync";
 import { changeSummary, syncSummary } from "./lib/summary";
+import { createSyncGate } from "./lib/syncGate";
 import { LibrarySummary } from "./components/LibrarySummary";
 import { Logo, LogoMono, NotificationLogo } from "./components/Logo";
 import { CollapsibleGroup, IconLabel } from "./components/Collapsible";
@@ -165,6 +166,13 @@ function openInSteamBrowser(url: string): void {
 /** The sync running now, if any. Module scope so the panel and the background
  *  poll can share it. */
 let syncInFlight: Promise<SyncOutcome> | null = null;
+
+/** The timed background sync waits while the panel is open, so it can not grey
+ *  the buttons out halfway through an edit. It runs once when the panel closes.
+ *  "Sync now" is not affected, that one is the user asking. */
+const panelGate = createSyncGate();
+/** Set by the plugin while it is loaded: runs the sync that was held back. */
+let runHeldSync: (() => void) | null = null;
 
 /** `total` counts every library entry, skipped ones included, so "N games — X added (Y skipped)" adds up. */
 type SyncOutcome = { result: SyncResult; total: number; skipped: number };
@@ -430,6 +438,12 @@ async function doRemoveAll(): Promise<void> {
 let lastStatus: Status | null = null;
 
 function Content() {
+  useEffect(() => {
+    panelGate.open();
+    return () => {
+      if (panelGate.close()) runHeldSync?.();
+    };
+  }, []);
   const [status, setStatusState] = useState<Status | null>(lastStatus);
   // Every write goes through here so the cache cannot drift from the view.
   const setStatus = useCallback(
@@ -940,6 +954,8 @@ export default definePlugin(() => {
   // Registered here, NOT in the panel: Decky keeps this alive for the whole Steam
   // session, but the panel only exists while open. In the component, "background" sync ran only while the user watched.
   const onLibraryChanged = () => {
+    // Panel open: the user is mid-edit. Wait, and run once when it closes.
+    if (panelGate.hold()) return;
     // Mark the panel busy for the whole run, exactly like a manual sync, so
     // "Sync now" and "Add all my games" grey out and a "Syncing…" line shows
     // while the auto-sync works. Without this the auto-sync was invisible, and
@@ -970,6 +986,7 @@ export default definePlugin(() => {
   setAbandonHandler(() => { syncInFlight = null; });
 
   addEventListener(SYNC_EVENT, onLibraryChanged);
+  runHeldSync = onLibraryChanged;
 
   // The provider badge on Steam's own game page. Patched here, not in the panel:
   // the panel exists only while open, and the badge must be there on every game
@@ -1002,6 +1019,7 @@ export default definePlugin(() => {
     icon: <LogoMono />,
     onDismount() {
       removeEventListener(SYNC_EVENT, onLibraryChanged);
+      runHeldSync = null;
       // Removed on purpose. A patch left behind outlives the unloaded plugin and keeps rendering a dead component.
       try {
         routerHook.removePatch("/library/app/:appid", libraryPatch);
