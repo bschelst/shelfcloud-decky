@@ -667,6 +667,17 @@ export async function syncLibrary(
     filed.push(member);
   };
 
+  // Where the installed layouts live, asked once for the whole run. Needed to
+  // SELECT a layout for a tile the sync is not otherwise touching. Best effort:
+  // without it those tiles keep the behaviour they had.
+  const selectionBase = await withTimeout(
+    layoutSelectionBase(), undefined, RPC_TIMEOUT)
+    .then((r) => (r?.ok && r.base && r.native
+      ? { base: r.base, native: r.native, repair: r.repair === true,
+          repairRev: r.repair_rev }
+      : undefined))
+    .catch(() => undefined);
+
   // Count the REAL work up front (adds, updates, removals), not every game walked
   // past. Counting all of them made the total disagree with the button ("Add 124
   // playable games"), which reads as a bug though both numbers were right.
@@ -674,6 +685,9 @@ export async function syncLibrary(
   const toChange = desired.filter((g) => {
     const existing = trackedFor(tracked, g);
     if (!existing) return true;                                  // add
+    // A repair pass rewrites every layout, which is most of the run's time. Count
+    // it, or the panel sits on "0/0" for minutes while the files are written.
+    if (selectionBase?.repair && g.controller_layout) return true;
     if (existing.launch !== g.options) return true;              // relaunch
     if (existing.name !== shortcutTitle(g)) return true;         // renamed
     return (existing.art ?? "") !== artworkFingerprint(g);       // new artwork
@@ -693,8 +707,15 @@ export async function syncLibrary(
   // games that need work, so it can't move for a game that needs none, but on a
   // library of nine hundred the scan alone is half a minute and a frozen line
   // looks stuck. So the name moves and the fraction does not.
+  // With no real work counted (a settled library) the fraction would sit at 0/0
+  // for the whole walk, though selecting layouts for every tile takes a while. Then
+  // the walk itself is the progress: position over games, which only moves forward.
+  let walked = 0;
   const scanning = (name: string) => {
-    callbacks.onProgress?.(`Checking ${shorten(name)} (${done}/${total})`);
+    walked++;
+    callbacks.onProgress?.(total > 0
+      ? `Checking ${shorten(name)} (${done}/${total})`
+      : `Checking ${shorten(name)} (${walked}/${desired.length})`);
   };
 
   // Web pages go first, and a cancel never reaches them. Cancelling "add all my
@@ -705,17 +726,6 @@ export async function syncLibrary(
     ...desired.filter((g) => WEBSITE_PROVIDERS.has(g.provider)),
     ...desired.filter((g) => !WEBSITE_PROVIDERS.has(g.provider)),
   ];
-
-  // Where the installed layouts live, asked once for the whole run. Needed to
-  // SELECT a layout for a tile the sync is not otherwise touching. Best effort:
-  // without it those tiles keep the behaviour they had.
-  const selectionBase = await withTimeout(
-    layoutSelectionBase(), undefined, RPC_TIMEOUT)
-    .then((r) => (r?.ok && r.base && r.native
-      ? { base: r.base, native: r.native, repair: r.repair === true,
-          repairRev: r.repair_rev }
-      : undefined))
-    .catch(() => undefined);
 
   await phase(`tiles (${ordered.length} desired)`);
   for (const game of ordered) {
@@ -810,6 +820,8 @@ export async function syncLibrary(
         if (turn.abandoned) return false;
         if (game.controller_layout
             && (launchChanged || artChanged || selectionBase?.repair)) {
+          // Changed tiles are stepped below; this names the repair-only ones.
+          if (!launchChanged && !artChanged) step("Layout", game.name);
           try {
             const layoutResult = await withTimeout(
               installControllerLayout(title, game.controller_layout), undefined, RPC_TIMEOUT);

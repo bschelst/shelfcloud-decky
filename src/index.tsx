@@ -783,10 +783,9 @@ function Content() {
                 : (owned ?? 0) + status.tracked}
               byProvider={status.by_provider}
               progress={busy ? progress : null}
-              // The banner above says "Syncing…" now; leaving the per-tile line
-              // here too showed "(0/0)" and jumped the chips in and out. Keep the
-              // chips steady during a run.
-              progressLabel={busy ? "" : message}
+              // The count is never 0/0 now (a settled library counts its walk), so
+              // the line can show what is happening instead of sitting blank.
+              progressLabel={message}
             />
           </Focusable>
         </PanelSectionRow>
