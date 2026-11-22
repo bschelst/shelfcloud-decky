@@ -42,7 +42,7 @@ Cloud gaming services like Boosteroid, GeForce NOW, Xbox Cloud and Amazon Luna d
 
 - A **Steam account** — Shelfcloud uses Steam sign-in, no separate account needed
 - A device running **SteamOS** or **Bazzite** (Steam Deck, Steam Machine, or any compatible hardware) with [Decky Loader](https://decky.xyz) installed
-- A Chromium-based browser (Chrome, Edge, or Brave) — the plugin offers to install one for you if none is present, and automatically configures the flatpak permissions it needs (gamepad access for controller input in cloud streams)
+- Microsoft Edge or Google Chrome — the plugin offers to install one for you if none is present, and automatically configures the flatpak permissions it needs (gamepad access for controller input in cloud streams)
 - An account on one or more supported cloud gaming services
 
 ### Installation
@@ -58,7 +58,7 @@ Shelfcloud is still in beta and not yet on the official Decky store. You can ins
 
 1. &#127918; Open the **Shelfcloud** panel from the Decky menu
 2. &#128274; Press **Sign in with Steam** — the website opens; sign in there
-3. &#128296; Under **Settings**, choose your browser (Chrome/Edge/Brave)
+3. &#128296; Under **Settings**, choose your browser (Edge or Chrome)
 4. &#127911; Select games on the Shelfcloud website
 5. &#128260; Press **Sync now** — your games appear as Steam tiles with artwork
 
@@ -163,7 +163,7 @@ More providers may be added over time. Shelfcloud does not buy subscriptions or 
 <details>
 <summary><strong>Why do I need a browser installed?</strong></summary>
 
-Cloud gaming providers offer standalone desktop clients, but those don't support launching a specific game directly — you'd still have to navigate to the game yourself. A browser lets Shelfcloud open the exact game page and press Play for you. Steam's built-in browser forwards no controller input to web pages, so games need a real Chromium browser (Chrome, Edge, or Brave) that supports the video codecs and gamepad APIs cloud providers require. Firefox is not supported for this reason.
+Cloud gaming providers offer standalone desktop clients, but those don't support launching a specific game directly — you'd still have to navigate to the game yourself. A browser lets Shelfcloud open the exact game page and press Play for you. Steam's built-in browser forwards no controller input to web pages, so games need Edge or Chrome, which support the video codecs and gamepad APIs cloud providers require. Other browsers (Brave, Vivaldi, Chromium, Firefox) are not supported for this reason.
 </details>
 
 <details>

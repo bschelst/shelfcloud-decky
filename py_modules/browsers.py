@@ -1,7 +1,7 @@
 # Shelfcloud project - https://shelfcloud.cc - bart@schelstraete.org
 """Browser detection and building the launch command.
 
-Chromium-based browsers only (Edge, Chrome, Chromium and family). Cloud gaming
+Microsoft Edge and Google Chrome only. Cloud gaming
 needs codec and DRM support that Firefox on Linux does not do well, so we do not
 offer it: a browser that loads but then fails to stream is worse than none.
 """
@@ -17,18 +17,15 @@ FLATPAK_ROOTS = [
     "/home/deck/.local/share/flatpak/app",
 ]
 
-# Chromium-based only, ordered by how well they do cloud gaming. Edge first
-# because Xbox Cloud has always been the most picky about it.
+# Edge and Chrome only, ordered by how well they do cloud gaming. Edge first
+# because Xbox Cloud has always been the most picky about it. Brave, Vivaldi and
+# plain Chromium are left out on purpose: they miss the DRM or the codecs some
+# services need, or block parts of the stream page, and a tile that opens and
+# then won't stream is worse then being asked to install Edge. Someone who only
+# has one of those gets the install offer.
 KNOWN_BROWSERS = [
     {"app_id": "com.microsoft.Edge", "label": "Microsoft Edge"},
     {"app_id": "com.google.Chrome", "label": "Google Chrome"},
-    {"app_id": "org.chromium.Chromium", "label": "Chromium"},
-    {"app_id": "com.brave.Browser", "label": "Brave"},
-    {"app_id": "com.vivaldi.Vivaldi", "label": "Vivaldi"},
-    {
-        "app_id": "io.github.ungoogled_software.ungoogled_chromium",
-        "label": "Ungoogled Chromium",
-    },
 ]
 
 # Each flag hides someting that would sit on top of the game in Game Mode.
@@ -64,8 +61,7 @@ def detect_browsers() -> List[Dict]:
 
 # Browsers we offer to install with one press, best first. Only these two: each
 # one gets downloaded onto someone's machine, so the list stays short and well
-# known. The rest of KNOWN_BROWSERS still works, we just do not install it. Edge
-# first for the same reason as above.
+# known. The same two as KNOWN_BROWSERS. Edge first for the same reason as above.
 INSTALLABLE = [
     {
         "app_id": "com.microsoft.Edge",

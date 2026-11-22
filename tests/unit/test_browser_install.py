@@ -141,5 +141,29 @@ def test_a_user_install_is_detected(monkeypatch, tmp_path):
     assert "com.microsoft.Edge" in found
 
 
+def test_only_edge_and_chrome_are_used(monkeypatch, tmp_path):
+    """Brave, Vivaldi, Chromium installed next to them are not offered or picked."""
+    for app_id in ("com.brave.Browser", "com.vivaldi.Vivaldi", "org.chromium.Chromium",
+                   "com.google.Chrome", "com.microsoft.Edge"):
+        (tmp_path / "app" / app_id).mkdir(parents=True)
+    monkeypatch.setattr(browsers, "FLATPAK_ROOTS", [str(tmp_path / "app")])
+    found = [b["app_id"] for b in browsers.detect_browsers()]
+    assert found == ["com.microsoft.Edge", "com.google.Chrome"]
+
+
+def test_a_chosen_brave_falls_back_on_a_supported_one(monkeypatch, tmp_path):
+    for app_id in ("com.brave.Browser", "com.google.Chrome"):
+        (tmp_path / "app" / app_id).mkdir(parents=True)
+    monkeypatch.setattr(browsers, "FLATPAK_ROOTS", [str(tmp_path / "app")])
+    assert browsers.resolve_browser("com.brave.Browser")["app_id"] == "com.google.Chrome"
+
+
+def test_only_brave_installed_means_no_browser(monkeypatch, tmp_path):
+    # the panel then offers to install Edge or Chrome
+    (tmp_path / "app" / "com.brave.Browser").mkdir(parents=True)
+    monkeypatch.setattr(browsers, "FLATPAK_ROOTS", [str(tmp_path / "app")])
+    assert browsers.resolve_browser("com.brave.Browser") is None
+
+
 def test_the_user_flatpak_root_is_scanned():
     assert any(".local/share/flatpak" in root for root in browsers.FLATPAK_ROOTS)
