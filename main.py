@@ -1747,6 +1747,39 @@ class Plugin:
                 missing.add(app_id)
         return {"ok": True, "app_ids": sorted(missing)}
 
+    async def tiles_drifted(self) -> Dict[str, Any]:
+        """App ids of our tiles whose real Steam shortcut is not what we recorded.
+
+        Sync compares the gateway with our RECORD, never with Steam. A tile taken
+        over from the older desktop app kept running `flatpak run cc.shelfcloud.App`
+        under the old name, while the record said our launcher, so it was never
+        rewritten and Play did nothing (130 tiles on one machine). Options and name
+        compared, both are written by sync. A record with no launch is skipped,
+        sync sees that one as changed already.
+        """
+        try:
+            steam = await asyncio.to_thread(shortcuts.shelfcloud_shortcuts)
+        except Exception as exc:                      # never block a sync
+            decky.logger.warning("could not read shortcuts.vdf for drift: %s", exc)
+            return {"ok": False, "app_ids": []}
+        real = {t.get("app_id"): t for t in steam if isinstance(t, dict)}
+        drifted = set()
+        for entry in self._synced.values():
+            if not isinstance(entry, dict):
+                continue
+            app_id, launch = entry.get("app_id"), entry.get("launch")
+            if not isinstance(app_id, int) or isinstance(app_id, bool) or not launch:
+                continue
+            tile = real.get(app_id)
+            if tile is None:
+                continue                              # gone, the vanished check owns that
+            if tile.get("options") != launch or tile.get("name") != entry.get("name"):
+                drifted.add(app_id)
+        if drifted:
+            decky.logger.info("%d tile(s) differ from what was recorded, rewriting",
+                              len(drifted))
+        return {"ok": True, "app_ids": sorted(drifted)}
+
     async def forget_shortcut(self, game_id: Any) -> Dict:
         key = str(game_id)
         tracked = self._synced.pop(key, None) or {}

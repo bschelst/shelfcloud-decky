@@ -95,6 +95,10 @@ export const setShelf =
 // app ids of our tiles whose icon file is gone from disk, so sync puts it back.
 export const tilesMissingIcons =
   guarded<[], { ok: boolean; app_ids?: number[] }>("tiles_missing_icons", true);
+// app ids of our tiles whose real shortcut differs from the record (old desktop
+// app launch, old name), so sync rewrites them insted of trusting the record.
+export const tilesDrifted =
+  guarded<[], { ok: boolean; app_ids?: number[] }>("tiles_drifted", true);
 export const layoutSelectionBase =
   guarded<[], { ok: boolean; base?: string; native?: string; repair?: boolean;
                 repair_rev?: number; error?: string }>("layout_selection_base", true);

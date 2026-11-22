@@ -4,7 +4,7 @@
 // frontend because SteamClient only exists here; the backend decides what the
 // library should hold, this makes it so.
 
-import { fetchArtwork, installControllerLayout, layoutSelectionBase, logNote, saveIcon, saveIconFromUrl, setSetting, setSteamIds, strayShortcuts, tilesMissingIcons } from "./api";
+import { fetchArtwork, installControllerLayout, layoutSelectionBase, logNote, saveIcon, saveIconFromUrl, setSetting, setSteamIds, strayShortcuts, tilesDrifted, tilesMissingIcons } from "./api";
 import { addToProviderCollections, pruneProviderCollections,
          removeRetiredCollections, type CollectionMember } from "./collection";
 import { layoutKey } from "./layoutKey";
@@ -83,6 +83,10 @@ const artUnavailable = new Set<number>();
 // and not every sync: an icon that can not be saved would else redo all of that
 // tile's art every five minutes. A reload gives one more try, like above.
 const iconRepairTried = new Set<number>();
+// Same idea for tiles rewritten because Steam's shortcut differed from the record.
+// Steam writes shortcuts.vdf a little later, so the next sync could read the old
+// file and rewrite them again. Once per session is enough.
+const driftRepairTried = new Set<number>();
 
 // Games we drew a fallback logo for, after the real one would not download.
 // This bounds the logo self-heal: the first miss keeps the old fingerprint so
@@ -725,6 +729,19 @@ export async function syncLibrary(
     }
   })();
 
+  // Tiles whose real shortcut is not what we recorded. Sync compares the gateway
+  // with the record only, so a tile taken over from the old desktop app kept
+  // running that app and Play did nothing. Best effort like the icons above.
+  const drifted = await (async () => {
+    try {
+      const answer = await withTimeout(tilesDrifted(), undefined, RPC_TIMEOUT);
+      const ids = answer?.ok && Array.isArray(answer.app_ids) ? answer.app_ids : [];
+      return new Set(ids.filter((id) => !driftRepairTried.has(id)));
+    } catch {
+      return new Set<number>();
+    }
+  })();
+
   // Count the REAL work up front (adds, updates, removals), not every game walked
   // past. Counting all of them made the total disagree with the button ("Add 124
   // playable games"), which reads as a bug though both numbers were right.
@@ -736,6 +753,7 @@ export async function syncLibrary(
     // it, or the panel sits on "0/0" for minutes while the files are written.
     if (selectionBase?.repair && g.controller_layout) return true;
     if (existing.launch !== g.options) return true;              // relaunch
+    if (drifted.has(existing.app_id)) return true;               // Steam has other
     if (existing.name !== shortcutTitle(g)) return true;         // renamed
     if (lostIcons.has(existing.app_id)) return true;             // icon file gone
     return (existing.art ?? "") !== artworkFingerprint(g);       // new artwork
@@ -855,7 +873,10 @@ export async function syncLibrary(
         // rest of the sync runs.
         if (pending.length >= COLLECTION_BATCH) await flushCollections();
       } else {
-        const launchChanged = existing.launch !== game.options || existing.name !== title;
+        const tileDrifted = drifted.has(existing.app_id);
+        if (tileDrifted) driftRepairTried.add(existing.app_id);
+        const launchChanged = existing.launch !== game.options || existing.name !== title
+          || tileDrifted;
         // a lost icon counts as changed art: it is the artwork pass that puts
         // the icon back, from the gateway like the first time
         const iconLost = lostIcons.has(existing.app_id);

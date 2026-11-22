@@ -32,6 +32,7 @@ _PROVIDER = re.compile(rb"--provider\s+(?:'([^']*)'|\"([^\"]*)\"|(\S+))")
 _APPID = re.compile(rb"\x02appid\x00(....)", re.IGNORECASE | re.DOTALL)
 _OPTIONS = re.compile(rb"\x01LaunchOptions\x00([^\x00]*)\x00", re.IGNORECASE)
 _NAME = re.compile(rb"\x01AppName\x00([^\x00]*)\x00", re.IGNORECASE)
+_EXE = re.compile(rb"\x01Exe\x00([^\x00]*)\x00", re.IGNORECASE)
 
 # Entries are keyed by their index: 0x00 "0" 0x00, 0x00 "1" 0x00, and so on
 _ENTRY = re.compile(rb"\x00(\d+)\x00")
@@ -85,6 +86,7 @@ def parse(blob: bytes) -> List[Dict]:
         (app_id,) = struct.unpack("<I", appid.group(1))
 
         name = _NAME.search(chunk)
+        exe = _EXE.search(chunk)
         provider = _PROVIDER.search(options.group(1))
         provider_value = next(
             (g for g in provider.groups() if g is not None), b"") if provider else b""
@@ -93,6 +95,9 @@ def parse(blob: bytes) -> List[Dict]:
             "game_id": int(game.group(1)),
             "provider": provider_value.decode("utf-8", "replace"),
             "name": name.group(1).decode("utf-8", "replace") if name else "",
+            # what Steam really runs, to see a tile that drifted from our record
+            "exe": exe.group(1).decode("utf-8", "replace") if exe else "",
+            "options": options.group(1).decode("utf-8", "replace"),
         })
     return out
 
