@@ -8,8 +8,15 @@
 // fixed image that must never be swaped, so it is compiled in.
 //
 // 256x256 with a real alpha channel, the same file the gateway serves at
-// /static/img/tiles/shelfcloud-icon.png. If that art is ever redrawn, this has
-// to be made again from it -- see tools/embed-brand-mark.md.
+// /static/img/tiles/shelfcloud-icon.png. If that art is ever redrawn, make this
+// again from it, in base64 cut in lines of 96:
+//
+//   python3 -c 'import base64,textwrap; print("\n".join(textwrap.wrap(base64.b64encode(
+//     open("../shelfcloud/backend/static/img/tiles/shelfcloud-icon.png","rb").read()).decode(), 96)))'
+//
+// Paste the lines into DATA as quoted, +-joined strings, and bump ART_REVISION in
+// sync.ts so tiles already on a shelf draw it again. Keep the alpha channel, that
+// is the hole reason it is compiled in.
 
 import type { SourceImage } from "./canvas";
 
