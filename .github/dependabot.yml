@@ -1,0 +1,26 @@
+# Weekly dependency checks, grouped so it is one PR to review, not twenty.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      npm:
+        patterns: ["*"]
+    # Hold the breaking majors so the weekly group stays mergeable. TypeScript 7
+    # (the native rewrite) drops moduleResolution=node10 and fails our tsc;
+    # ESLint 10 is a flat-config major. Upgrade those on purpose, not in a group.
+    ignore:
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "eslint"
+        update-types: ["version-update:semver-major"]
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        patterns: ["*"]

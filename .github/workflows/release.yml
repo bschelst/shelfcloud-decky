@@ -1,0 +1,105 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Type check
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Test frontend
+        run: pnpm test
+
+      # The runner's python has no pytest, and this step was added without one.
+      # v0.2.0 and v0.2.1 predate the step, so v0.3.0 was the first tag to meet
+      # it — and it failed on "No module named pytest" rather than on anything
+      # in the plugin.
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install backend test dependencies
+        # urllib3 too: the connection pool needs it and one test checks the pool
+        # really reuses a connection. Without it the runner has no pool and the
+        # test sees 40 handshakes instead of 1, so the release fails on it.
+        run: python3 -m pip install --disable-pip-version-check pytest urllib3
+
+      - name: Test backend
+        # Bounded so a hanging test fails in minutes with its output, instead
+        # of holding the job open until the six-hour default.
+        timeout-minutes: 10
+        run: python3 -m pytest tests/unit -v < /dev/null
+
+      - name: Build
+        run: pnpm build
+
+      - name: Package release zip
+        run: |
+          PLUGIN_NAME="Shelfcloud"
+          TAG="${GITHUB_REF#refs/tags/}"
+
+          mkdir -p "${PLUGIN_NAME}/dist"
+          mkdir -p "${PLUGIN_NAME}/py_modules"
+          mkdir -p "${PLUGIN_NAME}/bin"
+
+          cp plugin.json package.json main.py LICENSE "${PLUGIN_NAME}/"
+          cp dist/index.js "${PLUGIN_NAME}/dist/"
+          cp py_modules/*.py "${PLUGIN_NAME}/py_modules/"
+          cp bin/*.py "${PLUGIN_NAME}/bin/"
+          chmod +x "${PLUGIN_NAME}"/bin/*.py
+
+          zip -r "shelfcloud-decky-${TAG}.zip" "${PLUGIN_NAME}"
+          cp "shelfcloud-decky-${TAG}.zip" "shelfcloud-decky.zip"
+
+      - name: Fetch tag annotation
+        run: git fetch --tags --force
+
+      - name: Write release body
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          git tag -l --format='%(contents)' "${TAG}" > release_body.md
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            shelfcloud-decky-*.zip
+            shelfcloud-decky.zip
+          generate_release_notes: false
+          body_path: release_body.md
+          # Say so explicitly. GitHub calls whichever release was CREATED last
+          # "Latest", not the highest version — v0.1.0, v0.2.0 and v0.2.1 were
+          # published within three seconds of each other and v0.1.0 went last,
+          # so the download everyone gets has been the oldest build.
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

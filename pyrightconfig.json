@@ -1,0 +1,8 @@
+{
+  "include": ["main.py", "py_modules", "tests"],
+  "extraPaths": ["py_modules", "."],
+  "pythonVersion": "3.11",
+  "typeCheckingMode": "basic",
+  "reportMissingImports": "warning",
+  "reportMissingModuleSource": "none"
+}
