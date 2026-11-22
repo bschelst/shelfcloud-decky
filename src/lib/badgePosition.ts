@@ -12,8 +12,10 @@ export const INSET = 20;
 /** How far down a TOP badge sits, per corner. The values differ on purpose:
  *  the top-right of a Steam game page carries its own furniture, so a badge
  *  there has further to come down. The top-left has only the hero above it.
- *  Taken from the ProtonDB medal on this same page. */
-export const TOP_INSET = { tl: 40, tr: 60, tm: 60 } as const;
+ *  The left is from the ProtonDB medal on this same page. The right is 50, same
+ *  as the PlayCount plugin: it flashes a loading badge in that corner on our
+ *  tiles and then gives up, so at 60 ours looked to drop 10px on every open. */
+export const TOP_INSET = { tl: 40, tr: 50, tm: 50 } as const;
 
 /** Horizontally centred. A transform, not a computed left, because the badge's
  *  width is not known here and changes with the provider name. translateX(-50%)
