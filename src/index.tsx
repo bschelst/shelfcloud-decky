@@ -50,6 +50,7 @@ import { isSafeExternalUrl } from "./lib/url";
 import { badgeDataNow, invalidateBadgeData, refreshBadgeData } from "./lib/badgeData";
 import { startFocusBadge, stopFocusBadge } from "./lib/focusBadge";
 import { patchLibraryApp } from "./lib/patchLibraryApp";
+import { patchPlayMenu } from "./lib/patchPlayMenu";
 import type { DesiredGame, InstallState, LibraryResponse, Status, SyncResult } from "./lib/types";
 
 const SYNC_EVENT = "shelfcloud/library";
@@ -991,6 +992,9 @@ export default definePlugin(() => {
   // the panel exists only while open, and the badge must be there on every game
   // page.
   const libraryPatch = patchLibraryApp();
+  // cloud tiles in the dropdown next to Play on a Steam game. null if Steam's
+  // menu code moved, then the plugin goes on without it
+  const playMenuPatch = patchPlayMenu();
 
   // And the same mark on the highlighted card in the home carousel and grid. Not
   // a React patch: those cards are recycled by a virtual list, nothing stable to hang a child on - see focusBadge.
@@ -1024,6 +1028,11 @@ export default definePlugin(() => {
         routerHook.removePatch("/library/app/:appid", libraryPatch);
       } catch (error) {
         console.error("[shelfcloud] could not remove the library patch", error);
+      }
+      try {
+        playMenuPatch?.unpatch();
+      } catch (error) {
+        console.error("[shelfcloud] could not remove the play menu patch", error);
       }
       // Disconnects the observer AND takes the badge off whatever card it is on -
       // a node left in another window's document outlives the plugin.

@@ -11,6 +11,7 @@ import { FC } from "react";
 import {
   FaCog,
   FaGamepad,
+  FaPlay,
   FaSignOutAlt,
   FaTrashAlt,
   FaUsers,
@@ -246,6 +247,26 @@ export const SettingsSection: FC<SettingsSectionProps> = ({
         </Focusable>
       </PanelSectionRow>
     )}
+
+    <PanelSectionRow>
+      <div style={{ width: "100%" }}>
+        <ToggleField
+          label={<IconLabel icon={<FaPlay size={11} />}>Cloud in Play menu</IconLabel>}
+          description={
+            "On a Steam game, lists the cloud services that have it in the "
+            + "dropdown next to Play. Steam only shows that dropdown when "
+            + "there is an other PC to stream from."
+          }
+          checked={status.play_menu_enabled !== false}
+          onChange={(value) => {
+            void onSetSetting("play_menu_enabled", value).then((next) => {
+              setStatus(next);
+              invalidateBadgeData();
+            });
+          }}
+        />
+      </div>
+    </PanelSectionRow>
 
     {shelves?.ok && (shelves.shelves?.length ?? 0) > 0 && (
       <PanelSectionRow>

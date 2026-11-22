@@ -130,3 +130,26 @@ def test_an_unknown_setting_is_still_refused():
     plugin = _plugin()
     asyncio.run(plugin.set_setting("badge_colour", "#ff0000"))
     assert "badge_colour" not in plugin._settings
+
+
+def test_the_play_menu_entries_are_on_by_default():
+    """An existing install has no key for it yet, and that must mean on."""
+    assert _plugin()._play_menu_on() is True
+
+
+def test_the_play_menu_entries_can_be_switched_off():
+    plugin = _plugin()
+    asyncio.run(plugin.set_setting("play_menu_enabled", False))
+    assert plugin._settings["play_menu_enabled"] is False
+    assert plugin._play_menu_on() is False
+
+    asyncio.run(plugin.set_setting("play_menu_enabled", True))
+    assert plugin._play_menu_on() is True
+
+
+def test_the_play_menu_switch_takes_only_a_bool():
+    """A string "false" is truthy in python, so it is refused, not stored."""
+    plugin = _plugin()
+    for bad in ("false", 0, None, [False]):
+        asyncio.run(plugin.set_setting("play_menu_enabled", bad))
+        assert "play_menu_enabled" not in plugin._settings

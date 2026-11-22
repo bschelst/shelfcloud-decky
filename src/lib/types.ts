@@ -115,6 +115,8 @@ export interface Status {
   players_enabled?: boolean;
   // where that one sits. same six positions.
   players_position?: string;
+  // our services in the dropdown beside Play on a Steam game. on by default.
+  play_menu_enabled?: boolean;
   by_provider: Record<string, number>;
   last_error?: string | null;
 }

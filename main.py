@@ -2346,6 +2346,10 @@ class Plugin:
     def _version() -> str:
         return decky.DECKY_PLUGIN_VERSION or "unknown"
 
+    def _play_menu_on(self) -> bool:
+        """On unless switched off. An old settings file has no key, that is on."""
+        return self._settings.get("play_menu_enabled") is not False
+
     @_sized
     async def get_status(self) -> Dict[str, Any]:
         browser = await asyncio.to_thread(browsers.resolve_browser, self._settings.get("browser"))
@@ -2373,6 +2377,9 @@ class Plugin:
             # without the other is normal.
             "badge_on_cards": self._settings.get("badge_on_cards") is not False,
             "players_enabled": bool(self._settings.get("players_enabled")),
+            # our services in the dropdown beside Play on a Steam game. on unless
+            # switched off, like the badge
+            "play_menu_enabled": self._play_menu_on(),
             "players_position": (self._settings.get("players_position")
                                  if self._settings.get("players_position")
                                  in self.BADGE_POSITIONS else "tr"),
@@ -2522,7 +2529,7 @@ class Plugin:
     ALLOWED_SETTINGS = {"browser", "sync_minutes", "sync_all_providers", "ui_scale",
                         "badge_enabled", "badge_on_cards", "badge_position",
                         "extra_pad_layouts", "players_enabled",
-                        "players_position",
+                        "players_position", "play_menu_enabled",
                         # Not a preference: marks that the one-off layout re-selection
                         # has been done on this device. See LAYOUT_REPAIR.
                         "layout_repair"}
@@ -2541,6 +2548,10 @@ class Plugin:
         # dropdown is not the only thing that can call it.
         if key == "badge_position" and value not in self.BADGE_POSITIONS:
             decky.logger.warning("Rejected badge position: %r", value)
+            return await self.get_status()
+        # a switch, so only a real bool. the string "false" would read as on
+        if key == "play_menu_enabled" and not isinstance(value, bool):
+            decky.logger.warning("Rejected play menu value: %r", value)
             return await self.get_status()
         self._settings[key] = value
         await self._save_settings()

@@ -9,6 +9,7 @@
 import { useEffect, useState } from "react";
 
 import { currentPlayers, getStatus, trackedProviders } from "./api";
+import { cloudOptionsFor, type CloudOption } from "./cloudOptions";
 
 /** How long an answer may be reused. Long enough that paging a library costs
  *  one request, short enough that a sync finishing elsewhere shows up. */
@@ -27,11 +28,32 @@ function emptyCache<T>(value: T): Cached<T> {
 let providers = emptyCache<Record<string, string>>({});
 /** app id -> the game's id on STEAM, for tiles whose game is on Steam. */
 let steamIds = emptyCache<Record<string, string>>({});
-let badge = emptyCache<{
+interface BadgeSettings {
   enabled: boolean; onCards: boolean; position: string;
   players: boolean; playersPosition: string;
-}>({ enabled: true, onCards: true, position: "bl",
-     players: false, playersPosition: "tr" });
+  /** our services in the dropdown beside Play on a Steam game */
+  playMenu: boolean;
+}
+
+let badge = emptyCache<BadgeSettings>({ enabled: true, onCards: true, position: "bl",
+     players: false, playersPosition: "tr", playMenu: true });
+
+/** The status answer as the badges want it. One place, it was copied twice. */
+async function fetchBadgeSettings(): Promise<BadgeSettings> {
+  const status = await getStatus();
+  return {
+    enabled: status?.badge_enabled !== false,
+    onCards: status?.badge_on_cards !== false,
+    position: status?.badge_position ?? "bl",
+    // off by default. it asks Steam a question on every page open.
+    players: status?.players_enabled === true,
+    // top right by default, so it does not land on the provider badge,
+    // which defaults to bottom left.
+    playersPosition: status?.players_position ?? "tr",
+    // on unless switched off, same as the backend
+    playMenu: status?.play_menu_enabled !== false,
+  };
+}
 
 /** Throw both answers away so the next badge asks again. Called when a sync
  *  finishes: tiles were made or removed, so the app-id map is stale. */
@@ -56,6 +78,15 @@ export function badgeDataNow(): {
   };
 }
 
+/** Our cloud tiles for a Steam game, from what is cached right now. For the
+ *  Play dropdown, wich has to draw at once. Empty until the first fetch is in,
+ *  so call refreshBadgeData() early enough that it is there. Empty as well
+ *  when the user switched the menu entries off. */
+export function cloudOptionsNow(steamAppId: string | number): CloudOption[] {
+  if (!badge.value.playMenu) return [];
+  return cloudOptionsFor(steamAppId, steamIds.value, providers.value);
+}
+
 /** Fetch both answers if they are stale, for a caller that cannot await. */
 export function refreshBadgeData(): void {
   void read(providers, async () => {
@@ -66,17 +97,7 @@ export function refreshBadgeData(): void {
     const result = await trackedProviders();
     return result?.ok && result.steam_ids ? result.steam_ids : {};
   });
-  void read(badge, async () => {
-    const status = await getStatus();
-    return {
-      enabled: status?.badge_enabled !== false,
-      onCards: status?.badge_on_cards !== false,
-      position: status?.badge_position ?? "bl",
-      // off by default. it asks Steam a question on every page open.
-      players: status?.players_enabled === true,
-      playersPosition: status?.players_position ?? "tr",
-    };
-  });
+  void read(badge, fetchBadgeSettings);
 }
 
 async function read<T>(cache: Cached<T>, fetcher: () => Promise<T>): Promise<T> {
@@ -121,9 +142,7 @@ export function useProviderForApp(appId: string | undefined): string | undefined
 }
 
 /** Whether to show the badge, and where. */
-export function useBadgeSettings(): {
-  enabled: boolean; onCards: boolean; position: string;
-  players: boolean; playersPosition: string;
+export function useBadgeSettings(): BadgeSettings & {
   /** False until the real instellingen are read. A badge drawn on the guessed
    *  defaults shows up then vanishes, so nothing draws until this is true. */
   loaded: boolean;
@@ -135,18 +154,7 @@ export function useBadgeSettings(): {
 
   useEffect(() => {
     let cancelled = false;
-    void read(badge, async () => {
-      const status = await getStatus();
-      return {
-        enabled: status?.badge_enabled !== false,
-        onCards: status?.badge_on_cards !== false,
-        position: status?.badge_position ?? "bl",
-        players: status?.players_enabled === true,
-        // top right by default, so it does not land on the provider badge,
-        // which defaults to bottom left.
-        playersPosition: status?.players_position ?? "tr",
-      };
-    }).then((next) => {
+    void read(badge, fetchBadgeSettings).then((next) => {
       if (cancelled) return;
       setValue(next);
       setLoaded(true);
