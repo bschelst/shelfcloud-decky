@@ -19,14 +19,16 @@
 
 import { findClassModule, Focusable, Menu, showContextMenu } from "@decky/ui";
 import {
-  Children, cloneElement, isValidElement, useEffect, useRef,
+  Children, cloneElement, isValidElement, useEffect, useRef, useState,
   type ReactElement, type ReactNode,
 } from "react";
 
 import { playOptionsNow, providerNow } from "./badgeData";
 import type { CloudOption } from "./cloudOptions";
 import { cloudMenuItems, currentMenuItem } from "./playOptionsUi";
-import { steamDrawsArrow } from "./steamArrow";
+import {
+  ARROW_ICON, fallbackArrowStyle, PLAY_SQUARED, shouldLookAgain, steamDrawsArrow,
+} from "./steamArrow";
 
 /* Steam's tree, fibers and the class are untyped and not ours. */
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -44,16 +46,20 @@ const FIBER_BUDGET = 8000;
  *  name, not hash: the hashes change with every Steam build, the names not.
  *  Looked up on first use, the module is not there before Steam's UI is. */
 interface StreamingClasses { StreamingSelector: string; ShowingStreaming: string; ButtonChild: string }
-let streamingClasses: StreamingClasses | null | undefined;
+let streamingClasses: StreamingClasses | null = null;
+let lastMiss = 0;
 
+/** Steam's classes as Decky knows them, or null. A miss is not kept for ever:
+ *  Decky 4 on a Steam beta had the module not indexed at all, then we draw our
+ *  own arrow and ask again a bit later, see shouldLookAgain. */
 function getStreamingClasses(): StreamingClasses | null {
-  if (streamingClasses === undefined) {
-    const found = findClassModule((m: any) =>
-      typeof m?.StreamingSelector === "string"
-      && typeof m?.ShowingStreaming === "string"
-      && typeof m?.ButtonChild === "string") as StreamingClasses | void;
-    streamingClasses = found || null;
-  }
+  if (streamingClasses || !shouldLookAgain(lastMiss, Date.now())) return streamingClasses;
+  const found = findClassModule((m: any) =>
+    typeof m?.StreamingSelector === "string"
+    && typeof m?.ShowingStreaming === "string"
+    && typeof m?.ButtonChild === "string") as StreamingClasses | void;
+  streamingClasses = found || null;
+  if (!streamingClasses) lastMiss = Date.now();
   return streamingClasses;
 }
 
@@ -68,23 +74,42 @@ function openMenu(target: EventTarget, current: CloudOption | null, options: Clo
   );
 }
 
-/** The arrow after Play. Steam's own classes, so it joins Play into one button
- *  like Steam's arrow does, and the same triangle Steam draws. */
+/** The arrow after Play. Steam's own classes when Decky has them, so it joins
+ *  Play into one button like Steam's arrow does, and the same triangle Steam
+ *  draws. Without them our own look, copied from the Play button. */
 function PlayFromArrow(
   { classes, current, options }:
-  { classes: StreamingClasses; current: CloudOption | null; options: CloudOption[] },
+  { classes: StreamingClasses | null; current: CloudOption | null; options: CloudOption[] },
 ): ReactElement {
+  const [focused, setFocused] = useState(false);
   return (
     <Focusable
-      className={`${classes.StreamingSelector} ${classes.ButtonChild}`}
+      className={classes ? `${classes.StreamingSelector} ${classes.ButtonChild}` : undefined}
+      style={classes ? undefined : fallbackArrowStyle(focused)}
+      // Steam's arrow shows focus by going white, not with the ring around it
+      noFocusRing={!classes}
+      onGamepadFocus={() => setFocused(true)}
+      onGamepadBlur={() => setFocused(false)}
+      onMouseEnter={() => setFocused(true)}
+      onMouseLeave={() => setFocused(false)}
       onActivate={(event) => openMenu(event.currentTarget ?? window, current, options)}
       onClick={(event) => openMenu(event.currentTarget ?? window, current, options)}
     >
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 36" fill="none">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 36" fill="none"
+           // Steam's classes size it to 12px, our own look has to say it itself
+           width={classes ? undefined : ARROW_ICON} height={classes ? undefined : ARROW_ICON}>
         <path d="M17.98 26.54L3.20996 11.77H32.75L17.98 26.54Z" fill="currentColor" />
       </svg>
     </Focusable>
   );
+}
+
+/** Play with its right corners square, so it joins our arrow. Left alone when
+ *  it is not an element, a style we can not set is no reason to fail. */
+function squarePlay(play: ReactNode): ReactNode {
+  if (!isValidElement(play)) return play;
+  const style = (play.props as { style?: Record<string, unknown> }).style;
+  return cloneElement(play, { style: { ...style, ...PLAY_SQUARED } } as any);
 }
 
 /** Steam's Play bar output, with our button put right after the Play button. */
@@ -100,8 +125,9 @@ function withButton(self: any, rendered: ReactNode): ReactNode {
     // streaming PC off, and then there was no arrow at all.
     if (steamDrawsArrow(rendered, self.ShowStreamingMenu)) return rendered;
 
+    // null when Decky does not know them (Decky 4 on a Steam beta), then the
+    // arrow draws itself, see PlayFromArrow
     const classes = getStreamingClasses();
-    if (!classes) return rendered;   // Steam renamed them, rather nothing than a broken look
     const props = rendered.props as { children?: ReactNode; className?: string };
     const kids = Children.toArray(props.children);
     if (!kids.length) return rendered;
@@ -111,9 +137,14 @@ function withButton(self: any, rendered: ReactNode): ReactNode {
     return cloneElement(
       rendered,
       // the class Steam puts on the row when it has its own arrow: squares the
-      // right side of Play so Play and arrow read as one button
-      { className: `${props.className ?? ""} ${classes.ShowingStreaming}`.trim() } as any,
-      kids[0],
+      // right side of Play so Play and arrow read as one button. Only with
+      // Steam's classes, without them the row stays as it is.
+      (classes
+        ? { className: `${props.className ?? ""} ${classes.ShowingStreaming}`.trim() }
+        : {}) as any,
+      // without Steam's classes we square Play's right corners ourself, what
+      // ShowingStreaming does otherwise
+      classes ? kids[0] : squarePlay(kids[0]),
       <PlayFromArrow key="shelfcloud-play-from" classes={classes} current={current} options={options} />,
       ...kids.slice(1),
     );
