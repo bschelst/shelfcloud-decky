@@ -14,7 +14,7 @@
 import { beforePatch, findModuleChild, MenuSeparator, type Patch } from "@decky/ui";
 import { Children, cloneElement, isValidElement, type ReactElement, type ReactNode } from "react";
 
-import { cloudOptionsNow, refreshBadgeData } from "./badgeData";
+import { playOptionsNow, refreshBadgeData } from "./badgeData";
 import { cloudMenuItems } from "./playOptionsUi";
 
 /* Steam's menu element and manager are untyped and not ours. */
@@ -38,7 +38,9 @@ function isStreamingMenu(element: unknown): element is ReactElement<StreamingMen
 function PlayFromMenu({ inner }: { inner: ReactElement<StreamingMenuProps> }): ReactElement | null {
   const render = inner.type as (props: StreamingMenuProps) => ReactElement | null;
   const menu = render(inner.props);
-  const options = cloudOptionsNow(inner.props.overview.appid);
+  // tile-aware: on a cloud tile its other services, on a Steam game the
+  // services that have it
+  const options = playOptionsNow(inner.props.overview.appid);
   if (!options.length || !isValidElement(menu)) return menu;
 
   const own = (menu.props as { children?: ReactNode }).children;

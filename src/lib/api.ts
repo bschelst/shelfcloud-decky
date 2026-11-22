@@ -27,7 +27,8 @@ export const setSteamIds =
 // not on Steam at all (one in six), which is not the same as nobody playing.
 export const currentPlayers =
   guarded<[steam_app_id: string],
-          { ok: boolean; players?: number; error?: string }>("current_players");
+          { ok: boolean; players?: number; stale?: boolean; error?: string }>("current_players");
+export const clearPlayerCache = guarded<[], { ok: boolean }>("clear_player_cache");
 export const setSetting = guarded<[key: string, value: unknown], Status>("set_setting");
 
 // Start installing one of the offered browsers. Returns once it has started;
@@ -91,6 +92,9 @@ export const setShelf =
 // only runs for a touched tile; selecting is a pure Steam call that must run for every
 // tile, since Steam never picks our config up on its own. one call per sync, the caller
 // builds a path per tile from the base.
+// app ids of our tiles whose icon file is gone from disk, so sync puts it back.
+export const tilesMissingIcons =
+  guarded<[], { ok: boolean; app_ids?: number[] }>("tiles_missing_icons", true);
 export const layoutSelectionBase =
   guarded<[], { ok: boolean; base?: string; native?: string; repair?: boolean;
                 repair_rev?: number; error?: string }>("layout_selection_base", true);

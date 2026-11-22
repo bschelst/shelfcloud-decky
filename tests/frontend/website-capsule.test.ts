@@ -161,3 +161,47 @@ describe("what it leaves alone", () => {
     expect(capsuleBytes).toBe("bytes:capsule");
   });
 });
+
+describe("a game with no capsule of its own gets its name on the tile", () => {
+  // Chernobylite on GeForce NOW: no capsule URL, so the gateway answers with
+  // its nameless cloud and a shelf shows a tile nobody can tell apart.
+  const bare = (artwork: Record<string, string>) => page({
+    provider: "geforce_now",
+    name: "Chernobylite Enhanced Edition",
+    artwork,
+  });
+
+  it("draws it from the header when that is all there is", async () => {
+    await syncLibrary([bare({ header: "https://cdn.test/header" })], {}, callbacks());
+    expect(renderPageCapsule).toHaveBeenCalledWith(
+      "Chernobylite Enhanced Edition", expect.objectContaining({ data: "bytes:header" }));
+    expect(capsuleBytes).toBe("DRAWN");
+  });
+
+  it("prefers the cover over the header", async () => {
+    await syncLibrary([bare({ cover: "https://cdn.test/cover", header: "https://cdn.test/header" })],
+      {}, callbacks());
+    expect(renderPageCapsule).toHaveBeenCalledWith(
+      expect.anything(), expect.objectContaining({ data: "bytes:cover" }));
+  });
+
+  it("falls back on the mark when the game has no picture at all", async () => {
+    await syncLibrary([bare({})], {}, callbacks());
+    expect(renderPageCapsule).toHaveBeenCalledWith(
+      "Chernobylite Enhanced Edition", expect.objectContaining({ data: "bytes:icon" }));
+    expect(capsuleBytes).toBe("DRAWN");
+  });
+
+  it("keeps the gateway capsule when drawing fails", async () => {
+    vi.mocked(renderPageCapsule).mockResolvedValue(undefined);
+    await syncLibrary([bare({ header: "https://cdn.test/header" })], {}, callbacks());
+    expect(capsuleBytes).toBe("bytes:capsule");
+  });
+
+  it("marks the fingerprint so tiles already on a shelf get redrawn once", () => {
+    expect(artworkFingerprint(bare({ header: "https://cdn.test/header" }))).toContain("n1");
+    // and a game WITH its own capsule keeps its fingerprint, see the test above
+    expect(artworkFingerprint(page({ provider: "geforce_now", artwork: { capsule: "https://cdn.test/c" } })))
+      .not.toContain("n1");
+  });
+});

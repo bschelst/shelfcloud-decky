@@ -23,9 +23,10 @@ import {
   type ReactElement, type ReactNode,
 } from "react";
 
-import { cloudOptionsNow, playOptionsNow, providerNow } from "./badgeData";
+import { playOptionsNow, providerNow } from "./badgeData";
 import type { CloudOption } from "./cloudOptions";
 import { cloudMenuItems, currentMenuItem } from "./playOptionsUi";
+import { steamDrawsArrow } from "./steamArrow";
 
 /* Steam's tree, fibers and the class are untyped and not ours. */
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -94,8 +95,10 @@ function withButton(self: any, rendered: ReactNode): ReactNode {
     if (typeof appid !== "number") return rendered;
     const options = playOptionsNow(appid);
     if (!options.length) return rendered;
-    // Steam draws its own dropdown here and patchPlayMenu filled it already
-    if (self.props.bShowStreamingSelector && cloudOptionsNow(appid).length) return rendered;
+    // Steam draws its own arrow here, patchPlayMenu puts our lines in its menu.
+    // Checked on the render itself: bShowStreamingSelector stays true with the
+    // streaming PC off, and then there was no arrow at all.
+    if (steamDrawsArrow(rendered, self.ShowStreamingMenu)) return rendered;
 
     const classes = getStreamingClasses();
     if (!classes) return rendered;   // Steam renamed them, rather nothing than a broken look

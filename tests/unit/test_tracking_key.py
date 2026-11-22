@@ -86,6 +86,24 @@ def test_migration_never_loses_an_entry():
     assert sorted(e["app_id"] for e in out.values()) == [11, 22, 33, 44]
 
 
+def test_a_bare_leftover_of_a_tracked_tile_is_dropped():
+    # 14 of these on a steammachine: an old build wrote the tile under its bare
+    # id with nothing filled in, the composite record came later for the SAME
+    # shortcut. The leftover counted it twice, as "Other 14" in the panel.
+    twin = {"app_id": 2202998279, "name": "Medieval Dynasty (Xbox Cloud)",
+            "provider": "xbox_cloud"}
+    state = {"3082": {"app_id": 2202998279, "name": "", "launch": "", "art": "",
+                      "provider": "", "url": ""},
+             "3082:xbox_cloud": twin}
+    assert Plugin._migrate_keys(state) == {"3082:xbox_cloud": twin}
+
+
+def test_a_bare_entry_for_another_shortcut_stays():
+    # different app id: a real second tile, not a leftover. Not ours to drop
+    state = {"3082": {"app_id": 1}, "3082:xbox_cloud": {"app_id": 2, "provider": "xbox_cloud"}}
+    assert Plugin._migrate_keys(state) == state
+
+
 def test_rubbish_state_does_not_raise():
     assert Plugin._migrate_keys({}) == {}
     assert Plugin._migrate_keys(None) == {}

@@ -333,7 +333,10 @@ ARTWORK_MAX_BYTES = 8 * 1024 * 1024
 # broken state we used to write (both are eSelectionType 1 naming an autosave
 # file in the tile's own directory), so it kept protecting the bug. Raising this
 # repairs once and then gets out of the way; a later choice is respected again.
-LAYOUT_REPAIR = 2
+# 2->3: the gateway layouts start in Gamepad now (revision 42). A changed layout
+# only reaches a tile that gets touched, so without this every existing tile
+# kept the old file and still started in Mouse+Keyboard.
+LAYOUT_REPAIR = 3
 
 # One artwork slice. aiohttp closes the websocket on a message over 4 MB, and a
 # 7 MB Steam hero is 9 MB of base64 -- so an image goes in slices and the
@@ -506,6 +509,9 @@ class Plugin:
         # (when, answer) for the display probe, which shells out to xrandr and is
         # asked for by a panel that polls status every 1.5 seconds.
         self._players_cache: Dict[str, Any] = {}
+        # (when, answer) of the last GOOD count per game, kept next to the cache
+        # so a failed ask can fall back on it. see current_players
+        self._players_good: Dict[str, Any] = {}
         self._display_cache: tuple = (0.0, "")
         self._poll_task: Optional[asyncio.Task] = None
         self._login_task: Optional[asyncio.Task] = None
@@ -542,14 +548,12 @@ class Plugin:
         decky.logger.info("Shelfcloud unloaded")
 
     async def _uninstall(self):
-        # Our own icons, by name. This used to empty the whole directory, safe
-        # only while it was ours alone. It is now Steam's grid folder, which holds
-        # the library art of every game on the machine, so emptying it would wipe
-        # all of that.
-        for key, tracked in self._synced.items():
-            # The key is "<game id>:<provider>" now, so the game id has to come
-            # back out of it -- passed whole it matches no icon filename.
-            self._remove_icon_files(_key_game_id(key), tracked.get("app_id"))
+        # The icons in Steam's grid folder STAY. Decky calls this on every update
+        # too (store updates uninstall the old version first), and the tiles stay
+        # in the library through that. Deleting their icons is what left 377
+        # tiles with a grey circle after the 0.3.7 update, and it came back with
+        # every update since. An icon of a tile that is really gone is removed
+        # with the tile, see forget_shortcut.
 
         # The old home really was ours alone, so it can still go wholly.
         legacy = _settings_icon_dir()
@@ -640,7 +644,30 @@ class Plugin:
 
         if moved:
             decky.logger.info("re-keyed %d tracked tile(s) by game and provider", moved)
-        return migrated
+        return Plugin._drop_bare_leftovers(migrated)
+
+    @staticmethod
+    def _drop_bare_leftovers(state: Dict) -> Dict:
+        """Drop a bare-key record with no provider when a "id:provider" record
+        holds the same shortcut. An older build left these behind, empty, and
+        nothing removed them: the frontend writes composite keys only, and
+        _resolve_key only drops a bare key that is written to. They counted
+        each tile twice, as "Other" in the panel. Same app id only, a bare
+        record for an other shortcut is a real tile and stays."""
+        def game_of(key: Any) -> str:
+            return str(key).split(":", 1)[0]
+
+        taken = {(game_of(key), value.get("app_id")) for key, value in state.items()
+                 if ":" in str(key) and isinstance(value, dict)}
+        kept = {key: value for key, value in state.items()
+                if ":" in str(key) or not isinstance(value, dict)
+                or value.get("provider")
+                or (str(key), value.get("app_id")) not in taken}
+        dropped = len(state) - len(kept)
+        if dropped:
+            decky.logger.info("dropped %d leftover tracking record(s) of tiles "
+                              "already tracked by game and provider", dropped)
+        return kept
 
     @staticmethod
     def _recover_from_steam() -> Dict:
@@ -1698,6 +1725,28 @@ class Plugin:
             ],
         }
 
+    async def tiles_missing_icons(self) -> Dict[str, Any]:
+        """App ids of our tiles whose icon file is not on disk, for sync to redo.
+
+        An icon is a path in shortcuts.vdf that Steam reads on every draw, so a
+        lost file is a grey circle and nothing ever puts it back: artwork is only
+        reapplied when the gateway's art changes. Lost how does not matter here,
+        an update's uninstall did it once, this makes any loss heal by itself.
+        One listdir, not a stat per tile, the grid folder has thousands of files.
+        """
+        try:
+            present = set(os.listdir(_icon_dir()))
+        except OSError:
+            return {"ok": False, "app_ids": []}
+        missing = set()
+        for entry in self._synced.values():
+            app_id = entry.get("app_id") if isinstance(entry, dict) else None
+            if not isinstance(app_id, int) or isinstance(app_id, bool) or app_id <= 0:
+                continue
+            if not any(_icon_name(0, app_id, kind) in present for kind in ("png", "jpg")):
+                missing.add(app_id)
+        return {"ok": True, "app_ids": sorted(missing)}
+
     async def forget_shortcut(self, game_id: Any) -> Dict:
         key = str(game_id)
         tracked = self._synced.pop(key, None) or {}
@@ -2151,8 +2200,19 @@ class Plugin:
     # Still a cache, not zero: an appid Steam refuses (delisted, region-locked) must
     # not be re-asked on every page open.
     PLAYERS_FAILURE_CACHE_SECONDS = 60.0
+    # How old a good count may be to stand in for a failed ask. Older is not
+    # "playing right now" anymore.
+    PLAYERS_STALE_SECONDS = 2 * 3600.0
     PLAYERS_URL = ("https://api.steampowered.com/ISteamUserStats/"
                    "GetNumberOfCurrentPlayers/v1/?appid=%s")
+
+    async def clear_player_cache(self) -> Dict[str, Any]:
+        """The Clear cache button in Settings. Counts and fallbacks both go, so
+        the next page open asks Steam and nothing old can come back."""
+        self._players_cache = {}
+        self._players_good = {}
+        decky.logger.info("Player count cache cleared")
+        return {"ok": True}
 
     async def current_players(self, steam_app_id: str) -> Dict[str, Any]:
         """How many people are playing this game on Steam right now.
@@ -2179,14 +2239,29 @@ class Plugin:
         try:
             payload = await asyncio.to_thread(self._fetch_players, steam_app_id)
         except Exception as exc:
+            # logged, the badge only shows a dash and that says nothing about why
+            decky.logger.warning("player count for %s failed: %s", steam_app_id, exc)
             # Remembered too, else an appid Steam refuses would be re-asked on every
             # page open for ever.
-            result = {"ok": False, "error": str(exc)}
-            self._players_cache[steam_app_id] = (now, result)
-            return result
+            payload = {"ok": False, "error": str(exc)}
 
+        if payload.get("ok"):
+            self._players_good[steam_app_id] = (now, payload)
+        else:
+            payload = self._recent_good_count(steam_app_id, now) or payload
         self._players_cache[steam_app_id] = (now, payload)
         return payload
+
+    def _recent_good_count(self, steam_app_id: str, now: float) -> Optional[Dict[str, Any]]:
+        """The last good count for this game if it is recent, marked stale.
+
+        A failed ask (a blip at Steam, the Deck just awake) used to show a dash
+        while the number from a moment ago was right there. Too old and it is no
+        longer "playing right now", then the dash is the honest answer."""
+        kept = self._players_good.get(steam_app_id)
+        if not kept or now - kept[0] > self.PLAYERS_STALE_SECONDS:
+            return None
+        return {**kept[1], "stale": True}
 
     @classmethod
     def _fetch_players(cls, steam_app_id: str) -> Dict[str, Any]:

@@ -88,51 +88,75 @@ def grid(tmp_path):
     return folder, steams
 
 
-def test_uninstall_deletes_only_our_own_icons(grid, tmp_path):
-    """This used to be `for name in listdir: remove`, wich here is every
-    game's artwork on the device."""
+def test_uninstall_leaves_every_icon_in_the_grid(grid, tmp_path):
+    """Decky calls _uninstall on every UPDATE too, store updates included: it
+    uninstalls the old version before it puts the new one. The tiles stay in
+    the library through that, so deleting their icons left 377 of them pointing
+    at nothing after the 0.3.7 update (Fortnite on GeForce NOW, grey circle).
+    Our icons stay, and Steam's own art of course."""
     folder, steams = grid
     settings = tmp_path / "settings-icons"
     settings.mkdir()
 
     plugin = main.Plugin()
-    plugin._synced = {"23101": {"app_id": 2250922664, "name": "X",
-                                "launch": "", "art": "", "provider": "shelfcloud"}}
+    plugin._synced = {"23101:shelfcloud": {"app_id": 2250922664, "name": "X",
+                                           "launch": "", "art": "", "provider": "shelfcloud"}}
 
     with mock.patch.object(main, "_icon_dir", return_value=str(folder)), \
          mock.patch.object(main, "_settings_icon_dir", return_value=str(settings)):
         asyncio.run(plugin._uninstall())
 
-    assert not (folder / "2250922664_icon.png").exists(), "ours should be gone"
+    assert (folder / "2250922664_icon.png").read_bytes() == b"ours"
     for name, body in steams.items():
-        assert (folder / name).read_bytes() == body, (
-            f"{name} belongs to Steam or another shortcut and must survive")
+        assert (folder / name).read_bytes() == body
 
 
-def test_uninstall_passes_the_real_game_id(grid, tmp_path):
-    """The game id comes from the map KEY ("<game id>:<provider>"), not a field.
-    It must be split back out, else the legacy cleanup matches nothing. Checked
-    on the call, not the files: uninstall wipes the settings dir either way, so
-    a files check would pass even with the bug back.
-    """
+def test_uninstall_still_clears_the_old_settings_folder(grid, tmp_path):
+    """That one really was ours alone, nothing in Steam points into it anymore."""
     folder, _ = grid
     settings = tmp_path / "settings-icons"
     settings.mkdir()
+    (settings / "23101.png").write_bytes(b"old icon")
 
     plugin = main.Plugin()
-    plugin._synced = {"23101:shelfcloud": {"app_id": 2250922664, "name": "X",
-                                           "launch": "", "art": "",
-                                           "provider": "shelfcloud"}}
-
-    seen = []
+    plugin._synced = {}
     with mock.patch.object(main, "_icon_dir", return_value=str(folder)), \
-         mock.patch.object(main, "_settings_icon_dir", return_value=str(settings)), \
-         mock.patch.object(main.Plugin, "_remove_icon_files",
-                           staticmethod(lambda g, a: seen.append((g, a)))):
+         mock.patch.object(main, "_settings_icon_dir", return_value=str(settings)):
         asyncio.run(plugin._uninstall())
 
-    assert seen == [(23101, 2250922664)], (
-        "uninstall must pass the game id out of the map's key")
+    assert not settings.exists()
+
+
+# ------------------------------------------------- tiles that lost their icon
+
+def test_tiles_missing_an_icon_are_named(grid):
+    folder, _ = grid
+    plugin = main.Plugin()
+    plugin._synced = {
+        "2:geforce_now": {"app_id": 2250922664, "provider": "geforce_now"},   # has one
+        "2:boosteroid": {"app_id": 4053800932, "provider": "boosteroid"},      # lost it
+        "9:xbox_cloud": {"app_id": 1111, "provider": "xbox_cloud"},            # lost it
+    }
+    with mock.patch.object(main, "_icon_dir", return_value=str(folder)):
+        answer = asyncio.run(plugin.tiles_missing_icons())
+    assert answer == {"ok": True, "app_ids": [1111, 4053800932]}
+
+
+def test_a_jpg_icon_counts_too(grid):
+    folder, _ = grid
+    (folder / "4053800932_icon.jpg").write_bytes(b"jpg icon")
+    plugin = main.Plugin()
+    plugin._synced = {"2:boosteroid": {"app_id": 4053800932, "provider": "boosteroid"}}
+    with mock.patch.object(main, "_icon_dir", return_value=str(folder)):
+        assert asyncio.run(plugin.tiles_missing_icons())["app_ids"] == []
+
+
+def test_junk_entries_do_not_break_the_check(grid):
+    folder, _ = grid
+    plugin = main.Plugin()
+    plugin._synced = {"a": None, "b": {"app_id": "nope"}, "c": {}, "d": {"app_id": -5}}
+    with mock.patch.object(main, "_icon_dir", return_value=str(folder)):
+        assert asyncio.run(plugin.tiles_missing_icons()) == {"ok": True, "app_ids": []}
 
 
 def test_remove_icon_files_clears_both_naming_schemes(grid, tmp_path):

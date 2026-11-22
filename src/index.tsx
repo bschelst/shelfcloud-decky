@@ -44,7 +44,7 @@ import { NoBrowser } from "./components/NoBrowser";
 import { SettingsSection } from "./components/SettingsSection";
 import { LinksSection } from "./components/LinksSection";
 import { AboutSection } from "./components/AboutSection";
-import { cancelJob, cancelRequested, finishJob, getJob, runJob, setAbandonHandler, setJob, subscribeJob } from "./lib/job";
+import { cancelJob, cancelRequested, finishJob, getJob, reportSyncLine, runJob, setAbandonHandler, setJob, subscribeJob } from "./lib/job";
 import { theme } from "./lib/theme";
 import { isSafeExternalUrl } from "./lib/url";
 import { badgeDataNow, invalidateBadgeData, refreshBadgeData } from "./lib/badgeData";
@@ -273,14 +273,7 @@ async function performSync(onProgress?: (message: string) => void): Promise<Sync
 async function doSync(quiet = false): Promise<boolean> {
   setJob({ busy: true });
   try {
-    const { result, total, skipped } = await runSync((line) => {
-      // The sync emits "Adding X (12/124)"; reuse it instead of a second callback.
-      const match = line.match(/\((\d+)\/(\d+)\)\s*$/);
-      const done = match ? Number(match[1]) : 0;
-      const all = match ? Number(match[2]) : 0;
-      // Keep the last fraction on lines with no counter, so the bar does not jump back to indeterminate.
-      setJob({ message: line, progress: match && all > 0 ? done / all : getJob().progress });
-    });
+    const { result, total, skipped } = await runSync(reportSyncLine);
     finishJob(syncSummary(total, result, skipped));
     if (!quiet) toaster.toast({ title: "Shelfcloud", body: changeSummary(result),
                                logo: <NotificationLogo /> });
@@ -963,13 +956,12 @@ export default definePlugin(() => {
     // pressing Add-all over the top of it joined the already-running sync - which
     // had read the library BEFORE the add, so the newly added games got no tiles
     // or collections. Disabling the buttons while it runs is what prevents that.
-    // One clear line for the whole run, not the per-tile "Checking X (0/0)"
-    // scan text -- that read as a stuck error, and because the background sync
-    // ended on finishJob() with no message, the last such line was never
-    // cleared and sat there forever. "Syncing…" stays up while busy, then is
-    // cleared on finish. No onProgress, so nothing overwrites it.
+    // Same progress line as a manual sync. It was left out once because the scan
+    // read "Checking X (0/0)", but that counter never sits on 0/0 anymore, and
+    // without it a long run (all art redone after an update) showed nothing
+    // moving for minutes. finishJob("") clears the last line on the end.
     setJob({ busy: true, message: "Syncing…", progress: null });
-    void runSync()
+    void runSync(reportSyncLine)
       .then(({ result, owned }) => {
         finishJob("");
         // Only the run that did the work notifies, and only when something arrived.

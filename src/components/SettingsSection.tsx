@@ -9,6 +9,7 @@ import {
 } from "@decky/ui";
 import { FC } from "react";
 import {
+  FaBroom,
   FaCog,
   FaGamepad,
   FaPlay,
@@ -21,7 +22,7 @@ import { Collapsible, IconLabel } from "./Collapsible";
 import { NotificationLogo } from "./Logo";
 import { applyTilePerService } from "../lib/settings";
 import { cornersExcept } from "../lib/badgePosition";
-import { invalidateBadgeData } from "../lib/badgeData";
+import { clearAllBadgeCaches, invalidateBadgeData } from "../lib/badgeData";
 import { theme } from "../lib/theme";
 import type { Status } from "../lib/types";
 
@@ -309,6 +310,24 @@ export const SettingsSection: FC<SettingsSectionProps> = ({
         onClick={onApplyOverrides}
       >
         <IconLabel icon={<FaGamepad size={12} />}>Fix gamepad permissions</IconLabel>
+      </ButtonItem>
+    </PanelSectionRow>
+
+    <PanelSectionRow>
+      <ButtonItem
+        layout="below"
+        label="Forget the stored player counts and badge data, so every game page asks fresh"
+        onClick={() => {
+          void clearAllBadgeCaches().then((ok) => {
+            toaster.toast({
+              title: "Shelfcloud",
+              body: ok ? "Cache cleared" : "Could not clear the whole cache, try again",
+              logo: <NotificationLogo />,
+            });
+          });
+        }}
+      >
+        <IconLabel icon={<FaBroom size={12} />}>Clear cache</IconLabel>
       </ButtonItem>
     </PanelSectionRow>
 

@@ -4,11 +4,12 @@
 // frontend because SteamClient only exists here; the backend decides what the
 // library should hold, this makes it so.
 
-import { fetchArtwork, installControllerLayout, layoutSelectionBase, logNote, saveIcon, saveIconFromUrl, setSetting, setSteamIds, strayShortcuts } from "./api";
+import { fetchArtwork, installControllerLayout, layoutSelectionBase, logNote, saveIcon, saveIconFromUrl, setSetting, setSteamIds, strayShortcuts, tilesMissingIcons } from "./api";
 import { addToProviderCollections, pruneProviderCollections,
          removeRetiredCollections, type CollectionMember } from "./collection";
 import { layoutKey } from "./layoutKey";
 import { renderPageCapsule } from "./pagecapsule";
+import { renderSquareIcon } from "./squareicon";
 import { BRAND_MARK } from "./brandmark";
 import { PER_GAME_TIMEOUT, RPC_TIMEOUT, steamCall, withTimeout } from "./withTimeout";
 import { renderPageLogo } from "./pagelogo";
@@ -77,6 +78,11 @@ const START_DIR = "/usr/bin/";
 // is fine, but not every 60 seconds forever: some games have no artwork anywhere
 // and were "updated" on every sync. Per session, so a reload gives one more try.
 const artUnavailable = new Set<number>();
+
+// Tiles whose lost icon this session already tried to put back. Once per session
+// and not every sync: an icon that can not be saved would else redo all of that
+// tile's art every five minutes. A reload gives one more try, like above.
+const iconRepairTried = new Set<number>();
 
 // Games we drew a fallback logo for, after the real one would not download.
 // This bounds the logo self-heal: the first miss keeps the old fingerprint so
@@ -361,15 +367,22 @@ async function applyArtwork(
       const drawn = await renderPageCapsule(game.name, mark);
       if (drawn) visibleImage = drawn;
     }
-  } else if (!capsule) {
-    // A GAME with no capsule, drawn from its own picture. 79 catalogue games have
-    // a cover and no capsule, so the tile kept the gateway's cloud and a shelf of
-    // different games all looked the same. Same drawing a website tile gets: the
-    // game's art, centred, with its name under it. The cover is wide and the
-    // capsule is a tall portrait, so composing beats stretching.
-    const cover = await fetchSlot(game, "cover");
-    if (cover) {
-      const drawn = await renderPageCapsule(game.name, cover);
+  } else if (!game.artwork?.capsule) {
+    // A GAME with no capsule of its own, drawn from its own picture with its name
+    // under it. Checked on the URL, not on what came back: for these the gateway
+    // still answers, with its nameless cloud, so `capsule` was set and the name
+    // never went on (Chernobylite on GeForce NOW, a cloud nobody can tell apart).
+    // Cover first, then the header, then the plain mark: a tile with only the
+    // name on it still beats a cloud with nothing. Wide art is composed, not
+    // stretched, into the tall capsule.
+    // Only slots the game has its OWN url for: same trap as the capsule, the
+    // gateway may fill an empty slot with a stand-in.
+    const headerAt = BACKGROUND_SLOTS.findIndex(([slot]) => slot === "header");
+    const picture = (game.artwork?.cover ? await fetchSlot(game, "cover") : undefined)
+      ?? (game.artwork?.header && headerAt >= 0 ? (await background)[headerAt] : undefined)
+      ?? (await iconFetch);
+    if (picture) {
+      const drawn = await renderPageCapsule(game.name, picture);
       if (drawn) visibleImage = drawn;
     }
   }
@@ -408,8 +421,16 @@ async function applyArtwork(
   // take the logo only, which tied two things: giving a tile an icon meant giving
   // it a logo, and Steam draws a logo INSTEAD OF the title. Website tiles now get
   // a square `icon` and no logo, so the two can differ. Fallbacks stay for games.
+  //
+  // No icon of its own (most of the catalogue): a square cut from the capsule the
+  // tile shows, the game's own art. The logo came first here before, a wide strip
+  // of white text that Steam draws small and square on black, so the running-game
+  // menu and the switcher showed a black blob with letters (Fortnite on GFN).
   const logoIndex = BACKGROUND_SLOTS.findIndex(([slot]) => slot === "logo");
-  const iconImage = (await iconFetch)
+  const ownIcon = await iconFetch;
+  const squared = !ownIcon && visibleImage ? await renderSquareIcon(visibleImage) : undefined;
+  const iconImage = ownIcon
+    ?? squared
     ?? (logoIndex >= 0 ? images[logoIndex] : undefined)
     ?? capsule;
 
@@ -444,9 +465,12 @@ async function applyArtwork(
       // call rather than failing it. The icon falls back to the CAPSULE (600x900)
       // for any game with no icon, so the sync died on the FIRST game of a run.
       // Naming the picture the backend already has costs a few hundred bytes.
+      // a drawn square has no address, so its bytes go along. 256x256, small
+      // enough for the socket, unlike the capsule it is cut from
+      const iconUrl = "url" in iconImage ? iconImage.url : undefined;
       const saved = await withTimeout(
-        iconImage.url
-          ? saveIconFromUrl(game.game_id, iconImage.url, appId)
+        iconUrl
+          ? saveIconFromUrl(game.game_id, iconUrl, appId)
           : saveIcon(game.game_id, iconImage.data, iconImage.kind, appId),
         undefined, RPC_TIMEOUT);
       if (saved?.ok && saved.path) {
@@ -599,7 +623,8 @@ export interface SyncCallbacks {
 //   capsule-failed tiles were wrongly marked done. 5->6 icon became its own slot.
 //   6->7 repair, fetchSlot skipped the gateway. 7->8 drawn logo floated too high.
 //   8->9 name sat beside a black rectangle, mark compiled in now.
-export const ART_REVISION = "9";
+//   9->10 icon is a square out of the capsule, not the logo (black blob with text).
+export const ART_REVISION = "10";
 
 // Bump when what we DRAW for a website tile changes. Seperate from ART_REVISION,
 // which sits in every fingerprint and would re-download the whole library; this
@@ -607,12 +632,18 @@ export const ART_REVISION = "9";
 // change the string shape for games. 0->1: capsule drawn with the page's name.
 const WEBSITE_ART_REVISION = "w1";
 
+// Same idea for a GAME without a capsule of its own, wich gets its capsule
+// drawn too. Only mixed in for those, so only those tiles are redone.
+// 0->1: drawn from cover, header or mark, it kept the gateway's cloud before.
+const NAMED_ART_REVISION = "n1";
+
 // A fingerprint of the artwork a tile carries, stored alongside the shortcut so
 // sync can tell when the gateway has better art and re-apply it. Without it,
 // artwork is only applied at creation and games resolved later stay blank.
 export function artworkFingerprint(game: DesiredGame): string {
   const a = game.artwork ?? {};
-  const drawn = WEBSITE_PROVIDERS.has(game.provider) ? WEBSITE_ART_REVISION : "";
+  const drawn = WEBSITE_PROVIDERS.has(game.provider) ? WEBSITE_ART_REVISION
+    : a.capsule ? "" : NAMED_ART_REVISION;
   return [ART_REVISION + drawn, a.capsule ?? "", a.header ?? "", a.hero ?? "",
           a.logo ?? "", a.icon ?? ""].join("|");
 }
@@ -678,6 +709,22 @@ export async function syncLibrary(
       : undefined))
     .catch(() => undefined);
 
+  // Tiles whose icon FILE is gone. An icon is a path Steam reads on every draw,
+  // and art is only redone when the gateway's art changes, so a lost file stayed
+  // a grey circle for good. A Decky update did that to every tile once: it runs
+  // the old version's _uninstall, which deleted them. Best effort, no answer
+  // just means no repair this time. Wrapped whole, so even a missing function
+  // can not stop the sync.
+  const lostIcons = await (async () => {
+    try {
+      const answer = await withTimeout(tilesMissingIcons(), undefined, RPC_TIMEOUT);
+      const ids = answer?.ok && Array.isArray(answer.app_ids) ? answer.app_ids : [];
+      return new Set(ids.filter((id) => !iconRepairTried.has(id)));
+    } catch {
+      return new Set<number>();
+    }
+  })();
+
   // Count the REAL work up front (adds, updates, removals), not every game walked
   // past. Counting all of them made the total disagree with the button ("Add 124
   // playable games"), which reads as a bug though both numbers were right.
@@ -690,6 +737,7 @@ export async function syncLibrary(
     if (selectionBase?.repair && g.controller_layout) return true;
     if (existing.launch !== g.options) return true;              // relaunch
     if (existing.name !== shortcutTitle(g)) return true;         // renamed
+    if (lostIcons.has(existing.app_id)) return true;             // icon file gone
     return (existing.art ?? "") !== artworkFingerprint(g);       // new artwork
   }).length;
   const total = toChange + toRemove;
@@ -808,7 +856,11 @@ export async function syncLibrary(
         if (pending.length >= COLLECTION_BATCH) await flushCollections();
       } else {
         const launchChanged = existing.launch !== game.options || existing.name !== title;
-        const artChanged = (existing.art ?? "") !== art;
+        // a lost icon counts as changed art: it is the artwork pass that puts
+        // the icon back, from the gateway like the first time
+        const iconLost = lostIcons.has(existing.app_id);
+        if (iconLost) iconRepairTried.add(existing.app_id);
+        const artChanged = (existing.art ?? "") !== art || iconLost;
 
         // Install the layout only when this tile is actually touched. It used to
         // run for EVERY game with a layout (891 backend calls here, all to find

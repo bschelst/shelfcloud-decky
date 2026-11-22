@@ -8,8 +8,13 @@
 
 import { useEffect, useState } from "react";
 
-import { currentPlayers, getStatus, trackedProviders } from "./api";
+import { clearPlayerCache, currentPlayers, getStatus, trackedProviders } from "./api";
+import { askUntilAnswered } from "./askUntilAnswered";
+import { cachedPlayers, clearPlayers, rememberPlayers } from "./playersStore";
 import { cloudOptionsFor, otherServicesFor, type CloudOption } from "./cloudOptions";
+
+/** Waits before asking the player count again, while the page stays open. */
+const PLAYERS_RETRY_WAITS = [3_000, 10_000, 30_000] as const;
 
 /** How long an answer may be reused. Long enough that paging a library costs
  *  one request, short enough that a sync finishing elsewhere shows up. */
@@ -76,6 +81,16 @@ export function invalidateBadgeData(): void {
   steamIds = emptyCache(steamIds.value);
   gameIds = emptyCache(gameIds.value);
   badge = emptyCache(badge.value);
+}
+
+/** The Clear cache button: stored player counts, the in-memory answers and the
+ *  backend's count cache all go, so the next page asks everything fresh. True
+ *  only when all three worked. */
+export async function clearAllBadgeCaches(): Promise<boolean> {
+  const stored = clearPlayers();
+  invalidateBadgeData();
+  const backend = await clearPlayerCache().then((r) => r?.ok === true).catch(() => false);
+  return stored && backend;
 }
 
 /** The last answers, without waiting. For the focused-card badge in a mutation
@@ -203,25 +218,37 @@ export function useBadgeSettings(): BadgeSettings & {
 
 /** How many people play this tile's game on Steam, if anyone can say. Undefined
  *  covers three kinds of "no": not ours, not on Steam, or Steam had no answer —
- *  none is a zero. Not cached here, current_players caches on the backend. */
+ *  none is a zero. The last count is kept in localStorage (playersStore), so
+ *  the page has a number on its first frame and the fresh one replaces it. */
 export function usePlayersForApp(appId: string | undefined): number | undefined {
-  const [players, setPlayers] = useState<number | undefined>(undefined);
+  const [players, setPlayers] = useState<number | undefined>(
+    () => (appId ? cachedPlayers(appId) : undefined));
 
   useEffect(() => {
     let cancelled = false;
-    setPlayers(undefined);
+    setPlayers(appId ? cachedPlayers(appId) : undefined);
     if (!appId) return;
 
-    void read(steamIds, async () => {
-      const result = await trackedOnce();
-      return result?.ok && result.steam_ids ? result.steam_ids : {};
-    }).then(async (map) => {
+    // one try is not enough: a slow moment (a sync running, the Deck just
+    // awake) used to leave a dash until the page was opened again
+    const ask = async (): Promise<{ n: number; stale: boolean } | undefined> => {
+      const map = await read(steamIds, async () => {
+        const result = await trackedOnce();
+        return result?.ok && result.steam_ids ? result.steam_ids : {};
+      });
       const steamId = map[appId];
-      if (!steamId || cancelled) return;
-      const answer = await currentPlayers(steamId).catch(() => undefined);
-      if (!cancelled && answer?.ok && typeof answer.players === "number") {
-        setPlayers(answer.players);
-      }
+      if (!steamId) return undefined;
+      const answer = await currentPlayers(steamId);
+      if (!answer?.ok || typeof answer.players !== "number") return undefined;
+      return { n: answer.players, stale: answer.stale === true };
+    };
+    void askUntilAnswered(ask, PLAYERS_RETRY_WAITS, () => cancelled).then((count) => {
+      if (count === undefined) return;
+      // a stale one is the backend's fallback, storing it with todays time
+      // would keep an old number alive for ever. shown yes, stored no.
+      // stored also when the page closed meanwhile, it is still a good count
+      if (!count.stale) rememberPlayers(appId, count.n);
+      if (!cancelled) setPlayers(count.n);
     });
     return () => { cancelled = true; };
   }, [appId]);

@@ -42,6 +42,18 @@ export function getJob(): Job {
   return job;
 }
 
+// One progress line of a sync, "Artwork Fortnite (12/682)", into the job. Used by
+// the manual AND the automatic sync: the automatic one showed only "Syncing…",
+// and a first sync after a update that redoes all art then sat there for minutes
+// with nothing moving. A line without counter keeps the last fraction, so the
+// bar does not jump back.
+export function reportSyncLine(line: string): void {
+  const match = line.match(/\((\d+)\/(\d+)\)\s*$/);
+  const done = match ? Number(match[1]) : 0;
+  const all = match ? Number(match[2]) : 0;
+  setJob({ message: line, progress: match && all > 0 ? Math.min(1, done / all) : job.progress });
+}
+
 // Mark a job finished, and let any open panel re-read its counts.
 let clearTimer: ReturnType<typeof setTimeout> | null = null;
 
